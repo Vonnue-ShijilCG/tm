@@ -25,8 +25,24 @@ type manager struct {
 	rows    []managerRow
 	cursor  int
 	confirm bool   // waiting for y to act on rows[cursor]
+	prompt  string // the question asked while confirm is set
 	notice  string // last result or error
 	loadErr string // git problem listing worktrees, e.g. not a repository
+	branch  func(dir string) string
+}
+
+// rowBranch is the Git context of a terminal row: the branch checked out
+// where it runs (or would run), from the definition when the directory
+// cannot be read.
+func (mg *manager) rowBranch(r workspace.Row) string {
+	dir := r.Definition.Worktree
+	if dir == "" {
+		dir = mg.project.Path
+	}
+	if b := mg.branch(dir); b != "" {
+		return b
+	}
+	return r.Definition.Branch
 }
 
 // managerRow is either a terminal (terminal set) or an unused worktree
@@ -34,7 +50,8 @@ type manager struct {
 type managerRow struct {
 	terminal *workspace.Row
 	worktree *workspace.WorktreeInfo
-	visible  bool // running terminal shown in the layout
+	visible  bool   // running terminal shown in the layout
+	branch   string // branch checked out where the terminal runs, "" if unknown
 }
 
 // managerAction is what the manager asks the model to do after a key.
@@ -51,8 +68,10 @@ const (
 	mgChanged               // persisted state changed here (definition forgotten, worktree removed)
 )
 
-func newManager(ws *workspace.Workspace, p *workspace.Project, root *pane) *manager {
-	mg := &manager{project: p}
+// newManager builds the manager for p. branch reports the branch checked
+// out in a directory ("" when unknown), so rows can show Git context.
+func newManager(ws *workspace.Workspace, p *workspace.Project, root *pane, branch func(dir string) string) *manager {
+	mg := &manager{project: p, branch: branch}
 	mg.reload(ws, root)
 	return mg
 }
@@ -69,7 +88,7 @@ func (mg *manager) reload(ws *workspace.Workspace, root *pane) {
 	}
 	for i := range rows {
 		r := &rows[i]
-		mg.rows = append(mg.rows, managerRow{terminal: r, visible: r.Terminal != nil && root.contains(r.Terminal)})
+		mg.rows = append(mg.rows, managerRow{terminal: r, visible: r.Terminal != nil && root.contains(r.Terminal), branch: mg.rowBranch(*r)})
 	}
 	for i := range unused {
 		mg.rows = append(mg.rows, managerRow{worktree: &unused[i]})
@@ -115,11 +134,9 @@ func (mg *manager) update(msg tea.KeyMsg, ws *workspace.Workspace) managerAction
 		case r.terminal.Terminal != nil:
 			return mgDelete
 		default:
-			ws.ForgetSaved(mg.project, r.terminal.Definition)
-			mg.notice = fmt.Sprintf("deleted saved terminal %q", rowName(*r.terminal))
-			if r.terminal.Definition.Worktree != "" {
-				mg.notice += " (worktree kept)"
-			}
+			def := r.terminal.Definition
+			note := ws.DeleteTerminal(mg.project, def, nil)
+			mg.notice = deletionNotice(def, nil, note)
 			return mgChanged
 		}
 	}
@@ -159,8 +176,8 @@ func (mg *manager) update(msg tea.KeyMsg, ws *workspace.Workspace) managerAction
 	case key.Matches(msg, keys.MgOpenAll):
 		return mgOpenAll
 	case key.Matches(msg, keys.MgDelete):
-		if mg.selected() != nil {
-			mg.confirm, mg.notice = true, ""
+		if r := mg.selected(); r != nil {
+			mg.confirm, mg.notice, mg.prompt = true, "", mg.confirmText(*r, ws)
 		}
 	}
 	return mgNone
@@ -168,7 +185,7 @@ func (mg *manager) update(msg tea.KeyMsg, ws *workspace.Workspace) managerAction
 
 func (mg *manager) view(width int) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n %s\n\n", titleStyle.Render("Manage terminals · "+mg.project.Name))
+	fmt.Fprintf(&b, "\n %s\n %s\n\n", selectedStyle.Render(mg.project.Name), hintStyle.Render("Manage terminals"))
 
 	if mg.loadErr != "" {
 		b.WriteString(" " + hintStyle.Render(mg.loadErr) + "\n")
@@ -183,55 +200,65 @@ func (mg *manager) view(width int) string {
 		b.WriteString(" " + hintStyle.Render("No terminals yet. Press n to create one.") + "\n")
 	}
 	for i, r := range mg.rows {
-		if i == terminals && i > 0 {
-			b.WriteString("\n " + hintStyle.Render("Unused worktrees") + "\n")
-		} else if i == terminals {
+		if i == terminals {
 			b.WriteString("\n " + hintStyle.Render("Unused worktrees (no terminal uses them)") + "\n")
 		}
-		b.WriteString(mg.line(i, r, width) + "\n")
-	}
-	if r := mg.selected(); r != nil {
-		if path := rowPath(*r); path != "" {
-			b.WriteString("\n " + hintStyle.Render("path  "+leftTruncate(path, width-10)) + "\n")
+		for _, line := range mg.lines(i, r, width) {
+			b.WriteString(line + "\n")
 		}
+	}
+	if r := mg.selected(); r != nil && r.worktree != nil { // where the leftover lives is what cleanup needs to know
+		b.WriteString("\n " + hintStyle.Render("path  "+leftTruncate(r.worktree.Path, width-10)) + "\n")
 	}
 
 	if mg.confirm {
-		if r := mg.selected(); r != nil {
-			b.WriteString("\n " + errorStyle.Render(mg.confirmText(*r)) + "\n " + errorStyle.Render("y confirm · any other key cancels") + "\n")
-		}
+		b.WriteString("\n " + errorStyle.Render(mg.prompt) + "\n " + errorStyle.Render("y confirm · any other key cancels") + "\n")
 	} else if mg.notice != "" {
 		b.WriteString("\n " + hintStyle.Render(mg.notice) + "\n")
 	}
 	return b.String()
 }
 
-// line renders one row: marker, terminal, its state, and where it runs.
+// lines renders one row. A terminal takes two lines: its identity, the
+// same `Terminal 2 · ⎇ feature/login` as its pane header, then the program
+// it runs and its state, which is never dropped:
 //
-//	● 2 Login AI        visible   feature/login · worktree
-//	○ 4 Server          hidden    feature/server · worktree
-//	○   Payment         saved     feature/payment · worktree
-func (mg *manager) line(i int, r managerRow, width int) string {
-	marker, label, where, state := "○", "", "", ""
-	switch {
-	case r.worktree != nil:
-		label, where = r.worktree.Name, r.worktree.Branch+" · worktree"
+//	● Terminal 2 · ⎇ feature/login
+//	    claude                                 hidden
+//	○ Terminal · ⎇ feature/api
+//	                                           saved
+//
+// A saved definition has no number yet. An unused worktree takes one line:
+// directory name, branch and cleanliness.
+func (mg *manager) lines(i int, r managerRow, width int) []string {
+	indent, mark := "   ", "○"
+	if i == mg.cursor {
+		indent = " › "
+	}
+	budget := max(width-5, 1) // after the indent, marker and space
+	if r.worktree != nil {
+		wt := r.worktree
+		state := "clean"
 		switch {
-		case r.worktree.Missing:
+		case wt.Missing:
 			state = "directory missing"
-		case r.worktree.Dirty:
+		case wt.Dirty:
 			state = "dirty"
-		default:
-			state = "clean"
 		}
-	case r.terminal.Terminal != nil:
-		label = fmt.Sprintf("%d %s", r.terminal.Terminal.Num, rowName(*r.terminal))
-		where, state = rowWhere(*r.terminal), "hidden"
+		label := wt.Name
+		if wt.Branch != "" {
+			label += " · " + wt.Branch
+		}
+		return []string{mg.styled(i, indent+mark+" "+columns(label, state, budget))}
+	}
+
+	label, program, state := "Terminal", "", "saved"
+	if t := r.terminal.Terminal; t != nil {
+		label, program, state = fmt.Sprintf("Terminal %d", t.Num), programOf(t), "hidden"
 		if r.visible {
-			marker, state = "●", "visible"
+			mark, state = "●", "visible"
 		}
-	default:
-		label, where, state = "  "+rowName(*r.terminal), rowWhere(*r.terminal), "saved"
+	} else {
 		switch {
 		case r.terminal.Missing:
 			state = "saved · worktree missing"
@@ -239,19 +266,28 @@ func (mg *manager) line(i int, r managerRow, width int) string {
 			state = "saved · worktree not in git"
 		}
 	}
-	labelWidth := max(min(20, width-4-2-10), 6) // narrow windows shorten the name column, not the state
-	line := fmt.Sprintf("%s %-*s %-9s %s", marker, labelWidth, ansi.Truncate(label, labelWidth, "…"), state, where)
-	line = ansi.Truncate(line, max(width-4, 1), "…")
-	if i == mg.cursor {
-		return " " + selectedStyle.Render("› "+line)
+	return []string{
+		mg.styled(i, indent+mark+" "+ansi.Truncate(identity(label, r.branch, r.terminal.Definition.Worktree != ""), budget, "…")),
+		mg.styled(i, "     "+columns(program, state, budget)),
 	}
-	return "   " + line
 }
 
-func (mg *manager) confirmText(r managerRow) string {
-	switch {
-	case r.worktree != nil:
-		wt := r.worktree
+// columns lays a left-aligned label and a right-hand state on one line of
+// the given width, favouring the state when space is short.
+func columns(label, state string, width int) string {
+	labelWidth := max(width-len(state)-2, 4)
+	return fmt.Sprintf("%-*s  %s", labelWidth, ansi.Truncate(label, labelWidth, "…"), state)
+}
+
+func (mg *manager) styled(i int, line string) string {
+	if i == mg.cursor {
+		return selectedStyle.Render(line)
+	}
+	return line
+}
+
+func (mg *manager) confirmText(r managerRow, ws *workspace.Workspace) string {
+	if wt := r.worktree; wt != nil {
 		switch {
 		case wt.Missing:
 			return fmt.Sprintf("Remove worktree %q (%s)? Its directory is already gone; this only cleans up git's record.", wt.Name, wt.Branch)
@@ -260,45 +296,8 @@ func (mg *manager) confirmText(r managerRow) string {
 		default:
 			return fmt.Sprintf("Remove worktree %q (%s)? It is clean.", wt.Name, wt.Branch)
 		}
-	case r.terminal.Terminal != nil:
-		s := fmt.Sprintf("Permanently delete terminal %q? Its process is stopped.", rowName(*r.terminal))
-		if r.terminal.Definition.Worktree != "" {
-			s += " The worktree is kept."
-		}
-		return s
-	case r.terminal.Definition.Worktree != "":
-		return fmt.Sprintf("Delete saved terminal %q? Its worktree is kept.", rowName(*r.terminal))
-	default:
-		return fmt.Sprintf("Delete saved terminal %q? Nothing on disk is touched.", rowName(*r.terminal))
 	}
-}
-
-// rowName labels unnamed terminals "shell".
-func rowName(r workspace.Row) string {
-	if r.Definition.Name == "" {
-		return "shell"
-	}
-	return r.Definition.Name
-}
-
-// rowWhere says where the terminal runs: its worktree and branch, or the
-// project checkout.
-func rowWhere(r workspace.Row) string {
-	d := r.Definition
-	if d.Worktree == "" {
-		return "project checkout"
-	}
-	if d.Branch == "" {
-		return "worktree"
-	}
-	return d.Branch + " · worktree"
-}
-
-func rowPath(r managerRow) string {
-	if r.worktree != nil {
-		return r.worktree.Path
-	}
-	return r.terminal.Definition.Worktree
+	return deletionPrompt(ws, mg.project, r.terminal.Definition, r.terminal.Terminal)
 }
 
 // leftTruncate keeps the end of a path, which is the informative part.

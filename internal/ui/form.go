@@ -11,13 +11,13 @@ import (
 	"github.com/Vonnue-ShijilCG/tm/internal/workspace"
 )
 
-// newTermForm collects the options for a new terminal: a name, and for Git
-// projects an optional worktree with a branch to check out or create.
+// newTermForm collects the options for a new terminal: for Git projects an
+// optional dedicated worktree with a branch to check out or create; for
+// other projects there is nothing to choose and Enter simply creates it.
 type newTermForm struct {
 	project *workspace.Project
 	back    focus // where Esc returns
 
-	name     textinput.Model
 	branch   textinput.Model
 	worktree bool
 
@@ -25,22 +25,21 @@ type newTermForm struct {
 	branches    []string // existing local branches, for hints
 	current     string   // checked-out branch of the project
 
-	field int // 0 name, 1 branch, 2 worktree
+	field int // 0 branch, 1 worktree
 	err   string
 }
 
 const (
-	fieldName = iota
-	fieldBranch
+	fieldBranch = iota
 	fieldWorktree
 )
 
 func newForm(ws *workspace.Workspace, p *workspace.Project, back focus) *newTermForm {
-	f := &newTermForm{project: p, back: back, name: newInput("e.g. Payment"), branch: newInput("e.g. feature/payment")}
+	f := &newTermForm{project: p, back: back, branch: newInput("e.g. feature/payment")}
 	if branches, current, err := ws.Branches(p); err == nil {
 		f.canWorktree, f.branches, f.current, f.worktree = true, branches, current, true
 	}
-	f.name.Focus()
+	f.branch.Focus()
 	return f
 }
 
@@ -55,9 +54,9 @@ func newInput(placeholder string) textinput.Model {
 
 func (f *newTermForm) fieldCount() int {
 	if f.canWorktree {
-		return 3
+		return 2
 	}
-	return 1
+	return 1 // the (disabled) worktree row, so field arithmetic stays valid
 }
 
 // update handles a key while the form is open. It returns the options to
@@ -73,19 +72,17 @@ func (f *newTermForm) update(msg tea.KeyMsg) (opts *workspace.Options, cancelled
 	case key.Matches(msg, keys.FormPrev):
 		f.setField((f.field + f.fieldCount() - 1) % f.fieldCount())
 	case f.field == fieldWorktree:
-		if key.Matches(msg, keys.FormToggle) {
+		if key.Matches(msg, keys.FormToggle) && f.canWorktree {
 			f.worktree = !f.worktree
 		}
-	case f.field == fieldName:
-		f.name, _ = f.name.Update(msg)
-	case f.field == fieldBranch:
+	case f.field == fieldBranch && f.canWorktree:
 		f.branch, _ = f.branch.Update(msg)
 	}
 	return nil, false
 }
 
 func (f *newTermForm) submit() (*workspace.Options, bool) {
-	opts := &workspace.Options{Name: strings.TrimSpace(f.name.Value())}
+	opts := &workspace.Options{}
 	if f.canWorktree && f.worktree {
 		opts.Worktree = true
 		opts.Branch = strings.TrimSpace(f.branch.Value())
@@ -100,12 +97,8 @@ func (f *newTermForm) submit() (*workspace.Options, bool) {
 
 func (f *newTermForm) setField(i int) {
 	f.field = i
-	f.name.Blur()
 	f.branch.Blur()
-	switch i {
-	case fieldName:
-		f.name.Focus()
-	case fieldBranch:
+	if i == fieldBranch {
 		f.branch.Focus()
 	}
 }
@@ -113,8 +106,6 @@ func (f *newTermForm) setField(i int) {
 func (f *newTermForm) view(width int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n %s\n\n", titleStyle.Render("New terminal · "+f.project.Name))
-
-	b.WriteString(f.row(fieldName, "Name", f.name.View()))
 
 	if f.canWorktree {
 		branchHint := ""
@@ -131,7 +122,7 @@ func (f *newTermForm) view(width int) string {
 		wt := "no"
 		if f.worktree {
 			wt = "yes"
-			if path, err := workspace.WorktreePath(".", f.project.Name, f.worktreeName()); err == nil {
+			if path, err := workspace.WorktreePath(".", f.project.Name, strings.TrimSpace(f.branch.Value())); err == nil {
 				wt += hintStyle.Render("  → " + path)
 			}
 		}
@@ -142,19 +133,13 @@ func (f *newTermForm) view(width int) string {
 		}
 	} else {
 		b.WriteString(f.row(fieldWorktree, "Worktree", hintStyle.Render("no (not a git repository)")))
+		b.WriteString("\n " + hintStyle.Render("enter opens a shell in the project directory") + "\n")
 	}
 
 	if f.err != "" {
 		b.WriteString("\n " + errorStyle.Render(f.err) + "\n")
 	}
 	return b.String()
-}
-
-func (f *newTermForm) worktreeName() string {
-	if n := strings.TrimSpace(f.name.Value()); n != "" {
-		return n
-	}
-	return strings.TrimSpace(f.branch.Value())
 }
 
 func (f *newTermForm) row(field int, label, value string) string {

@@ -13,6 +13,7 @@ package workspace
 
 import (
 	"fmt"
+	"os"
 
 	uv "github.com/charmbracelet/ultraviolet"
 
@@ -59,7 +60,7 @@ func (t *Terminal) Dir(p *Project) string {
 // Options describes how to create a terminal. The zero value is a plain
 // shell in the project directory.
 type Options struct {
-	Name     string // display name; also the worktree directory name
+	Name     string // kept for saved-state compatibility; no longer shown or set by the form
 	Branch   string // branch to check out when Worktree is set
 	Worktree bool   // create (or check out) Branch in its own worktree
 }
@@ -254,7 +255,7 @@ func (ws *Workspace) Find(id int) (*Project, *Terminal) {
 // process has ended, keeping the project's active terminal sensible. It
 // does not close the session. The terminal's definition is remembered so
 // the workspace can recreate it later — a process ending never forgets a
-// terminal. Use Delete to forget one for good.
+// terminal. Use DeleteTerminal to forget one for good.
 func (ws *Workspace) Remove(id int) (*Project, *Terminal) {
 	p, t := ws.detach(id)
 	if t != nil {
@@ -263,13 +264,62 @@ func (ws *Workspace) Remove(id int) (*Project, *Terminal) {
 	return p, t
 }
 
-// Delete detaches the terminal with the given ID without remembering it, so
-// it will not be restored. The session is not closed here (callers do
-// that) and a worktree the terminal used is left alone: worktrees are
-// removed separately, and only deliberately, from the manager.
-func (ws *Workspace) Delete(id int) (*Project, *Terminal) {
-	return ws.detach(id)
+// DeleteTerminal is the one way a terminal ceases to exist. Running (t set)
+// or saved (t nil), its definition goes, and the dedicated worktree it
+// owned goes with it: removed through git, or pruned when its directory is
+// already gone. A terminal in the project checkout only loses its
+// definition; the checkout is never touched. The worktree is kept, with the
+// reason in note, when another terminal still uses it or git cannot remove
+// it. The session is not closed here; callers do that first. Callers are
+// expected to have confirmed with the user, so a dirty worktree is removed.
+func (ws *Workspace) DeleteTerminal(p *Project, def SavedTerminal, t *Terminal) (note string) {
+	if t != nil {
+		ws.detach(t.ID)
+	} else {
+		p.forget(def.Name, def.Worktree)
+	}
+	if def.Worktree == "" {
+		return ""
+	}
+	if other := p.terminalUsing(def.Worktree); other != nil {
+		return fmt.Sprintf("worktree kept: terminal %d uses it", other.Num)
+	}
+	for _, s := range p.Saved {
+		if s.Worktree == def.Worktree {
+			return "worktree kept: another saved terminal uses it"
+		}
+	}
+	if _, listed := ws.WorktreeStatus(p, def.Worktree); !listed { // git has forgotten it already
+		if _, err := os.Stat(def.Worktree); err != nil {
+			return "" // and the directory is gone too: nothing left to clean up
+		}
+		return "worktree kept: git no longer lists it; remove the directory by hand"
+	}
+	if err := ws.RemoveWorktree(p, WorktreeInfo{Path: def.Worktree, Branch: def.Branch}, true); err != nil {
+		return "worktree kept: " + err.Error()
+	}
+	return ""
 }
+
+// WorktreeStatus reports what git knows about the worktree at path: its
+// branch, whether it is dirty or its directory missing. ok is false when git
+// does not list it (or cannot be asked).
+func (ws *Workspace) WorktreeStatus(p *Project, path string) (info WorktreeInfo, ok bool) {
+	worktrees, err := ws.Worktrees(p)
+	if err != nil {
+		return WorktreeInfo{}, false
+	}
+	for _, wt := range worktrees {
+		if wt.Path == path {
+			return wt, true
+		}
+	}
+	return WorktreeInfo{}, false
+}
+
+// Definition is the terminal's persistent form: name, branch and worktree
+// path. It is what survives when the process does not.
+func (t *Terminal) Definition() SavedTerminal { return t.saved() }
 
 // saved is the terminal's persistent definition.
 func (t *Terminal) saved() SavedTerminal {
@@ -302,15 +352,6 @@ func (ws *Workspace) detach(id int) (*Project, *Terminal) {
 		p.active = len(p.Terminals) - 1
 	}
 	return p, t
-}
-
-// ResizeAll propagates a new screen size to every session.
-func (ws *Workspace) ResizeAll(cols, rows int) {
-	for _, p := range ws.Projects {
-		for _, t := range p.Terminals {
-			t.Session.Resize(cols, rows)
-		}
-	}
 }
 
 // CloseAll terminates every session.

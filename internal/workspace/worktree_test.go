@@ -154,9 +154,6 @@ func TestWorktreeCreationErrors(t *testing.T) {
 	if _, err := ws.CreateTerminal(plain, Options{Name: "Shell"}, 80, 24); err != nil {
 		t.Errorf("plain terminal in non-git project failed: %v", err)
 	}
-	if ws.IsGitProject(plain) || !ws.IsGitProject(app) {
-		t.Error("IsGitProject wrong")
-	}
 }
 
 func TestClosingTerminalKeepsWorktree(t *testing.T) {

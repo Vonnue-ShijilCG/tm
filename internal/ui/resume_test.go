@@ -39,13 +39,9 @@ func TestStateIsSavedOnCreateCloseAndQuit(t *testing.T) {
 	m, spawned, root := gitModel(t)
 	stateFile := filepath.Join(root, state.FileName)
 
-	m = press(m, "n")
-	m = typeText(m, "Login")
-	m = press(m, "tab")
-	m = typeText(m, "develop")
-	m = press(m, "enter")
+	m = makeTerminal(t, m, "n", "Login", "develop")
 	f, err := state.Load(root)
-	if err != nil || len(f.Projects) != 1 || len(f.Projects[0].Terminals) != 1 || f.Projects[0].Terminals[0].Worktree != ".terminal-worktrees/app/login" {
+	if err != nil || len(f.Projects) != 1 || len(f.Projects[0].Terminals) != 1 || f.Projects[0].Terminals[0].Worktree != ".terminal-worktrees/app/develop" {
 		t.Fatalf("state after create = %+v, %v", f, err)
 	}
 
@@ -72,7 +68,7 @@ func TestStateIsSavedOnCreateCloseAndQuit(t *testing.T) {
 	if len(f.Projects) != 1 || len(f.Projects[0].Terminals) != 2 {
 		t.Fatalf("closed terminals should stay saved, state = %+v", f)
 	}
-	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "login", ".git")); err != nil {
+	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "develop", ".git")); err != nil {
 		t.Error("closing must not delete the worktree")
 	}
 
@@ -102,14 +98,8 @@ func TestStateIsSavedOnCreateCloseAndQuit(t *testing.T) {
 
 func TestRestartOffersSavedTerminalsAndReopensThem(t *testing.T) {
 	m, _, root := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "Login")
-	m = press(m, "tab")
-	m = typeText(m, "develop")
-	m = press(m, "enter")
-	m = press(m, "alt+n")
-	m = typeText(m, "Plain")
-	m = press(m, "tab", "tab", " ", "enter") // worktree off
+	m = makeTerminal(t, m, "n", "Login", "develop")
+	m = makeTerminal(t, m, "alt+n", "Plain", "")
 	if len(m.ws.Projects[0].Terminals) != 2 {
 		t.Fatalf("setup: expected 2 terminals, got %d", len(m.ws.Projects[0].Terminals))
 	}
@@ -131,14 +121,14 @@ func TestRestartOffersSavedTerminalsAndReopensThem(t *testing.T) {
 
 	m2 = press(m2, "m")
 	view = m2.View()
-	for _, want := range []string{"Manage terminals · app", "Login", "develop · worktree", "Plain", "project checkout", "saved"} {
+	for _, want := range []string{"Manage terminals", "○ Terminal · ⎇ develop", "○ Terminal · main", "saved"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("manager missing %q:\n%s", want, view)
 		}
 	}
 	// Reopen the worktree terminal: reuses the existing worktree.
 	m2 = press(m2, "enter")
-	if len(*spawned) != 1 || (*spawned)[0].dir != filepath.Join(root, workspace.WorktreesDir, "app", "login") {
+	if len(*spawned) != 1 || (*spawned)[0].dir != filepath.Join(root, workspace.WorktreesDir, "app", "develop") {
 		t.Fatalf("enter should reopen Login in its worktree, spawned=%+v", *spawned)
 	}
 	if m2.panel != nil || m2.focus != focusMain || app.Terminals[0].Name != "Login" || app.Terminals[0].Worktree == nil {
@@ -147,7 +137,7 @@ func TestRestartOffersSavedTerminalsAndReopensThem(t *testing.T) {
 	if list, _ := m2.ws.Worktrees(app); len(list) != 1 {
 		t.Errorf("reopening must not create another worktree, got %d", len(list))
 	}
-	if !strings.Contains(m2.View(), "1 Login [develop]") {
+	if !strings.Contains(m2.View(), "Terminal 1 · ⎇ develop") {
 		t.Errorf("tab should show the restored name and branch:\n%s", m2.View())
 	}
 
@@ -160,7 +150,7 @@ func TestRestartOffersSavedTerminalsAndReopensThem(t *testing.T) {
 		t.Errorf("Saved should be empty after reopening everything: %+v", app.Saved)
 	}
 	m2 = press(m2, "esc", "m")
-	if strings.Contains(m2.View(), "saved") || !strings.Contains(m2.View(), "1 Login") || !strings.Contains(m2.View(), "visible") {
+	if strings.Contains(m2.View(), "saved") || !strings.Contains(m2.View(), "Terminal 1 · ⎇ develop") || !strings.Contains(m2.View(), "visible") {
 		t.Errorf("manager should show both as visible running terminals:\n%s", m2.View())
 	}
 
@@ -177,13 +167,10 @@ func TestRestartOffersSavedTerminalsAndReopensThem(t *testing.T) {
 
 func TestRestartWithMissingWorktreeIsStaleNotRecreated(t *testing.T) {
 	m, _, root := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "Login")
-	m = press(m, "tab")
-	m = typeText(m, "develop")
-	m = press(m, "enter", "esc")
+	m = makeTerminal(t, m, "n", "Login", "develop")
+	m = press(m, "esc")
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-	wtPath := filepath.Join(root, workspace.WorktreesDir, "app", "login")
+	wtPath := filepath.Join(root, workspace.WorktreesDir, "app", "develop")
 
 	// Worktree deleted while tm was not running.
 	if err := os.RemoveAll(wtPath); err != nil {
@@ -201,28 +188,28 @@ func TestRestartWithMissingWorktreeIsStaleNotRecreated(t *testing.T) {
 	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
 		t.Error("missing worktree must not be recreated")
 	}
-	m2 = press(m2, "d", "y") // delete the saved definition; git's record of the worktree remains as an unused entry
+	m2 = press(m2, "d")
+	if !strings.Contains(m2.View(), "worktree directory is already gone") {
+		t.Errorf("the prompt should explain the missing directory:\n%s", m2.View())
+	}
+	m2 = press(m2, "y") // delete the definition; git's stale record is pruned with it
 	f, _ := state.Load(root)
 	if len(f.Projects) != 0 {
-		t.Errorf("state should be empty after forgetting, got %+v", f.Projects)
+		t.Errorf("state should be empty after deleting, got %+v", f.Projects)
 	}
-	if v := m2.View(); !strings.Contains(v, "Unused worktrees") || !strings.Contains(v, "directory missing") || len(m2.panel.rows) != 1 || m2.panel.rows[0].worktree == nil {
-		t.Errorf("the registered worktree should now be listed as unused, not as a terminal:\n%s", v)
+	if len(m2.panel.rows) != 0 || strings.Contains(m2.View(), "Unused worktrees") || !strings.Contains(m2.View(), "deleted saved terminal") {
+		t.Errorf("nothing should remain, not even an unused entry:\n%s", m2.View())
 	}
-	m2 = press(m2, "d", "y") // prune it
-	if len(m2.panel.rows) != 0 || !strings.Contains(m2.View(), "removed worktree") {
-		t.Errorf("after prune nothing should remain:\n%s", m2.View())
+	if list, _ := m2.ws.Worktrees(m2.ws.Projects[0]); len(list) != 0 {
+		t.Errorf("git's record should be pruned: %+v", list)
 	}
 
 	// Worktree removed from git entirely (git no longer lists it): stale row, forgettable.
 	m3, _, root3 := gitModel(t)
-	m3 = press(m3, "n")
-	m3 = typeText(m3, "Gone")
-	m3 = press(m3, "tab")
-	m3 = typeText(m3, "develop")
-	m3 = press(m3, "enter", "esc")
+	m3 = makeTerminal(t, m3, "n", "Gone", "develop")
+	m3 = press(m3, "esc")
 	m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-	gonePath := filepath.Join(root3, workspace.WorktreesDir, "app", "gone")
+	gonePath := filepath.Join(root3, workspace.WorktreesDir, "app", "develop")
 	if err := os.RemoveAll(gonePath); err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +235,7 @@ func TestRestartWithMissingWorktreeIsStaleNotRecreated(t *testing.T) {
 		t.Errorf("enter on a stale row must not open or create anything:\n%s", m4.View())
 	}
 	m4 = press(m4, "d")
-	if !strings.Contains(m4.View(), "Delete saved terminal \"Gone\"") {
+	if !strings.Contains(m4.View(), "Delete this saved terminal") {
 		t.Errorf("d on a stale row should offer to delete the definition:\n%s", m4.View())
 	}
 	m4 = press(m4, "y")
@@ -307,11 +294,11 @@ func TestManagerListsRunningPlainTerminals(t *testing.T) {
 	m, spawned := newTestModel(t)
 	m = press(m, "enter", "esc", "m") // one running plain terminal in backend
 	view := m.View()
-	if !strings.Contains(view, "project checkout") || !strings.Contains(view, "visible") || !strings.Contains(view, "1 shell") {
+	if !strings.Contains(view, "Terminal 1") || !strings.Contains(view, "visible") || !strings.Contains(view, "t1") { // unnamed: the program's title stands in
 		t.Fatalf("manager should list the running plain terminal:\n%s", view)
 	}
 	m = press(m, "d")
-	if !m.panel.confirm || !strings.Contains(m.View(), "Permanently delete terminal") {
+	if !m.panel.confirm || !strings.Contains(m.View(), "Delete Terminal 1") {
 		t.Errorf("d on a running terminal asks before deleting for good:\n%s", m.View())
 	}
 	m = press(m, "esc") // cancel

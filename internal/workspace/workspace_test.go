@@ -156,7 +156,7 @@ func TestRemoveKeepsOthersAndFixesActive(t *testing.T) {
 	}
 }
 
-func TestFindResizeAllCloseAll(t *testing.T) {
+func TestFindAndCloseAll(t *testing.T) {
 	ws, spawned := newTestWorkspace()
 	a, _ := ws.NewTerminal(ws.Projects[0], 80, 24)
 	b, _ := ws.NewTerminal(ws.Projects[1], 80, 24)
@@ -166,13 +166,6 @@ func TestFindResizeAllCloseAll(t *testing.T) {
 	}
 	if p, term := ws.Find(a.ID + b.ID + 1); p != nil || term != nil {
 		t.Error("Find of unknown id should return nils")
-	}
-
-	ws.ResizeAll(100, 40)
-	for i, s := range *spawned {
-		if s.cols != 100 || s.rows != 40 {
-			t.Errorf("session %d size %dx%d, want 100x40", i, s.cols, s.rows)
-		}
 	}
 
 	ws.CloseAll()

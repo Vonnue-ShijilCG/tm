@@ -19,17 +19,7 @@ import (
 func savedProject(t *testing.T, withMissing bool) (Model, *[]*fakeSession, string) {
 	t.Helper()
 	m, _, root := gitModel(t)
-	create := func(name, branch string) {
-		m = press(m, "n")
-		m = typeText(m, name)
-		if branch == "" {
-			m = press(m, "tab", "tab", " ", "enter")
-			return
-		}
-		m = press(m, "tab")
-		m = typeText(m, branch)
-		m = press(m, "enter")
-	}
+	create := func(name, branch string) { m = makeTerminal(t, m, "n", name, branch) }
 	m = press(m, "esc")
 	create("Login", "develop")
 	m = press(m, "esc")
@@ -43,7 +33,7 @@ func savedProject(t *testing.T, withMissing bool) (Model, *[]*fakeSession, strin
 	m = press(m, "esc")
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if withMissing {
-		if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "gone")); err != nil {
+		if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "feature-gone")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -65,7 +55,7 @@ func TestOpenAllReopensSavedTerminalsIntoPanes(t *testing.T) {
 	for _, term := range app.Terminals {
 		names[term.Name] = term.Session.(*fakeSession).dir
 	}
-	if names["Login"] != filepath.Join(root, workspace.WorktreesDir, "app", "login") || names["Payment"] != filepath.Join(root, workspace.WorktreesDir, "app", "payment") || names["Dev"] != app.Path {
+	if names["Login"] != filepath.Join(root, workspace.WorktreesDir, "app", "develop") || names["Payment"] != filepath.Join(root, workspace.WorktreesDir, "app", "feature-payment") || names["Dev"] != app.Path {
 		t.Errorf("terminals opened in wrong directories: %v", names)
 	}
 	if after, _ := m.ws.Worktrees(app); len(after) != len(before) {
@@ -95,7 +85,7 @@ func TestOpenAllReopensSavedTerminalsIntoPanes(t *testing.T) {
 		t.Error("focused terminal must be visible")
 	}
 	view := m.View()
-	for _, want := range []string{"Login [develop]", "Payment [feature/payment]", "Dev"} {
+	for _, want := range []string{"⎇ develop", "⎇ feature/payment", "· main"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
@@ -132,7 +122,7 @@ func TestOpenAllSkipsMissingWorktreeAndKeepsRunning(t *testing.T) {
 	if !strings.Contains(m.notice, "Gone") || !strings.Contains(m.notice, "missing") {
 		t.Errorf("missing worktree should be reported: %q", m.notice)
 	}
-	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "gone")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "feature-gone")); !os.IsNotExist(err) {
 		t.Error("missing worktree must not be recreated")
 	}
 	if len(app.Saved) != 1 || app.Saved[0].Name != "Gone" {

@@ -17,19 +17,9 @@ import (
 func arranged(t *testing.T) (Model, string) {
 	t.Helper()
 	m, _, root := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "Login")
-	m = press(m, "tab")
-	m = typeText(m, "develop")
-	m = press(m, "enter")
-	m = press(m, "alt+v")
-	m = typeText(m, "Payment")
-	m = press(m, "tab")
-	m = typeText(m, "feature/payment")
-	m = press(m, "enter")
-	m = press(m, "alt+h")
-	m = typeText(m, "Dev")
-	m = press(m, "tab", "tab", " ", "enter")
+	m = makeTerminal(t, m, "n", "Login", "develop")
+	m = makeTerminal(t, m, "alt+v", "Payment", "feature/payment")
+	m = makeTerminal(t, m, "alt+h", "Dev", "")
 	m = press(m, "alt+=")    // grow Dev: the Payment/Dev stack ratio becomes 0.4
 	m = press(m, "alt+left") // focus Login
 	if got := names(m.layouts[m.ws.Projects[0]]); strings.Join(got, ",") != "Login,Payment,Dev" {
@@ -99,7 +89,7 @@ func TestRestoreCollapsesAroundMissingTerminal(t *testing.T) {
 	m, root := arranged(t)
 	// Payment's worktree disappears while tm is not running: its leaf must go
 	// and Login | Dev remain, with Dev taking the whole right column.
-	if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "payment")); err != nil {
+	if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "feature-payment")); err != nil {
 		t.Fatal(err)
 	}
 	m2, spawned := restartModel(t, m)
@@ -119,7 +109,7 @@ func TestRestoreCollapsesAroundMissingTerminal(t *testing.T) {
 	if app.ActiveTerminal().Name != "Login" {
 		t.Error("saved focus (Login) should still apply")
 	}
-	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "payment")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "feature-payment")); !os.IsNotExist(err) {
 		t.Error("missing worktree must not be recreated")
 	}
 }
@@ -286,12 +276,8 @@ func TestRestoredLayoutRespectsMinimumsAtAllSizes(t *testing.T) {
 
 func TestFocusAndResizeChangesArePersisted(t *testing.T) {
 	m, spawned, root := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "A")
-	m = press(m, "tab", "tab", " ", "enter")
-	m = press(m, "alt+v")
-	m = typeText(m, "B")
-	m = press(m, "tab", "tab", " ", "enter") // two named panes, focus on B
+	m = makeTerminal(t, m, "n", "A", "")
+	m = makeTerminal(t, m, "alt+v", "B", "")
 	_ = spawned
 	f, _ := state.Load(root)
 	if f.Projects[0].Focused == nil || *f.Projects[0].Focused != 1 {

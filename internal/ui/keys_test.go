@@ -47,7 +47,7 @@ func TestTerminalModeKeyPolicy(t *testing.T) {
 	}
 
 	reserved := map[string]tea.KeyMsg{
-		"alt+j": alt("j"), "alt+k": alt("k"), "alt+n": alt("n"), "alt+x": alt("x"),
+		"alt+j": alt("j"), "alt+k": alt("k"), "alt+n": alt("n"), "alt+m": alt("m"), "alt+x": alt("x"),
 		"alt+v": alt("v"), "alt+h": alt("h"), "alt+z": alt("z"), "alt+=": alt("="), "alt+-": alt("-"),
 		"alt+left": {Type: tea.KeyLeft, Alt: true}, "alt+right": {Type: tea.KeyRight, Alt: true},
 		"alt+up": {Type: tea.KeyUp, Alt: true}, "alt+down": {Type: tea.KeyDown, Alt: true},

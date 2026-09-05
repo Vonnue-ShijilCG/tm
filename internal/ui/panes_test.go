@@ -121,7 +121,7 @@ func TestFocusMovesBetweenPanesWithAltArrows(t *testing.T) {
 		t.Error("focus movement must not spawn anything")
 	}
 	view := m.View()
-	if !strings.Contains(view, "3 t3") || strings.Count(view, "SCREEN:") != 3 {
+	if !strings.Contains(view, "Terminal 3") || strings.Count(view, "SCREEN:") != 3 {
 		t.Errorf("all three panes should be rendered:\n%s", view)
 	}
 }
@@ -280,7 +280,7 @@ func TestAltJKCycleVisibleTerminalsOnly(t *testing.T) {
 	if p.ActiveTerminal() != p.Terminals[0] || len(m.layouts[p].leaves()) != 2 || m.layouts[p].contains(p.Terminals[1]) {
 		t.Errorf("hidden terminal must never be swapped in by navigation: %v", m.layouts[p].leaves())
 	}
-	if !strings.Contains(m.View(), " 1 t1 ") { // panes are ~14 cols wide here: check the header
+	if !strings.Contains(m.View(), " Terminal 1 ") { // panes are ~14 cols wide here: check the header
 		t.Errorf("focused visible terminal should be rendered:\n%s", m.View())
 	}
 	// The manager is the explicit way back.
@@ -292,16 +292,10 @@ func TestAltJKCycleVisibleTerminalsOnly(t *testing.T) {
 
 func TestPaneHeadersShowNameAndBranch(t *testing.T) {
 	m, _, _ := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "Login")
-	m = press(m, "tab")
-	m = typeText(m, "develop")
-	m = press(m, "enter")
-	m = press(m, "alt+v")
-	m = typeText(m, "Plain")
-	m = press(m, "tab", "tab", " ", "enter")
+	m = makeTerminal(t, m, "n", "Login", "develop")
+	m = makeTerminal(t, m, "alt+v", "Plain", "")
 	view := m.View()
-	for _, want := range []string{"1 Login [develop]", "2 Plain"} {
+	for _, want := range []string{"Terminal 1 · ⎇ develop", "Terminal 2 · main"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("pane header missing %q:\n%s", want, view)
 		}

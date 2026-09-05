@@ -55,15 +55,16 @@ func TestFormCreatesWorktreeTerminal(t *testing.T) {
 		t.Fatalf("n on a git project should open the form with worktree enabled: %+v", m.form)
 	}
 	view := m.View()
-	for _, want := range []string{"New terminal · app", "Name", "Branch", "Worktree", "yes"} {
+	for _, want := range []string{"New terminal · app", "Branch", "Worktree", "yes"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("form view missing %q:\n%s", want, view)
 		}
 	}
+	if strings.Contains(view, "Name") {
+		t.Errorf("the form no longer asks for a name:\n%s", view)
+	}
 
-	m = typeText(m, "Login")
-	m = press(m, "tab")
-	m = typeText(m, "develop") // existing branch
+	m = typeText(m, "develop") // the branch field has focus straight away; an existing branch
 	if !strings.Contains(m.View(), "(existing)") {
 		t.Errorf("typing an existing branch should say so:\n%s", m.View())
 	}
@@ -72,31 +73,32 @@ func TestFormCreatesWorktreeTerminal(t *testing.T) {
 	if m.form != nil {
 		t.Fatalf("form should close after a successful create, err=%q", m.form.err)
 	}
-	wantDir := filepath.Join(root, workspace.WorktreesDir, "app", "login")
+	wantDir := filepath.Join(root, workspace.WorktreesDir, "app", "develop") // the worktree directory follows the branch
 	if len(*spawned) != 1 || (*spawned)[0].dir != wantDir {
 		t.Fatalf("shell should start in %s, spawned=%+v", wantDir, *spawned)
 	}
 	term := m.ws.Projects[0].Terminals[0]
-	if term.Name != "Login" || term.Worktree == nil || term.Worktree.Branch != "develop" {
+	if term.Worktree == nil || term.Worktree.Branch != "develop" {
 		t.Errorf("terminal = %+v", term)
 	}
 	if m.focus != focusMain {
 		t.Error("new terminal should be focused")
 	}
 	view = m.View()
-	for _, want := range []string{"1 Login [develop]", "app · terminal 1 Login · worktree develop"} {
+	for _, want := range []string{"Terminal 1 · ⎇ develop", "app · Terminal 1 · ⎇ develop"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}
 	}
+	if strings.Contains(m.paneTitle(m.ws.Projects[0], term), "worktree") || strings.Contains(m.viewStatus(), "worktree") {
+		t.Error("neither header nor status bar says worktree")
+	}
 }
 
-func TestFormNewBranchAndDuplicateNameError(t *testing.T) {
+func TestFormNewBranchAndDuplicateBranchError(t *testing.T) {
 	m, spawned, _ := gitModel(t)
 
 	m = press(m, "n")
-	m = typeText(m, "Payment")
-	m = press(m, "tab")
 	m = typeText(m, "feature/payment") // does not exist yet
 	if !strings.Contains(m.View(), "(new branch)") {
 		t.Errorf("typing an unknown branch should say new branch:\n%s", m.View())
@@ -106,18 +108,16 @@ func TestFormNewBranchAndDuplicateNameError(t *testing.T) {
 		t.Fatalf("create with new branch failed: form=%+v spawned=%d", m.form, len(*spawned))
 	}
 
-	// Same name again from terminal mode: alt+n opens the form, create fails,
-	// the form stays open with the error and nothing was spawned.
+	// The same branch again from terminal mode: alt+n opens the form, create
+	// fails, the form stays open with the error and nothing was spawned.
 	m = press(m, "alt+n")
 	if m.form == nil || m.form.back != focusMain {
 		t.Fatal("alt+n should open the form and remember to return to the terminal")
 	}
-	m = typeText(m, "Payment")
-	m = press(m, "tab")
-	m = typeText(m, "feature/other")
+	m = typeText(m, "feature/payment")
 	m = press(m, "enter")
 	if m.form == nil || !strings.Contains(m.form.err, "already exists") {
-		t.Fatalf("duplicate worktree name should keep the form open with an error, form=%+v", m.form)
+		t.Fatalf("a branch whose worktree already exists should keep the form open with an error, form=%+v", m.form)
 	}
 	if !strings.Contains(m.View(), "already exists") {
 		t.Error("error should be rendered in the form")
@@ -162,20 +162,16 @@ func TestFormOnNonGitProjectCreatesPlainTerminal(t *testing.T) {
 	if m.form == nil || m.form.canWorktree {
 		t.Fatalf("form should open without worktree support: %+v", m.form)
 	}
-	if !strings.Contains(m.View(), "not a git repository") {
-		t.Errorf("form should explain why worktrees are unavailable:\n%s", m.View())
+	if !strings.Contains(m.View(), "not a git repository") || strings.Contains(m.View(), "Name") {
+		t.Errorf("form should explain why worktrees are unavailable and ask for nothing else:\n%s", m.View())
 	}
-	m = typeText(m, "Shell")
-	m = press(m, "tab") // only one field: stays on name
+	m = press(m, "tab", " ") // nothing to edit: these are no-ops
 	m = press(m, "enter")
 	if m.form != nil || len(*spawned) != 1 || (*spawned)[0].dir != "/ws/ecommerce" {
 		t.Fatalf("plain terminal should be created: form=%v spawned=%+v", m.form, *spawned)
 	}
-	if got := m.ws.Projects[1].Terminals[0].Name; got != "Shell" {
-		t.Errorf("terminal name = %q, want Shell", got)
-	}
-	if !strings.Contains(m.View(), "1 Shell ") {
-		t.Errorf("tab should show the name:\n%s", m.View())
+	if !strings.Contains(m.View(), " Terminal 1 ") {
+		t.Errorf("header shows the terminal identity without a branch:\n%s", m.View())
 	}
 }
 

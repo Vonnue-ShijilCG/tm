@@ -37,6 +37,7 @@ type keyMap struct {
 	NextTerm   key.Binding
 	PrevTerm   key.Binding
 	NewTerm    key.Binding
+	ManageTerm key.Binding
 	HideTerm   key.Binding
 	DeleteTerm key.Binding
 
@@ -95,6 +96,7 @@ var keys = keyMap{
 	NextTerm:   key.NewBinding(key.WithKeys("alt+j"), key.WithHelp("alt+j", "next terminal")),
 	PrevTerm:   key.NewBinding(key.WithKeys("alt+k"), key.WithHelp("alt+k", "prev terminal")),
 	NewTerm:    key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("alt+n", "new terminal")),
+	ManageTerm: key.NewBinding(key.WithKeys("alt+m"), key.WithHelp("alt+m", "manage terminals")),
 	HideTerm:   key.NewBinding(key.WithKeys("alt+x"), key.WithHelp("alt+x", "hide terminal")),
 	DeleteTerm: key.NewBinding(key.WithKeys("alt+delete"), key.WithHelp("alt+del", "delete forever")),
 
@@ -141,7 +143,7 @@ func helpSections() []helpSection {
 	k := keys
 	return []helpSection{
 		{"SIDEBAR", []key.Binding{k.Down, k.Up, k.Top, k.Bottom, k.Select, k.New, k.SplitSide, k.SplitStack, k.Focus, k.Zoom, k.Manage, k.Help, k.Quit}},
-		{"TERMINAL", []key.Binding{k.Sidebar, k.NextTerm, k.PrevTerm, k.NewTerm, k.HideTerm, k.DeleteTerm}},
+		{"TERMINAL", []key.Binding{k.Sidebar, k.NextTerm, k.PrevTerm, k.NewTerm, k.ManageTerm, k.HideTerm, k.DeleteTerm}},
 		{"PANES", []key.Binding{k.PaneSide, k.PaneStack, k.PaneLeft, k.PaneRight, k.PaneUp, k.PaneDown, k.PaneGrow, k.PaneShrink, k.PaneZoom}},
 		{"NEW TERMINAL", []key.Binding{k.FormNext, k.FormPrev, k.FormToggle, k.FormSubmit, k.FormCancel}},
 		{"MANAGE TERMINALS", []key.Binding{k.MgDown, k.MgUp, k.MgShow, k.MgHide, k.MgNew, k.MgOpenAll, k.MgDelete, k.MgClose}},

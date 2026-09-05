@@ -54,11 +54,6 @@ func sanitizeName(name string) (string, error) {
 	return s, nil
 }
 
-// IsGitProject reports whether p is inside a Git repository.
-func (ws *Workspace) IsGitProject(p *Project) bool {
-	return git.IsRepository(p.Path)
-}
-
 // Branches lists p's local branches and the currently checked-out one.
 func (ws *Workspace) Branches(p *Project) (branches []string, current string, err error) {
 	repo, err := git.Open(p.Path)

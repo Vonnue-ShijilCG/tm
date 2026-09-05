@@ -1,112 +1,103 @@
 # tm
 
-`tm` is a terminal-native workspace manager for developers: one screen for
-all the Git repositories in a directory, with as many independent terminals
-per repository as you need.
-
-## Features
-
-- Multiple Git projects in one workspace, listed in a sidebar and navigated
-  with Vim-style keys.
-- Multiple terminals per project, each an independent process in its own
-  PTY with a full terminal emulator behind it.
-- Optional Git worktree isolation: a terminal can run in its own checkout
-  of the same repository, so branch changes in one terminal never affect
-  another.
-- Split layouts: automatic balanced grids for one to six terminals, plus
-  manual splits, divider resizing, and zoom.
-- Hide terminals without stopping them, and bring them back later.
-- A Terminal Manager per project for visible, hidden, and saved terminals.
-- Persistent terminal definitions and layouts across restarts, without
-  storing terminal output or environment.
-- A configurable per-project limit on running terminals.
-- Keyboard-first workflow; every shortcut is listed on the built-in help
-  screen.
-
-## How it works
+`tm` is a terminal-native workspace manager for Linux developers who work
+across several Git repositories at once. Start it in the directory that holds
+your repositories and you get one screen with every project in a sidebar and
+as many independent terminals per project as you need, each in its own PTY,
+each showing the branch it is on, arranged in split panes, and remembered
+between sessions.
 
 ```text
 Workspace
-├── Project
-│   ├── Terminal 1
-│   ├── Terminal 2
-│   └── Terminal 3
-├── Project
-│   └── Terminal 1
-└── Project
-    └── Terminal 1
+├── api            ● Terminal 1 · main
+│                  ● Terminal 2 · ⎇ feature/login
+├── web            ● Terminal 1 · main
+└── docs           ○ (saved, not running)
 ```
 
-- **Workspace** is the directory you start `tm` in. Its direct
-  subdirectories are scanned for Git repositories.
-- **Project** is one of those repositories. It appears in the sidebar and
-  owns a set of terminals.
-- **Terminal** is the thing you work with: a shell (your `$SHELL`, falling
-  back to `/bin/bash`) started in the project directory, shown in a pane
-  with a header carrying its number, name, and branch. Terminals are
-  created, hidden, shown, restored, and deleted as terminals.
-- **Worktree** is an optional property of a terminal. When enabled, the
-  terminal runs in its own Git worktree of the repository, on a branch you
-  choose, so what you check out there never touches the other terminals of
-  the same project. Worktrees live under
-  `<workspace>/.terminal-worktrees/<project>/<name>/`.
+## Features
 
-You create terminals. Worktrees are only something to think about when two
-terminals of the same repository need different checkouts at the same
-time.
+- **Workspace discovery.** Every direct subdirectory that contains a `.git`
+  entry becomes a project, listed in a sidebar with Vim-style navigation.
+- **Multiple terminals per project.** Each terminal is an independent
+  process in its own pseudo-terminal, driven by a terminal emulator, so
+  editors, servers and interactive tools behave as they do in any terminal.
+- **Terminal-first UI.** The terminal is the object you manage. Its identity
+  is `Terminal 1 · main`: a number and the branch it is on.
+- **Isolated worktrees when you need them.** A terminal can be given its own
+  Git worktree on a branch of your choice, so a checkout there never
+  disturbs the other terminals of the same project. Such a terminal shows
+  `⎇` before its branch, and that symbol is the only place the worktree
+  appears.
+- **Branch visibility.** Headers read the checked-out branch straight from
+  `.git/HEAD`, so a checkout you type shows up within a second.
+- **Hidden background terminals.** Hide a pane without stopping what runs in
+  it; bring it back later from the Terminal Manager.
+- **Terminal Manager.** One place per project to see visible, hidden and
+  saved terminals, show or hide them, restore them, and delete them.
+- **Pane layouts.** Automatic balanced grids for one to six terminals, plus
+  manual splits, divider resizing and zoom. Layouts are saved.
+- **Focus and navigation** between panes with Alt chords; everything else
+  you type reaches the program in the terminal.
+- **Saved terminal restoration.** Terminal definitions and layouts survive a
+  restart; processes do not, and nothing is launched until you ask.
+- **Configurable terminal limit** per project.
+- **Unused worktree cleanup.** Worktrees no terminal uses any more are listed
+  apart and can be removed deliberately, never automatically.
+- **Non-Git directories.** A project whose `.git` is not a usable repository
+  still gets plain terminals.
+- **Lightweight local state.** One small JSON file per workspace holding
+  terminal definitions and layouts. No daemon, no database.
 
 ## Installation
 
-With the Go toolchain installed:
+Requires Linux and Go (the version in `go.mod`). With the Go toolchain on
+your `PATH`:
 
 ```bash
 go install github.com/Vonnue-ShijilCG/tm/cmd/tm@latest
 ```
 
-This places `tm` in `$(go env GOPATH)/bin`; make sure that directory is on
-your `PATH`. To build from a clone instead:
+This places `tm` in `$(go env GOPATH)/bin`. From a clone, the Makefile offers
+the same steps:
 
 ```bash
 git clone https://github.com/Vonnue-ShijilCG/tm.git
 cd tm
-go install ./cmd/tm            # or: go build -o bin/tm ./cmd/tm
+make build      # bin/tm
+make install    # go install ./cmd/tm
 ```
 
-There are no prebuilt releases yet.
+`git` must be on your `PATH` for branch names and worktrees. There are no
+prebuilt releases yet.
 
-## Quick start
+## Usage
 
 Point `tm` at a directory whose direct children are Git repositories:
 
-```text
-~/workspace/
-├── project-a/
-├── project-b/
-└── project-c/
-```
-
 ```bash
-cd ~/workspace
+mkdir -p ~/workspace
+cd ~/workspace        # contains api/, web/, docs/ ...
 tm
 ```
 
-`tm` discovers the repositories and lists them in the sidebar. Move with
-`j`/`k`, press `Enter` on a project to open a shell in it, and type. To add
-another terminal to the same project press `n` (or `Alt+n` from inside a
-terminal): a small dialog asks for an optional name and, for Git projects,
-whether the terminal should run in its own worktree on a given branch.
-Leave the worktree off for a plain second shell in the same checkout; turn
-it on when that terminal should work on another branch without disturbing
-the others, for example a long-running dev server on `main` next to a
-feature branch you are editing.
+Each repository appears in the sidebar. Press `Enter` on one to open a shell
+in it. Press `n` (or `Alt+n` from inside a terminal) for another terminal of
+the same project: for a Git project a small dialog asks whether the new
+terminal should run in its own worktree on a branch you name; leave that off
+for a second shell in the same checkout, turn it on when the terminal should
+work on another branch without touching the others, for instance a dev
+server on `main` beside a feature branch you are editing. For a directory
+that is not a usable Git repository, `Enter` in the dialog simply opens a
+shell.
 
-Terminals of a project are arranged automatically as a balanced grid. `Esc`
-returns to the sidebar, `m` opens the Terminal Manager for the highlighted
-project, `s` shows every shortcut, and `q` quits (closing every terminal).
+Terminals of a project are laid out automatically as a balanced grid. `Esc`
+returns to the sidebar, `m` opens the Terminal Manager, `s` lists every
+shortcut, `q` quits and closes all terminals.
 
 ## Keyboard shortcuts
 
-In the sidebar:
+Sidebar:
 
 | Key | Action |
 | --- | --- |
@@ -115,102 +106,135 @@ In the sidebar:
 | `Enter` | open the project: focus it if it is running, otherwise start one terminal |
 | `n` | new terminal for the highlighted project |
 | `v` / `h` | new terminal beside / below the focused pane |
-| `Tab` (`l`, `→`) | focus the project's terminals |
+| `Tab`, `l`, `→` | focus the project's terminals |
 | `m` | Terminal Manager for the highlighted project |
 | `z` | zoom the focused terminal (toggle) |
 | `s` | help screen with every shortcut |
 | `q`, `Ctrl+C` | quit and close all terminals |
 
-While a terminal has focus, everything you type goes to the program in it,
-including `Tab`, `Shift+Tab`, `Ctrl+C`, `Ctrl+D`, `Ctrl+Z`, `Ctrl+\`, and
-Alt chords `tm` does not use. `tm` reserves only these:
+Terminal (everything not listed here is forwarded to the program, including
+`Tab`, `Shift+Tab`, `Ctrl+C`, `Ctrl+D`, `Ctrl+Z`, `Ctrl+\`, arrows, and Alt
+chords `tm` does not use):
 
 | Key | Action |
 | --- | --- |
 | `Esc` | back to the sidebar |
 | `Alt+j` / `Alt+k` | next / previous **visible** terminal |
-| `Alt+n` | new terminal (placed automatically) |
+| `Alt+n` | new terminal, placed automatically |
+| `Alt+m` | Terminal Manager for this terminal's project |
+| `Alt+x` | **hide** the terminal: the pane goes, the process keeps running |
+| `Alt+Delete` | **delete** the terminal permanently (asks first) |
 | `Alt+v` / `Alt+h` | new terminal beside / below the focused pane |
 | `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | focus the neighbouring pane |
 | `Alt+=` / `Alt+-` | grow / shrink the focused pane |
 | `Alt+z` | zoom the focused pane (toggle) |
-| `Alt+x` | **hide** the terminal: its pane goes away, the process keeps running |
-| `Alt+Delete` | **delete** the terminal permanently: stops the process and forgets the definition (asks first; a worktree is kept) |
 
-Two points are worth stating plainly. `Alt+x` never stops anything: a
-build, a server, or an editor in a hidden terminal keeps running, and `m`
-brings the pane back. `Alt+j`/`Alt+k` cycle through visible terminals
-only; hidden and saved terminals are reached through the Terminal Manager.
+Three things are worth stating plainly:
 
-A lone `Esc` is the one key that programs in the terminal do not receive.
-Programs that use `Esc` heavily (Vim, `less`) still get `Alt+key`
-sequences normally.
+- `Alt+x` only hides. The process, the terminal definition and any worktree
+  stay exactly as they are; a hidden build or server keeps running.
+- `Alt+Delete` is the destructive one. It stops the process, forgets the
+  definition, and removes the dedicated worktree the terminal owned (see
+  below). The project's own checkout is never touched.
+- `Alt+j` / `Alt+k` cycle through visible terminals only. Hidden and saved
+  terminals come back through the Terminal Manager. `Tab` is not a terminal
+  switcher because it is forwarded to the PTY for completion.
+
+A lone `Esc` is the one key programs in a terminal do not receive; Alt
+sequences still reach Vim, `less` and friends.
 
 ## Terminal Manager
 
-`m` lists the highlighted project's terminals, one row each:
+`m` in the sidebar, or `Alt+m` inside a terminal, opens the manager for that
+project (the focused terminal's project, whatever the sidebar cursor points
+at). `Esc` returns to where you were.
 
 ```text
-Manage terminals · project-a
+api
+Manage terminals
 
- › ● 1 shell        visible   project checkout
-   ○ 2 Login        hidden    feature/login · worktree
-   ● 3 Tests        visible   feature/tests · worktree
-   ○   Payment      saved     feature/payment · worktree
+ › ● Terminal 1 · main
+       shell                        visible
+   ○ Terminal 2 · ⎇ feature/login
+       claude                       hidden
+   ● Terminal 3 · ⎇ feature/tests
+       vitest                       visible
+   ○ Terminal · ⎇ feature/payment
+                                    saved
 
- Unused worktrees
-   ○ old-login      clean     feature/old-login · worktree
+ Unused worktrees (no terminal uses them)
+   ○ old-login · feature/old-login  clean
 ```
 
-- **visible**: running and shown in the layout.
-- **hidden**: running but not shown (after `Alt+x`, or because the window
-  was too small for its pane).
-- **saved**: a definition from an earlier session that is not running.
-  Terminals whose worktree is missing or no longer known to Git are
-  flagged and never recreated silently.
+Each terminal is one entry: its identity, then the program it runs and its
+state. **visible** is in the layout; **hidden** is running but taken out of
+the layout with `Alt+x`; **saved** is a definition from an earlier session
+whose process is not running (no number until it runs again). A saved
+terminal whose worktree is missing or unknown to Git is flagged and never
+recreated silently.
 
-Keys: `j`/`k` move; `Enter` acts on the selected row only, focusing a
-visible terminal, showing a hidden one, or starting a saved one (reusing
-its worktree); `h` hides the selected visible terminal, the same as
-`Alt+x`; `n` opens the new-terminal dialog; `a` restores every saved
-terminal that can run, up to the configured limit, and reapplies the saved
-layout; `d` deletes the selected terminal for good after confirmation,
-stopping its process and keeping its worktree; `Esc` closes.
+| Key | Action |
+| --- | --- |
+| `j` / `k` | move |
+| `Enter` | focus a visible terminal, show a hidden one, or start a saved one |
+| `h` | hide the selected visible terminal (same as `Alt+x`) |
+| `n` | new terminal |
+| `a` | restore every saved terminal that can run, up to the limit, reapplying the saved layout |
+| `d` | delete the selected terminal permanently, after confirmation |
+| `Esc` | close |
 
-Worktrees under `.terminal-worktrees/<project>/` that no terminal or saved
-definition uses any more are listed separately under *Unused worktrees*.
-They are never terminals and never removed automatically; `d` there
-removes one, with a warning if it has uncommitted changes.
+Hidden terminals never reappear on their own; `Enter` here is how they come
+back, and a shown terminal returns to the pane it left.
 
-## Worktrees
+## Git worktrees
 
-Two terminals in the same normal checkout share one working directory: a
-`git checkout` in one changes the files the other sees. When a terminal is
-created with the worktree option, it gets its own Git worktree on the
-branch you name (created from `HEAD` if the branch does not exist yet), so
-each terminal can be on a different branch at the same time.
+```text
+Project
+├── Terminal 1 · main
+├── Terminal 2 · ⎇ feature/login
+└── Terminal 3 · ⎇ feature/payment
+```
 
-Worktrees are optional. Hiding, deleting, or losing a terminal never
-removes its worktree; restoring a terminal reuses the existing worktree
-and never creates a second one. Cleanup is explicit, through the Terminal
-Manager's *Unused worktrees* section.
+Two terminals in the same checkout share one working directory, so a
+`git checkout` in one changes what the other sees. A terminal created with
+the worktree option gets its own worktree on the branch you name (created
+from `HEAD` if it does not exist yet), under
+`<workspace>/.terminal-worktrees/<project>/`. The `⎇` in its header is the
+only sign; you keep thinking in terminals.
+
+Deleting a worktree-backed terminal removes the worktree it owned along
+with the definition. The confirmation names the worktree and warns when it
+has uncommitted changes; cancelling keeps everything. A worktree that
+another terminal still uses, or that lies outside `tm`'s worktree
+directory, is never removed, and the notice says why. Worktrees left behind
+by other means appear under *Unused worktrees* in the manager, where `d`
+removes them with the same care.
+
+## Persistence and restart behaviour
+
+`tm` writes `<workspace>/.terminal-state.json`: per project, each terminal's
+branch and workspace-relative worktree path, the pane layout, and which
+terminal had focus. It is written atomically when terminals are created or
+closed, when the layout changes, and on quit. Terminal output, environment
+variables and secrets are never stored.
+
+Processes do not survive `tm` exiting, so after a restart every terminal is
+a saved definition and nothing is launched automatically. `Enter` on a
+project starts exactly one: the terminal that had focus, or the first
+restorable one. The others wait in the Terminal Manager, where `Enter`
+starts one and `a` starts them all and reapplies the saved layout. A
+terminal hidden with `Alt+x` is therefore simply "saved" after a restart.
+Worktree-backed terminals keep their identity and their place in the saved
+layout; plain terminals in the same checkout are interchangeable and may
+swap cells when a layout is restored.
 
 ## Configuration
 
-`tm` reads one optional file:
+`tm` reads one optional file, never writes it:
 
 ```text
-$XDG_CONFIG_HOME/tm/config.toml
+$XDG_CONFIG_HOME/tm/config.toml    # or ~/.config/tm/config.toml
 ```
-
-falling back to
-
-```text
-~/.config/tm/config.toml
-```
-
-It is never written by `tm`. The one setting is the maximum number of
-running terminals per project:
 
 ```toml
 # Maximum number of terminals allowed per project.
@@ -218,80 +242,57 @@ running terminals per project:
 max_terminals = 6
 ```
 
-The default is 6. The limit counts running terminals, including hidden
-ones; saved definitions do not count. At the limit, creating or restoring
-another terminal is refused with a message naming this file. The file is
-re-read on every attempt, so an edit takes effect without restarting.
-Lowering the limit below the number of terminals already running closes
-nothing; it only prevents further creation. An invalid value falls back to
-6 and is reported in the status bar.
-
-## Requirements
-
-- Linux. `tm` is developed and tested on Linux; it uses Unix
-  pseudo-terminals and is not supported on Windows. Other Unix-like
-  systems are untested.
-- A terminal emulator that sends Alt chords as `Esc`-prefixed keys (most
-  do).
-- `git` on your `PATH` for repository discovery, branches, and worktrees.
-- Go (the version in `go.mod`) to build.
-
-## Building from source
-
-```bash
-go build ./...                 # compile every package
-go build -o bin/tm ./cmd/tm    # build the CLI binary
-./bin/tm                       # run it inside a workspace directory
-```
-
-`make build` does the same, and `make install` runs `go install ./cmd/tm`.
+The default is 6. The limit counts running terminals, hidden ones included;
+saved definitions do not count. At the limit, creating or restoring another
+terminal is refused with a message naming this file; the file is re-read on
+every attempt, so an edit takes effect without a restart. Lowering the limit
+below the number already running closes nothing. An invalid value falls back
+to 6 and is reported in the status bar.
 
 ## Development
 
-Validate a change with the same steps CI runs:
-
 ```bash
-gofmt -l .
-go vet ./...
-go test ./...
-go test -race ./...
-go build ./...
+make build      # compile bin/tm
+make install    # go install ./cmd/tm
+make test       # go test ./...
+make race       # go test -race ./...
+make vet        # go vet ./...
+make fmt        # gofmt -w .
+make check      # what CI runs: formatting, vet, tests, race tests, build
 ```
 
-`make check` runs all of them. The tests use temporary directories and
-temporary Git repositories; they never touch your real workspaces or
-`~/.config/tm`.
+CI runs the same steps as `make check` on every push and pull request with
+the Go version from `go.mod`. Tests use temporary directories and temporary
+Git repositories and never touch your workspaces or `~/.config/tm`.
 
-## State and data
+## Design
 
-`tm` remembers terminal *definitions* per workspace in
-`<workspace>/.terminal-state.json`: each terminal's name, branch, and
-workspace-relative worktree path, the pane layout, and which terminal had
-focus. It is written atomically when terminals are created or closed, when
-the layout changes, and on quit. Terminal output, environment variables,
-command history, and secrets are never stored, and processes do not
-survive `tm` exiting.
+```text
+Workspace   the directory tm is started in
+└── Project the direct children with a .git entry
+    └── Terminal   a PTY-backed shell shown in a pane, identified by number and branch
+        └── Worktree (optional)   a dedicated checkout under .terminal-worktrees/
+```
 
-On the next start nothing is launched automatically. `Enter` on a project
-starts one of its saved terminals; the Terminal Manager starts the others
-individually or all at once.
+The code follows the same shape. `internal/project` discovers repositories.
+`internal/workspace` owns projects, terminals, saved definitions, worktree
+operations, the terminal limit and the state file's contents. `internal/git`
+wraps the `git` command and reads `.git/HEAD`. `internal/terminal` runs a
+PTY with an emulated screen. `internal/state` loads and saves the JSON state
+file. `internal/config` reads the configuration. `internal/ui` is the Bubble
+Tea front end: sidebar, pane layout, Terminal Manager, form and help, with a
+single key map that drives input, the status bar and the help screen. State
+is a small local file; there is no daemon and no process persistence.
 
-## Limitations and known issues
+## Requirements and limitations
 
-- Hidden terminals are not remembered as hidden across a restart: running
-  processes do not survive `tm` exiting, so after a restart every
-  terminal is simply a saved definition.
-- Terminals without a name share a layout identity across restarts, so two
-  unnamed shells may swap places when a saved layout is restored. Named
-  terminals are placed exactly.
-- Projects that are not Git repositories get plain terminals only; the
-  worktree option and the Unused worktrees section do not apply.
-
-## Roadmap
-
-`tm` is early-stage software. Likely future work includes prebuilt
-releases and broader installation options, and verifying other Unix-like
-platforms. There is no plan to add process persistence such as tmux.
+- Linux. Other Unix-like systems are untested; Windows is not supported.
+- A terminal emulator that sends Alt chords as `Esc`-prefixed keys.
+- `git` on `PATH`.
+- Plain terminals in one checkout share a saved-layout identity and may swap
+  places on restore. Worktree terminals are placed exactly.
+- Hidden state is not remembered across a restart, since processes end with
+  `tm`.
 
 ## License
 

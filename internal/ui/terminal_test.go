@@ -314,7 +314,7 @@ func TestAltXHidesOnlyActiveTerminalAndKeepsItRunning(t *testing.T) {
 	if m.focus != focusMain || p.ActiveTerminal() != p.Terminals[2] {
 		t.Errorf("focus moves to the next visible terminal (3), got %d", p.ActiveTerminal().Num)
 	}
-	if v := m.View(); strings.Contains(v, "2 t2") || !strings.Contains(v, "1 t1") || !strings.Contains(v, "3 t3") {
+	if v := m.View(); strings.Contains(v, "Terminal 2") || !strings.Contains(v, "Terminal 1") || !strings.Contains(v, "Terminal 3") {
 		t.Errorf("only visible panes are drawn; the hidden terminal is reachable from the manager:\n%s", v)
 	}
 
@@ -368,7 +368,7 @@ func TestViewShowsTabsAndCounts(t *testing.T) {
 	m, _ := newTestModel(t)
 	m = press(m, "enter", "alt+n", "enter", "alt+n", "enter")
 	view := m.View()
-	for _, want := range []string{"1 t1", "2 t2", "3 t3", "● backend", "backend · terminal 3", "alt+x"} {
+	for _, want := range []string{"Terminal 1", "Terminal 2", "Terminal 3", "● backend", "backend · Terminal 3", "alt+x"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("view missing %q:\n%s", want, view)
 		}

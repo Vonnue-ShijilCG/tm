@@ -32,7 +32,7 @@ func TestRowsAreTerminalFirstAndListUnusedWorktreesApart(t *testing.T) {
 	orphan, _ := ws.CreateTerminal(app, Options{Name: "Old", Branch: "feature/old", Worktree: true}, 80, 24)
 	pay, _ := ws.CreateTerminal(app, Options{Name: "Payment", Branch: "feature/pay", Worktree: true}, 80, 24)
 	ws.Remove(pay.ID)    // exits: saved
-	ws.Delete(orphan.ID) // deleted for good: its worktree is now unused
+	ws.detach(orphan.ID) // gone without cleanup, as an older tm left it: its worktree is now unused
 
 	rows, unused, err := ws.Rows(app)
 	if err != nil {
@@ -203,7 +203,7 @@ func TestRecordLayoutKeepsSavedLayoutWhileTerminalsArePending(t *testing.T) {
 	if q.Layout != pair {
 		t.Error("a hidden unnamed shell keeps the pair layout pending")
 	}
-	ws2.Delete(s2.ID)
+	ws2.DeleteTerminal(q, s2.Definition(), s2)
 	ws2.RecordLayout(q, &Layout{Key: s1.Key()}, s1.Key())
 	if q.Layout == pair {
 		t.Error("once the second shell is gone the single pane is the layout")

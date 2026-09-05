@@ -53,7 +53,7 @@ func TestEnterRestoresOnlyTheFocusedTerminalAndAKeepsTheLayout(t *testing.T) {
 	if f, _ := state.Load(root); stateLeaves(f.Projects[0].Layout) != 3 || len(f.Projects[0].Terminals) != 3 {
 		t.Errorf("enter must not rewrite the saved layout: %+v", f.Projects[0].Layout)
 	}
-	m2 = press(m2, "alt+n", "tab", "tab", " ", "enter") // a new plain terminal placed next to Login
+	m2 = press(m2, "alt+n", "tab", " ", "enter") // a new plain terminal placed next to Login
 	if len(*spawned) != 2 || len(m2.layouts[app].leaves()) != 2 {
 		t.Fatalf("new terminal: spawned=%d visible=%d", len(*spawned), len(m2.layouts[app].leaves()))
 	}
@@ -88,7 +88,7 @@ func TestEnterRestoresOnlyTheFocusedTerminalAndAKeepsTheLayout(t *testing.T) {
 	for _, s := range *spawned {
 		dirs[s.dir] = true
 	}
-	for _, want := range []string{filepath.Join(root, workspace.WorktreesDir, "app", "login"), filepath.Join(root, workspace.WorktreesDir, "app", "payment"), app.Path} {
+	for _, want := range []string{filepath.Join(root, workspace.WorktreesDir, "app", "develop"), filepath.Join(root, workspace.WorktreesDir, "app", "feature-payment"), app.Path} {
 		if !dirs[want] {
 			t.Errorf("no shell started in %s", want)
 		}
@@ -114,7 +114,7 @@ func TestEnterOnRunningProjectFocusesAndCreatesNothing(t *testing.T) {
 
 func TestEnterPartialRestoreReportsUnavailable(t *testing.T) {
 	m, root := arranged(t)
-	if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "payment")); err != nil {
+	if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "feature-payment")); err != nil {
 		t.Fatal(err)
 	}
 	m2, spawned := restartModel(t, m)
@@ -130,7 +130,7 @@ func TestEnterPartialRestoreReportsUnavailable(t *testing.T) {
 	if !strings.Contains(m2.notice, "restored 1 terminal;") || !strings.Contains(m2.notice, "1 unavailable") || !strings.Contains(m2.notice, "Payment") {
 		t.Errorf("notice = %q", m2.notice)
 	}
-	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "payment")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "feature-payment")); !os.IsNotExist(err) {
 		t.Error("missing worktree must not be recreated")
 	}
 	if got := strings.Join(names(m2.layouts[app]), ","); got != "Login,Dev" {
@@ -140,7 +140,7 @@ func TestEnterPartialRestoreReportsUnavailable(t *testing.T) {
 
 func TestEnterFallsBackToFirstRestorableWhenFocusedIsUnavailable(t *testing.T) {
 	m, root := arranged(t) // Login focused
-	if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "login")); err != nil {
+	if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "develop")); err != nil {
 		t.Fatal(err)
 	}
 	m2, spawned := restartModel(t, m)
@@ -152,20 +152,17 @@ func TestEnterFallsBackToFirstRestorableWhenFocusedIsUnavailable(t *testing.T) {
 	if !strings.Contains(m2.notice, "restored 1 terminal;") || !strings.Contains(m2.notice, "Login") {
 		t.Errorf("notice should explain the fallback: %q", m2.notice)
 	}
-	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "login")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "develop")); !os.IsNotExist(err) {
 		t.Error("missing worktree must not be recreated")
 	}
 }
 
 func TestEnterWhenNothingIsRestorableOpensFreshShell(t *testing.T) {
 	m, _, root := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "Gone")
-	m = press(m, "tab")
-	m = typeText(m, "develop")
-	m = press(m, "enter", "esc")
+	m = makeTerminal(t, m, "n", "Gone", "develop")
+	m = press(m, "esc")
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
-	if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "gone")); err != nil {
+	if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "develop")); err != nil { // Gone lives on develop
 		t.Fatal(err)
 	}
 	m2, spawned := restartModel(t, m)
@@ -177,7 +174,7 @@ func TestEnterWhenNothingIsRestorableOpensFreshShell(t *testing.T) {
 	if !strings.Contains(m2.notice, "restored 0 terminals") || !strings.Contains(m2.notice, "Gone") {
 		t.Errorf("notice should explain what was unavailable: %q", m2.notice)
 	}
-	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "gone")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "develop")); !os.IsNotExist(err) {
 		t.Error("missing worktree must not be recreated")
 	}
 }

@@ -184,10 +184,6 @@ func (ws *Workspace) OpenSaved(p *Project, s SavedTerminal, cols, rows int) (*Te
 	return t, err
 }
 
-// ForgetSaved drops one saved definition without touching git or the
-// filesystem.
-func (ws *Workspace) ForgetSaved(p *Project, s SavedTerminal) { p.forget(s.Name, s.Worktree) }
-
 // RestoreResult describes what OpenAll or RestoreOne did.
 type RestoreResult struct {
 	Opened    []*Terminal
@@ -252,7 +248,7 @@ func (ws *Workspace) open(p *Project, defs []SavedTerminal, one bool, cols, rows
 // Row is one terminal of a project as the manager lists it: running
 // (Terminal set) or saved (Terminal nil). Definition is the terminal's saved
 // form either way — name, branch and worktree path ("" for the project
-// checkout) — so a saved row can be handed to OpenSaved or ForgetSaved.
+// checkout) — so a saved row can be handed to OpenSaved or DeleteTerminal.
 // Missing and Stale flag a saved worktree that cannot be opened.
 type Row struct {
 	Terminal   *Terminal

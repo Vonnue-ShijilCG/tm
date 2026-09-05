@@ -19,16 +19,8 @@ func repoWithThree(t *testing.T) (Model, *[]*fakeSession, *workspace.Project) {
 	t.Helper()
 	m, spawned, _ := gitModel(t)
 	m = press(m, "enter") // terminal 1: plain shell in the checkout
-	m = press(m, "alt+n")
-	m = typeText(m, "Login")
-	m = press(m, "tab")
-	m = typeText(m, "develop")
-	m = press(m, "enter")
-	m = press(m, "alt+n")
-	m = typeText(m, "Payment")
-	m = press(m, "tab")
-	m = typeText(m, "feature/payment")
-	m = press(m, "enter")
+	m = makeTerminal(t, m, "alt+n", "Login", "develop")
+	m = makeTerminal(t, m, "alt+n", "Payment", "feature/payment")
 	p := m.ws.Projects[0]
 	if len(*spawned) != 3 || len(m.layouts[p].leaves()) != 3 {
 		t.Fatalf("setup: spawned=%d visible=%d", len(*spawned), len(m.layouts[p].leaves()))
@@ -68,7 +60,7 @@ func TestAltXHidesWorktreeTerminalAndManagerRestoresItReusingTheWorktree(t *test
 
 	m = press(m, "esc", "m")
 	view := m.View()
-	for _, want := range []string{"Manage terminals · app", "● 1 shell", "○ 2 Login", "develop · worktree", "hidden", "● 3 Payment", "feature/payment · worktree", "visible"} {
+	for _, want := range []string{"Manage terminals", "● Terminal 1 · main", "○ Terminal 2 · ⎇ develop", "hidden", "● Terminal 3 · ⎇ feature/payment", "visible"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("manager missing %q:\n%s", want, view)
 		}
@@ -126,7 +118,7 @@ func TestManagerEnterRestoresOnlyTheSelectedSavedTerminal(t *testing.T) {
 	app := m.ws.Projects[0]
 	m = press(m, "m")
 	view := m.View()
-	for _, want := range []string{"Login", "Payment", "Dev", "saved", "develop · worktree", "project checkout"} {
+	for _, want := range []string{"○ Terminal · ⎇ develop", "○ Terminal · ⎇ feature/payment", "○ Terminal · main", "saved"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("manager missing %q:\n%s", want, view)
 		}
@@ -135,7 +127,7 @@ func TestManagerEnterRestoresOnlyTheSelectedSavedTerminal(t *testing.T) {
 	if len(app.Terminals) != 1 || app.Terminals[0].Name != "Payment" || len(app.Saved) != 2 {
 		t.Fatalf("only Payment should start: running=%+v saved=%d", app.Terminals, len(app.Saved))
 	}
-	if app.Terminals[0].Worktree == nil || app.Terminals[0].Worktree.Path != filepath.Join(root, workspace.WorktreesDir, "app", "payment") {
+	if app.Terminals[0].Worktree == nil || app.Terminals[0].Worktree.Path != filepath.Join(root, workspace.WorktreesDir, "app", "feature-payment") {
 		t.Errorf("Payment should reuse its worktree: %+v", app.Terminals[0].Worktree)
 	}
 	if list, _ := m.ws.Worktrees(app); len(list) != 2 {
@@ -155,14 +147,14 @@ func TestManagerIsScopedToOneProject(t *testing.T) {
 	m = press(m, "enter", "alt+n", "enter", "esc") // backend: 2
 	m = press(m, "j", "enter", "esc")              // ecommerce: 1
 	m = press(m, "k", "m")
-	if v := m.View(); !strings.Contains(v, "Manage terminals · backend") || !strings.Contains(v, "1 shell") || !strings.Contains(v, "2 shell") || strings.Contains(v, "Manage terminals · ecommerce") {
+	if v := m.View(); m.panel.project != m.ws.Projects[0] || !strings.Contains(v, "Terminal 1") || !strings.Contains(v, "Terminal 2") {
 		t.Errorf("backend manager wrong:\n%s", v)
 	}
 	if len(m.panel.rows) != 2 {
 		t.Errorf("backend has 2 rows, got %d", len(m.panel.rows))
 	}
 	m = press(m, "esc", "j", "m")
-	if v := m.View(); !strings.Contains(v, "Manage terminals · ecommerce") || len(m.panel.rows) != 1 {
+	if v := m.View(); m.panel.project != m.ws.Projects[1] || len(m.panel.rows) != 1 || strings.Contains(v, "Terminal 2") {
 		t.Errorf("ecommerce manager wrong (%d rows):\n%s", len(m.panel.rows), v)
 	}
 }
@@ -211,24 +203,30 @@ func TestManagerDeleteIsSeparateFromHide(t *testing.T) {
 	login := p.Terminals[1]
 	wtPath := login.Worktree.Path
 	m = press(m, "esc", "m", "j", "d")
-	if !m.panel.confirm || !strings.Contains(m.View(), "Permanently delete terminal \"Login\"") || !strings.Contains(m.View(), "worktree is kept") {
-		t.Fatalf("d should ask first:\n%s", m.View())
+	if !m.panel.confirm || !strings.Contains(m.View(), "Delete Terminal 2 and its worktree \"develop\"") || !strings.Contains(m.View(), "worktree is clean") {
+		t.Fatalf("d should ask first and say the worktree goes too:\n%s", m.View())
 	}
 	m = press(m, "n") // anything but y cancels
 	if m.panel.confirm || (*spawned)[1].closed || len(p.Terminals) != 3 {
 		t.Fatal("cancel must change nothing")
 	}
+	if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
+		t.Fatal("cancel must keep the worktree")
+	}
 	m = press(m, "d", "y")
 	if !(*spawned)[1].closed || len(p.Terminals) != 2 || len(p.Saved) != 0 || m.layouts[p].contains(login) {
 		t.Errorf("delete stops the process and forgets the definition: running=%d saved=%d", len(p.Terminals), len(p.Saved))
 	}
-	if _, err := os.Stat(filepath.Join(wtPath, ".git")); err != nil {
-		t.Error("the worktree is kept")
+	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
+		t.Error("the dedicated worktree is removed with the terminal")
 	}
-	if v := m.View(); !strings.Contains(v, "Unused worktrees") || !strings.Contains(v, "login") || strings.Contains(v, "2 Login") {
-		t.Errorf("the worktree now shows as unused, not as a terminal:\n%s", v)
+	if list, _ := m.ws.Worktrees(p); len(list) != 1 || list[0].Path != p.Terminals[1].Worktree.Path {
+		t.Errorf("only Payment's worktree should remain: %+v", list)
 	}
-	if !strings.Contains(m.View(), "deleted terminal \"Login\" (worktree kept)") {
+	if v := m.View(); strings.Contains(v, "Unused worktrees") || len(m.panel.rows) != 2 {
+		t.Errorf("nothing is left behind to list:\n%s", v)
+	}
+	if !strings.Contains(m.View(), "deleted Terminal 2 and its worktree") {
 		t.Errorf("manager should report the deletion:\n%s", m.View())
 	}
 	checkTiling(t, m, p)
@@ -236,19 +234,19 @@ func TestManagerDeleteIsSeparateFromHide(t *testing.T) {
 
 func TestUnusedWorktreeCleanupFromManager(t *testing.T) {
 	m, _, p := repoWithThree(t)
-	wtPath := p.Terminals[1].Worktree.Path
-	m = press(m, "esc", "m", "j", "d", "y") // delete Login for good; its worktree becomes unused
-	if len(m.panel.rows) != 3 || m.panel.rows[2].worktree == nil || m.panel.rows[2].worktree.Path != wtPath {
-		t.Fatalf("expected two terminals then one unused worktree: %+v", m.panel.rows)
+	wtPath := orphanWorktree(t, m, p, "old-login", "feature/old-login")
+	m = press(m, "esc", "m")
+	if len(m.panel.rows) != 4 || m.panel.rows[3].worktree == nil || m.panel.rows[3].worktree.Path != wtPath {
+		t.Fatalf("expected three terminals then one unused worktree: %+v", m.panel.rows)
 	}
-	m = press(m, "j", "j", "enter") // enter on a worktree does nothing
-	if m.panel == nil || len(p.Terminals) != 2 || !strings.Contains(m.View(), "not a terminal") {
+	m = press(m, "j", "j", "j", "enter") // enter on a worktree does nothing
+	if m.panel == nil || len(p.Terminals) != 3 || !strings.Contains(m.View(), "not a terminal") {
 		t.Errorf("enter on an unused worktree must not open anything:\n%s", m.View())
 	}
 	if err := os.WriteFile(filepath.Join(wtPath, "wip.txt"), []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = press(m, "esc", "m", "j", "j")
+	m = press(m, "esc", "m", "j", "j", "j")
 	if !strings.Contains(m.View(), "dirty") {
 		t.Errorf("dirty worktree should be flagged:\n%s", m.View())
 	}
@@ -264,11 +262,11 @@ func TestUnusedWorktreeCleanupFromManager(t *testing.T) {
 	if _, err := os.Stat(wtPath); !os.IsNotExist(err) {
 		t.Error("confirmed removal deletes the worktree")
 	}
-	if len(m.panel.rows) != 2 || strings.Contains(m.View(), "Unused worktrees") {
+	if len(m.panel.rows) != 3 || strings.Contains(m.View(), "Unused worktrees") {
 		t.Errorf("unused section disappears when empty:\n%s", m.View())
 	}
 	branches, _, _ := m.ws.Branches(p)
-	if !strings.Contains(strings.Join(branches, ","), "develop") {
+	if !strings.Contains(strings.Join(branches, ","), "feature/old-login") {
 		t.Error("the branch survives")
 	}
 }

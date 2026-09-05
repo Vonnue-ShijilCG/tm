@@ -63,8 +63,10 @@ type Model struct {
 	zoom bool // render only the focused terminal at full size; the layout tree is untouched
 
 	deleting     *workspace.Terminal          // alt+delete pressed: waiting for y to delete this terminal for good
+	deletePrompt string                       // the question shown while deleting is set
 	layouts      map[*workspace.Project]*pane // visible panes per project; nil root = none (running terminals not in the tree are hidden)
 	allVisible   map[*workspace.Project]*pane // last tree that showed every running terminal, so a hidden pane can return to its exact place
+	branches     *branchLookup                // checked-out branch per directory, for pane headers and the manager
 	pendingSplit splitDir                     // where the form's new terminal goes; 0 = auto
 
 	width, height int
@@ -73,7 +75,7 @@ type Model struct {
 // New builds a Model for the given workspace root and its projects, and
 // restores saved terminal definitions from the workspace state file.
 func New(root string, projects []project.Project) Model {
-	m := Model{root: root, ws: workspace.New(root, projects, spawnShell), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}}
+	m := Model{root: root, ws: workspace.New(root, projects, spawnShell), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}, branches: newBranchLookup()}
 	if err := m.ws.Restore(); err != nil {
 		m.notice = "could not read saved state: " + err.Error()
 	}
@@ -194,6 +196,8 @@ func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace
 		m.persist()
 	case key.Matches(msg, keys.NewTerm):
 		m.openForm(p, 0, focusMain)
+	case key.Matches(msg, keys.ManageTerm):
+		m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get) // p is the focused terminal's project; focus is kept for esc
 	case key.Matches(msg, keys.PaneSide):
 		m.openForm(p, splitSide, focusMain)
 	case key.Matches(msg, keys.PaneStack):
@@ -221,7 +225,7 @@ func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace
 	case key.Matches(msg, keys.HideTerm):
 		m.hide(p, t) // the process keeps running; the manager (m) shows it again
 	case key.Matches(msg, keys.DeleteTerm):
-		m.deleting = t // destructive: ask first
+		m.deleting, m.deletePrompt = t, deletionPrompt(m.ws, p, t.Definition(), t) // destructive: ask first
 	default:
 		forwardKey(t.Session, msg)
 	}
@@ -229,7 +233,7 @@ func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace
 }
 
 // confirmDelete handles the key after alt+delete: y deletes the terminal's
-// definition for good (its worktree is kept), anything else cancels.
+// definition for good, with the dedicated worktree it owned; anything else cancels.
 func (m Model) confirmDelete(msg tea.KeyMsg, p *workspace.Project) (tea.Model, tea.Cmd) {
 	t := m.deleting
 	m.deleting = nil
@@ -240,22 +244,24 @@ func (m Model) confirmDelete(msg tea.KeyMsg, p *workspace.Project) (tea.Model, t
 	return m, nil
 }
 
-// deleteTerminal is the one destructive operation: the process is stopped,
-// the definition forgotten, the pane removed. The worktree is left alone.
+// deleteTerminal is the one destructive operation on a running terminal,
+// shared by alt+delete and the manager's d: the process is stopped, the
+// definition forgotten, the pane removed, and the dedicated worktree the
+// terminal owned removed with it (see Workspace.DeleteTerminal). The
+// project checkout is never touched.
 func (m *Model) deleteTerminal(p *workspace.Project, t *workspace.Terminal) {
-	if _, gone := m.ws.Delete(t.ID); gone == nil {
+	if _, found := m.ws.Find(t.ID); found == nil {
 		return
 	}
+	def := t.Definition()
 	_ = t.Session.Close() // its exit message finds no terminal and is ignored
+	note := m.ws.DeleteTerminal(p, def, t)
 	m.dropPane(p, t)
 	m.refocus(p)
 	m.applyLayout(p)
 	m.settleFocus()
 	m.persist()
-	m.notice = fmt.Sprintf("deleted terminal %q", displayNameOf(t))
-	if t.Worktree != nil {
-		m.notice += " (worktree kept)"
-	}
+	m.notice = deletionNotice(def, t, note)
 }
 
 // hide takes t out of p's visible layout and nothing else: the process,
@@ -395,13 +401,6 @@ func selectTerminal(p *workspace.Project, t *workspace.Terminal) {
 			p.Select(i)
 		}
 	}
-}
-
-func displayNameOf(t *workspace.Terminal) string {
-	if t.Name == "" {
-		return fmt.Sprintf("terminal %d", t.Num)
-	}
-	return t.Name
 }
 
 // focusNeighbor moves focus to the visible pane next to t in direction d.
@@ -577,7 +576,7 @@ func (m Model) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Manage):
 		if last >= 0 {
 			p := m.ws.Projects[m.cursor]
-			m.panel = newManager(m.ws, p, m.layouts[p])
+			m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get)
 		}
 	case key.Matches(msg, keys.Help):
 		m.help = true
@@ -1061,35 +1060,35 @@ func (m Model) viewMain() string {
 func (m Model) viewPanes(p *workspace.Project, active *workspace.Terminal) string {
 	area := m.mainArea()
 	if m.zoom {
-		return m.renderLeaf(active, area, m.focus == focusMain)
+		return m.renderLeaf(p, active, area, m.focus == focusMain)
 	}
-	return m.renderPane(m.layouts[p], area, active)
+	return m.renderPane(p, m.layouts[p], area, active)
 }
 
-func (m Model) renderPane(n *pane, r rect, active *workspace.Terminal) string {
+func (m Model) renderPane(p *workspace.Project, n *pane, r rect, active *workspace.Terminal) string {
 	if n == nil {
 		return ""
 	}
 	if n.isLeaf() {
-		return m.renderLeaf(n.term, r, n.term == active && m.focus == focusMain)
+		return m.renderLeaf(p, n.term, r, n.term == active && m.focus == focusMain)
 	}
 	if n.dir == splitSide {
 		wa := splitSize(r.w, n.ratio, minPaneCols)
-		left := m.renderPane(n.a, rect{r.x, r.y, wa, r.h}, active)
-		right := m.renderPane(n.b, rect{r.x + wa + 1, r.y, r.w - wa - 1, r.h}, active)
+		left := m.renderPane(p, n.a, rect{r.x, r.y, wa, r.h}, active)
+		right := m.renderPane(p, n.b, rect{r.x + wa + 1, r.y, r.w - wa - 1, r.h}, active)
 		divider := hintStyle.Render(strings.TrimRight(strings.Repeat("│\n", r.h), "\n"))
 		return lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
 	}
 	ha := splitSize(r.h, n.ratio, minPaneRows)
-	top := m.renderPane(n.a, rect{r.x, r.y, r.w, ha}, active)
-	bottom := m.renderPane(n.b, rect{r.x, r.y + ha + 1, r.w, r.h - ha - 1}, active)
+	top := m.renderPane(p, n.a, rect{r.x, r.y, r.w, ha}, active)
+	bottom := m.renderPane(p, n.b, rect{r.x, r.y + ha + 1, r.w, r.h - ha - 1}, active)
 	divider := hintStyle.Render(strings.Repeat("─", r.w))
 	return lipgloss.JoinVertical(lipgloss.Left, top, divider, bottom)
 }
 
 // renderLeaf draws one terminal into exactly r.w x r.h cells.
-func (m Model) renderLeaf(t *workspace.Terminal, r rect, focused bool) string {
-	header := headerStyle(focused).Render(ansi.Truncate(" "+paneTitle(t)+" ", r.w, "…"))
+func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, focused bool) string {
+	header := headerStyle(focused).Render(ansi.Truncate(" "+m.paneTitle(p, t)+" ", r.w, "…"))
 	lines := []string{header}
 	for i, line := range strings.Split(t.Session.Render(focused), "\n") {
 		if i >= r.h-paneHeaderHeight {
@@ -1109,28 +1108,38 @@ func headerStyle(focused bool) lipgloss.Style {
 	return hintStyle
 }
 
-// paneTitle names a pane: number, name (or program title), and branch.
-func paneTitle(t *workspace.Terminal) string {
-	return fmt.Sprintf("%d %s", t.Num, terminalLabel(t))
+// paneTitle is the terminal's identity as shown everywhere: `Terminal 2 ·
+// ⎇ feature/login`. The branch is the one checked out where the terminal
+// runs; ⎇ marks a terminal with its own dedicated worktree. Whether the
+// checkout is a worktree is otherwise not the user's concern, and custom
+// names are not part of the identity.
+func (m Model) paneTitle(p *workspace.Project, t *workspace.Terminal) string {
+	return identity(fmt.Sprintf("Terminal %d", t.Num), m.branches.get(t.Dir(p)), t.Worktree != nil)
 }
 
-const maxLabelWidth = 18
+// identity joins a terminal's label and its Git context: `label · ⎇ branch`,
+// `label · branch`, or just label when there is no Git context.
+func identity(label, branch string, worktree bool) string {
+	if branch == "" {
+		return label
+	}
+	if worktree {
+		return label + " · " + worktreeMark + branch
+	}
+	return label + " · " + branch
+}
 
-// terminalLabel is the user's name for the terminal, else the title its
-// program set, else "shell"; worktree terminals also show their branch.
-func terminalLabel(t *workspace.Terminal) string {
-	label := t.Name
-	if label == "" {
-		label = t.Session.Title()
+// worktreeMark is the one visible sign that a terminal has a dedicated
+// worktree.
+const worktreeMark = "⎇ "
+
+// programOf is what runs in the terminal: the title its program set, else
+// "shell".
+func programOf(t *workspace.Terminal) string {
+	if title := t.Session.Title(); title != "" {
+		return title
 	}
-	if label == "" {
-		label = "shell"
-	}
-	label = ansi.Truncate(label, maxLabelWidth, "…")
-	if t.Worktree != nil {
-		label += " [" + t.Worktree.Branch + "]"
-	}
-	return label
+	return "shell"
 }
 
 func (m Model) viewStatus() string {
@@ -1145,15 +1154,11 @@ func (m Model) viewStatus() string {
 		bindings = keys.formHelp()
 	case m.deleting != nil:
 		bindings = []key.Binding{keys.Confirm, keys.Cancel}
-		note := "removes the saved definition"
-		if m.deleting.Worktree != nil {
-			note = "worktree kept"
-		}
-		prompt = fmt.Sprintf("Permanently delete terminal %q? (%s)", displayNameOf(m.deleting), note)
+		prompt = m.deletePrompt
 	case m.focus == focusMain:
 		bindings = keys.terminalHelp()
 		if p, t := m.activeTerminal(); t != nil {
-			info = terminalInfo(p, t)
+			info = p.Name + " · " + m.paneTitle(p, t)
 			if m.zoom {
 				info += " · zoom"
 			}
@@ -1161,7 +1166,17 @@ func (m Model) viewStatus() string {
 	default:
 		bindings = keys.sidebarHelp()
 	}
-	parts := make([]string, 0, len(bindings)+2)
+	hints := make([]string, 0, len(bindings))
+	for _, b := range bindings {
+		h := b.Help()
+		hints = append(hints, fmt.Sprintf("%s %s", h.Key, hintStyle.Render(h.Desc)))
+	}
+	width := max(m.width-statusStyle.GetHorizontalPadding(), 1)
+	if prompt != "" { // a question must never push its own answer keys off the line
+		room := width - ansi.StringWidth(strings.Join(hints, "  •  ")) - 5
+		prompt = ansi.Truncate(prompt, max(room, 12), "…")
+	}
+	parts := make([]string, 0, len(hints)+3)
 	if m.notice != "" {
 		parts = append(parts, errorStyle.Render(m.notice))
 	}
@@ -1171,23 +1186,7 @@ func (m Model) viewStatus() string {
 	if info != "" {
 		parts = append(parts, hintStyle.Render(info))
 	}
-	for _, b := range bindings {
-		h := b.Help()
-		parts = append(parts, fmt.Sprintf("%s %s", h.Key, hintStyle.Render(h.Desc)))
-	}
-	line := ansi.Truncate(strings.Join(parts, "  •  "), max(m.width-statusStyle.GetHorizontalPadding(), 1), "…")
+	parts = append(parts, hints...)
+	line := ansi.Truncate(strings.Join(parts, "  •  "), width, "…")
 	return statusStyle.Width(m.width).Render(line)
-}
-
-// terminalInfo describes the focused terminal: project, number, name and
-// whether it runs in a worktree.
-func terminalInfo(p *workspace.Project, t *workspace.Terminal) string {
-	info := fmt.Sprintf("%s · terminal %d", p.Name, t.Num)
-	if t.Name != "" {
-		info += " " + t.Name
-	}
-	if t.Worktree != nil {
-		info += " · worktree " + t.Worktree.Branch
-	}
-	return info
 }

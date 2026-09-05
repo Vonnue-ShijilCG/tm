@@ -62,9 +62,9 @@ func TestClosingAnyTerminalIsRememberedAndDeleteForgets(t *testing.T) {
 	}
 
 	login, _ := ws.CreateTerminal(app, Options{Name: "Login", Branch: "develop", Worktree: true}, 80, 24)
-	p, gone := ws.Delete(login.ID) // alt+delete: definition forgotten, worktree kept
+	p, gone := ws.detach(login.ID) // the detach half of DeleteTerminal: forgotten, nothing else touched
 	if p != app || gone != login || len(app.Terminals) != 0 {
-		t.Fatalf("Delete should detach the terminal: p=%v gone=%v terminals=%d", p, gone, len(app.Terminals))
+		t.Fatalf("detach should remove the terminal: p=%v gone=%v terminals=%d", p, gone, len(app.Terminals))
 	}
 	for _, s := range app.Saved {
 		if s.Name == "Login" {
@@ -72,13 +72,13 @@ func TestClosingAnyTerminalIsRememberedAndDeleteForgets(t *testing.T) {
 		}
 	}
 	if (*spawned)[1].closed {
-		t.Error("Delete itself must not close the session; the UI does that")
+		t.Error("detach itself must not close the session; the UI does that")
 	}
 	if list, _ := ws.Worktrees(app); len(list) != 1 || list[0].Name != "login" {
-		t.Errorf("worktree must survive deleting its terminal, got %+v", list)
+		t.Errorf("detach alone must not touch the worktree, got %+v", list)
 	}
-	if _, none := ws.Delete(999); none != nil {
-		t.Error("Delete of an unknown id should return nil")
+	if _, none := ws.detach(999); none != nil {
+		t.Error("detach of an unknown id should return nil")
 	}
 }
 
@@ -194,9 +194,9 @@ func TestOpenSavedReusesWorktreeAndPreventsDuplicates(t *testing.T) {
 	if _, err := os.Stat(missing); !os.IsNotExist(err) {
 		t.Error("open must not create the missing worktree")
 	}
-	ws.ForgetSaved(app, find("Missing"))
+	ws.DeleteTerminal(app, find("Missing"), nil) // nothing on disk or in git to remove: only the definition goes
 	if len(app.Saved) != 0 {
-		t.Errorf("ForgetSaved should drop the saved definition, got %+v", app.Saved)
+		t.Errorf("DeleteTerminal should drop the saved definition, got %+v", app.Saved)
 	}
 }
 
@@ -301,9 +301,9 @@ func TestUnnamedPlainTerminalsArePersistedIndividually(t *testing.T) {
 	if len(ws2.Projects[0].Saved) != 2 {
 		t.Errorf("both shells should be restorable, got %+v", ws2.Projects[0].Saved)
 	}
-	ws2.ForgetSaved(ws2.Projects[0], SavedTerminal{})
+	ws2.DeleteTerminal(ws2.Projects[0], SavedTerminal{}, nil)
 	if len(ws2.Projects[0].Saved) != 1 {
-		t.Errorf("ForgetSaved on an unnamed shell should drop exactly one, got %+v", ws2.Projects[0].Saved)
+		t.Errorf("deleting an unnamed saved shell should drop exactly one, got %+v", ws2.Projects[0].Saved)
 	}
 }
 

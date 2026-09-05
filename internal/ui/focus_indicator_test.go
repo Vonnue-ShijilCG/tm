@@ -20,12 +20,13 @@ func TestPaneHeadersAreTheOnlyTerminalIndicators(t *testing.T) {
 			m = press(m, "alt+left")
 		}
 		view := m.View()
-		for _, header := range []string{" 1 t1 ", " 2 t2 "} {
-			if strings.Count(view, header) != 1 {
-				t.Errorf("each visible terminal appears exactly once, as its pane header; %q found %d times:\n%s", header, strings.Count(view, header), view)
+		panes := m.viewPanes(p, p.ActiveTerminal())
+		for _, header := range []string{" Terminal 1 ", " Terminal 2 "} {
+			if strings.Count(panes, header) != 1 {
+				t.Errorf("each visible terminal appears exactly once in the main view, as its pane header; %q found %d times:\n%s", header, strings.Count(panes, header), panes)
 			}
 		}
-		if want := paneTitle(p.ActiveTerminal()); !strings.Contains(view, want) {
+		if want := m.paneTitle(p, p.ActiveTerminal()); !strings.Contains(view, want) {
 			t.Errorf("focused pane header %q missing from the view", want)
 		}
 	}

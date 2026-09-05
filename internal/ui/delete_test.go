@@ -2,7 +2,6 @@ package ui
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -29,9 +28,7 @@ func savedNames(root string) []string {
 
 func TestAltXHidesWithoutStoppingAndEnterShowsItAgain(t *testing.T) {
 	m, spawned, root := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "API")
-	m = press(m, "tab", "tab", " ", "enter")
+	m = makeTerminal(t, m, "n", "API", "")
 	p := m.ws.Projects[0]
 	api := p.Terminals[0]
 
@@ -52,7 +49,7 @@ func TestAltXHidesWithoutStoppingAndEnterShowsItAgain(t *testing.T) {
 		t.Fatalf("definition must stay in the state file, got %v", got)
 	}
 	m = press(m, "m")
-	if v := m.View(); !strings.Contains(v, "1 API") || !strings.Contains(v, "hidden") || strings.Contains(v, "saved") {
+	if v := m.View(); !strings.Contains(v, "○ Terminal 1 · main") || !strings.Contains(v, "hidden") || strings.Contains(v, "saved") {
 		t.Errorf("manager should list API as hidden:\n%s", v)
 	}
 	m = press(m, "esc", "enter") // Enter on the project shows its terminal again
@@ -63,9 +60,7 @@ func TestAltXHidesWithoutStoppingAndEnterShowsItAgain(t *testing.T) {
 
 func TestShellExitingBehavesLikeAltX(t *testing.T) {
 	m, spawned, root := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "Dev")
-	m = press(m, "tab", "tab", " ", "enter")
+	m = makeTerminal(t, m, "n", "Dev", "")
 	m = exit(m, m.ws.Projects[0].Terminals[0].ID) // the user typed exit
 	if got := savedNames(root); len(got) != 1 || got[0] != "Dev" {
 		t.Fatalf("an exited shell must stay restorable, state = %v", got)
@@ -78,11 +73,7 @@ func TestShellExitingBehavesLikeAltX(t *testing.T) {
 
 func TestAltDeleteAsksThenForgetsForGood(t *testing.T) {
 	m, spawned, root := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "Login")
-	m = press(m, "tab")
-	m = typeText(m, "develop")
-	m = press(m, "enter")
+	m = makeTerminal(t, m, "n", "Login", "develop")
 	app := m.ws.Projects[0]
 	wt := app.Terminals[0].Worktree.Path
 
@@ -91,7 +82,7 @@ func TestAltDeleteAsksThenForgetsForGood(t *testing.T) {
 		t.Fatal("alt+delete must ask before doing anything")
 	}
 	view := m.View()
-	for _, want := range []string{`Permanently delete terminal "Login"?`, "worktree kept", "y confirm"} {
+	for _, want := range []string{`Delete Terminal 1 and its worktree "develop"?`, "The worktree is clean", "y confirm"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("confirmation missing %q:\n%s", want, view)
 		}
@@ -104,10 +95,13 @@ func TestAltDeleteAsksThenForgetsForGood(t *testing.T) {
 	if len(app.Saved) != 0 || len(savedNames(root)) != 0 {
 		t.Errorf("definition must be gone from memory and disk: saved=%+v state=%v", app.Saved, savedNames(root))
 	}
-	if _, err := os.Stat(filepath.Join(wt, ".git")); err != nil {
-		t.Error("worktree must be kept")
+	if _, err := os.Stat(wt); !os.IsNotExist(err) {
+		t.Error("the dedicated worktree is removed with its terminal")
 	}
-	if !strings.Contains(m.notice, `deleted terminal "Login"`) || !strings.Contains(m.notice, "worktree kept") {
+	if list, _ := m.ws.Worktrees(app); len(list) != 0 {
+		t.Errorf("git should no longer list the worktree: %+v", list)
+	}
+	if !strings.Contains(m.notice, `deleted Terminal 1 and its worktree`) {
 		t.Errorf("notice = %q", m.notice)
 	}
 	if m.focus != focusSidebar {
@@ -118,16 +112,14 @@ func TestAltDeleteAsksThenForgetsForGood(t *testing.T) {
 		t.Errorf("deleted terminal must not return; got %+v", app.Terminals)
 	}
 	m = press(m, "esc", "m")
-	if strings.Contains(m.View(), "Login") || !strings.Contains(m.View(), "login") { // the worktree row remains, the saved terminal does not
-		t.Errorf("panel should list the worktree but no saved Login terminal:\n%s", m.View())
+	if v := m.View(); strings.Contains(v, "Login") || strings.Contains(v, "Unused worktrees") { // neither the terminal nor an orphan remains
+		t.Errorf("manager should list neither a Login terminal nor an unused worktree:\n%s", v)
 	}
 }
 
 func TestAltDeleteCancelChangesNothing(t *testing.T) {
 	m, spawned, root := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "Keep")
-	m = press(m, "tab", "tab", " ", "enter")
+	m = makeTerminal(t, m, "n", "Keep", "")
 	app := m.ws.Projects[0]
 	before, _ := state.Load(root)
 	for _, cancel := range []string{"esc", "n", "z"} {
@@ -154,9 +146,7 @@ func threePanes(t *testing.T) (Model, *[]*fakeSession, string) {
 	t.Helper()
 	m, spawned, root := gitModel(t)
 	for i, step := range []struct{ key, name string }{{"n", "Login"}, {"alt+v", "Payment"}, {"alt+h", "Dev"}} {
-		m = press(m, step.key)
-		m = typeText(m, step.name)
-		m = press(m, "tab", "tab", " ", "enter")
+		m = makeTerminal(t, m, step.key, step.name, "")
 		if len(*spawned) != i+1 {
 			t.Fatalf("setup step %d spawned %d", i, len(*spawned))
 		}
@@ -209,9 +199,7 @@ func TestAltDeleteRepairsLayoutAndFocus(t *testing.T) {
 func TestAltDeleteOfSavedOnlyDefinitionViaPanelStillWorks(t *testing.T) {
 	// A closed (saved) terminal cannot receive alt+delete; the panel's d forgets it.
 	m, _, root := gitModel(t)
-	m = press(m, "n")
-	m = typeText(m, "Old")
-	m = press(m, "tab", "tab", " ", "enter")
+	m = makeTerminal(t, m, "n", "Old", "")
 	m = exit(m, m.ws.Projects[0].Terminals[0].ID) // the shell exits: Old is saved, not running
 	m = press(m, "m", "d", "y")
 	if len(savedNames(root)) != 0 || len(m.ws.Projects[0].Saved) != 0 {
