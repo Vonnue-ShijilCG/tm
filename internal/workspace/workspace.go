@@ -1,0 +1,323 @@
+// Package workspace holds the runtime tree of the application:
+//
+//	Workspace
+//	├── Project A
+//	│   ├── Terminal A1
+//	│   └── Terminal A2
+//	└── Project B
+//	    └── Terminal B1
+//
+// It only depends on the discovered project list and on the Session
+// interface, so terminal backends and the UI can change independently.
+package workspace
+
+import (
+	"fmt"
+
+	uv "github.com/charmbracelet/ultraviolet"
+
+	"github.com/Vonnue-ShijilCG/tm/internal/config"
+	"github.com/Vonnue-ShijilCG/tm/internal/git"
+	"github.com/Vonnue-ShijilCG/tm/internal/project"
+)
+
+// Session is what the workspace and UI need from a running terminal.
+// *terminal.Session satisfies it; tests use fakes.
+type Session interface {
+	SendKey(uv.KeyPressEvent)
+	SendText(string)
+	Resize(cols, rows int)
+	Render(showCursor bool) string
+	Title() string
+	Output() <-chan struct{}
+	Done() <-chan struct{}
+	Err() error
+	Close() error
+}
+
+// Spawner starts a new session in dir with the given screen size.
+type Spawner func(dir string, cols, rows int) (Session, error)
+
+// Terminal is one independent process attached to a project. It runs in
+// the project checkout unless a Worktree was created for it.
+type Terminal struct {
+	ID       int           // unique across the workspace; used to route messages
+	Num      int           // 1-based, stable for the life of the project; shown in the pane header
+	Name     string        // optional label chosen by the user
+	Worktree *git.Worktree // nil when the terminal runs in the project checkout
+	Session  Session
+}
+
+// Dir is the terminal's working directory.
+func (t *Terminal) Dir(p *Project) string {
+	if t.Worktree != nil {
+		return t.Worktree.Path
+	}
+	return p.Path
+}
+
+// Options describes how to create a terminal. The zero value is a plain
+// shell in the project directory.
+type Options struct {
+	Name     string // display name; also the worktree directory name
+	Branch   string // branch to check out when Worktree is set
+	Worktree bool   // create (or check out) Branch in its own worktree
+}
+
+// Project is a discovered repository together with its terminals.
+type Project struct {
+	project.Project
+	Terminals []*Terminal
+	Saved     []SavedTerminal // remembered definitions that are not running
+	Layout    *Layout         // last known arrangement (live, or restored from the state file)
+	Focus     string          // key of the focused terminal in Layout, "" if unknown
+	Notice    string          // shown when no terminal is running, e.g. the last exit status
+
+	active  int // index into Terminals, -1 when empty
+	nextNum int
+}
+
+// ActiveTerminal returns the focused terminal of the project, or nil.
+func (p *Project) ActiveTerminal() *Terminal {
+	if p.active < 0 || p.active >= len(p.Terminals) {
+		return nil
+	}
+	return p.Terminals[p.active]
+}
+
+// ActiveIndex returns the index of the active terminal, or -1.
+func (p *Project) ActiveIndex() int {
+	if p.ActiveTerminal() == nil {
+		return -1
+	}
+	return p.active
+}
+
+// Select makes the terminal at index i active. It reports whether i was valid.
+func (p *Project) Select(i int) bool {
+	if i < 0 || i >= len(p.Terminals) {
+		return false
+	}
+	p.active = i
+	return true
+}
+
+// Limit is the per-project cap on running terminals. It is read through a
+// LimitSource every time a terminal is about to be created, so a changed
+// configuration applies to the next attempt without restarting.
+type Limit struct {
+	Max    int    // running terminals allowed per project
+	Source string // where the setting lives, for messages
+	Notice string // problem found while reading the setting, "" when fine
+}
+
+// LimitSource returns the current limit.
+type LimitSource func() Limit
+
+// ConfigLimit is the default LimitSource: max_terminals from the user's
+// configuration file, falling back to the default when it is missing or
+// invalid (the problem is carried in Notice).
+func ConfigLimit() Limit {
+	path := config.Path()
+	c, err := config.Load(path)
+	l := Limit{Max: c.MaxTerminals, Source: config.Display(path)}
+	if err != nil {
+		l.Notice = err.Error()
+	}
+	return l
+}
+
+// LimitError is returned when a project already runs as many terminals as
+// the limit allows. Nothing is created, closed or forgotten.
+type LimitError struct {
+	Limit
+	Running int
+}
+
+func (e *LimitError) Error() string {
+	return fmt.Sprintf("maximum terminals reached (%d): change max_terminals in %s", e.Max, e.Source)
+}
+
+// Workspace is the root of the tree. Root is the directory the projects
+// were discovered in; worktrees live under it (see WorktreesDir).
+type Workspace struct {
+	Root     string
+	Projects []*Project
+	Limits   LimitSource // per-project terminal limit; ConfigLimit unless replaced
+
+	spawn       Spawner
+	nextID      int
+	limitNotice string
+}
+
+// New wraps discovered projects; each starts with no terminals.
+func New(root string, projects []project.Project, spawn Spawner) *Workspace {
+	ws := &Workspace{Root: root, spawn: spawn, Limits: ConfigLimit}
+	for _, p := range projects {
+		ws.Projects = append(ws.Projects, &Project{Project: p, active: -1})
+	}
+	return ws
+}
+
+// NewTerminal spawns a plain shell in p's directory. See CreateTerminal.
+func (ws *Workspace) NewTerminal(p *Project, cols, rows int) (*Terminal, error) {
+	return ws.CreateTerminal(p, Options{}, cols, rows)
+}
+
+// CreateTerminal spawns an independent session for p, appends it to the
+// project and makes it active. With opts.Worktree the shell starts inside a
+// worktree for opts.Branch; the worktree is kept when the terminal closes.
+func (ws *Workspace) CreateTerminal(p *Project, opts Options, cols, rows int) (*Terminal, error) {
+	if err := ws.CanCreateTerminal(p); err != nil {
+		return nil, err // before touching git: a refused terminal leaves no worktree behind
+	}
+	var wt *git.Worktree
+	if opts.Worktree {
+		var err error
+		if wt, err = ws.addWorktree(p, opts); err != nil {
+			return nil, err
+		}
+	}
+	return ws.startTerminal(p, opts.Name, wt, cols, rows)
+}
+
+// CanCreateTerminal is the single rule every creation path goes through:
+// p may start another terminal while it runs fewer than the configured
+// maximum. Saved definitions do not count; only running terminals do. The
+// error, a *LimitError, says how to change the limit.
+func (ws *Workspace) CanCreateTerminal(p *Project) error {
+	l := ws.limit()
+	if len(p.Terminals) >= l.Max {
+		return &LimitError{Limit: l, Running: len(p.Terminals)}
+	}
+	return nil
+}
+
+// limit reads the current limit and remembers any problem with it.
+func (ws *Workspace) limit() Limit {
+	var l Limit
+	if ws.Limits != nil {
+		l = ws.Limits()
+	}
+	if l.Max < 1 {
+		l.Max = config.DefaultMaxTerminals
+	}
+	if l.Source == "" {
+		l.Source = "the tm config"
+	}
+	ws.limitNotice = l.Notice
+	return l
+}
+
+// LimitNotice reports the problem found the last time the limit was read
+// (an invalid configuration value, for instance), or "".
+func (ws *Workspace) LimitNotice() string { return ws.limitNotice }
+
+// CurrentLimit reads the limit now, e.g. to report a configuration problem
+// at startup.
+func (ws *Workspace) CurrentLimit() Limit { return ws.limit() }
+
+// startTerminal spawns the session and registers the terminal. It enforces
+// the limit as the final guard for every path, including reopening saved
+// definitions.
+func (ws *Workspace) startTerminal(p *Project, name string, wt *git.Worktree, cols, rows int) (*Terminal, error) {
+	if err := ws.CanCreateTerminal(p); err != nil {
+		return nil, err
+	}
+	t := &Terminal{Name: name, Worktree: wt}
+	s, err := ws.spawn(t.Dir(p), cols, rows)
+	if err != nil {
+		return nil, err
+	}
+	ws.nextID++
+	p.nextNum++
+	t.ID, t.Num, t.Session = ws.nextID, p.nextNum, s
+	p.Terminals = append(p.Terminals, t)
+	p.active = len(p.Terminals) - 1
+	p.Notice = ""
+	return t, nil
+}
+
+// Find returns the project and terminal with the given ID, or nils.
+func (ws *Workspace) Find(id int) (*Project, *Terminal) {
+	for _, p := range ws.Projects {
+		for _, t := range p.Terminals {
+			if t.ID == id {
+				return p, t
+			}
+		}
+	}
+	return nil, nil
+}
+
+// Remove detaches the terminal with the given ID from its project once its
+// process has ended, keeping the project's active terminal sensible. It
+// does not close the session. The terminal's definition is remembered so
+// the workspace can recreate it later — a process ending never forgets a
+// terminal. Use Delete to forget one for good.
+func (ws *Workspace) Remove(id int) (*Project, *Terminal) {
+	p, t := ws.detach(id)
+	if t != nil {
+		p.remember(t.saved())
+	}
+	return p, t
+}
+
+// Delete detaches the terminal with the given ID without remembering it, so
+// it will not be restored. The session is not closed here (callers do
+// that) and a worktree the terminal used is left alone: worktrees are
+// removed separately, and only deliberately, from the manager.
+func (ws *Workspace) Delete(id int) (*Project, *Terminal) {
+	return ws.detach(id)
+}
+
+// saved is the terminal's persistent definition.
+func (t *Terminal) saved() SavedTerminal {
+	s := SavedTerminal{Name: t.Name}
+	if t.Worktree != nil {
+		s.Branch, s.Worktree = t.Worktree.Branch, t.Worktree.Path
+	}
+	return s
+}
+
+func (ws *Workspace) detach(id int) (*Project, *Terminal) {
+	p, t := ws.Find(id)
+	if t == nil {
+		return nil, nil
+	}
+	idx := 0
+	for i, cur := range p.Terminals {
+		if cur == t {
+			idx = i
+			break
+		}
+	}
+	p.Terminals = append(p.Terminals[:idx], p.Terminals[idx+1:]...)
+	switch {
+	case len(p.Terminals) == 0:
+		p.active = -1
+	case idx < p.active:
+		p.active--
+	case p.active >= len(p.Terminals):
+		p.active = len(p.Terminals) - 1
+	}
+	return p, t
+}
+
+// ResizeAll propagates a new screen size to every session.
+func (ws *Workspace) ResizeAll(cols, rows int) {
+	for _, p := range ws.Projects {
+		for _, t := range p.Terminals {
+			t.Session.Resize(cols, rows)
+		}
+	}
+}
+
+// CloseAll terminates every session.
+func (ws *Workspace) CloseAll() {
+	for _, p := range ws.Projects {
+		for _, t := range p.Terminals {
+			_ = t.Session.Close()
+		}
+	}
+}

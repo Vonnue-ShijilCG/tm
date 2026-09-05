@@ -1,0 +1,1193 @@
+// Package ui contains the Bubble Tea model for the tm terminal UI.
+package ui
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+
+	"github.com/Vonnue-ShijilCG/tm/internal/project"
+	"github.com/Vonnue-ShijilCG/tm/internal/terminal"
+	"github.com/Vonnue-ShijilCG/tm/internal/workspace"
+)
+
+type focus int
+
+const (
+	focusSidebar focus = iota
+	focusMain
+)
+
+const statusHeight = 1
+
+// spawnShell is the default workspace.Spawner: the user's shell in a PTY.
+func spawnShell(dir string, cols, rows int) (workspace.Session, error) {
+	s, err := terminal.Start(terminal.Config{Command: terminal.DefaultShell(), Dir: dir, Cols: cols, Rows: rows})
+	if err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// Messages produced by the per-terminal watcher command.
+type (
+	terminalOutputMsg struct {
+		id int
+		s  workspace.Session
+	}
+	terminalExitedMsg struct {
+		id  int
+		err error
+	}
+)
+
+// Model is the root Bubble Tea model: the sidebar cursor, the focused pane
+// and the workspace tree of projects and their terminals.
+type Model struct {
+	root string
+	ws   *workspace.Workspace
+
+	cursor   int // highlighted row in the sidebar
+	selected int // project whose terminals fill the main pane, -1 when none
+	focus    focus
+	form     *newTermForm // open "new terminal" dialog, nil otherwise
+	panel    *manager     // open terminal manager, nil otherwise
+	help     bool         // help screen shown over everything
+	notice   string       // one-line message in the status bar (state file problems)
+	quitting bool         // set once quit began; later exit messages must not rewrite state
+
+	zoom bool // render only the focused terminal at full size; the layout tree is untouched
+
+	deleting     *workspace.Terminal          // alt+delete pressed: waiting for y to delete this terminal for good
+	layouts      map[*workspace.Project]*pane // visible panes per project; nil root = none (running terminals not in the tree are hidden)
+	allVisible   map[*workspace.Project]*pane // last tree that showed every running terminal, so a hidden pane can return to its exact place
+	pendingSplit splitDir                     // where the form's new terminal goes; 0 = auto
+
+	width, height int
+}
+
+// New builds a Model for the given workspace root and its projects, and
+// restores saved terminal definitions from the workspace state file.
+func New(root string, projects []project.Project) Model {
+	m := Model{root: root, ws: workspace.New(root, projects, spawnShell), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}}
+	if err := m.ws.Restore(); err != nil {
+		m.notice = "could not read saved state: " + err.Error()
+	}
+	if l := m.ws.CurrentLimit(); l.Notice != "" { // an invalid max_terminals is reported at startup and again on each use
+		m.notice = l.Notice
+	}
+	return m
+}
+
+// noteLimit shows the problem found the last time the terminal limit was
+// read, if any, unless the action just performed has something more
+// pressing to say (a restore summary, a refusal). Called after actions that
+// read the limit, since a successful persist clears the notice.
+func (m *Model) noteLimit() {
+	if n := m.ws.LimitNotice(); n != "" && m.notice == "" {
+		m.notice = n
+	}
+}
+
+// openForm starts the new-terminal dialog for p unless p already runs as
+// many terminals as the configuration allows; then the status bar says so
+// and nothing opens. dir is where the terminal goes (0 = automatic).
+func (m *Model) openForm(p *workspace.Project, dir splitDir, back focus) {
+	if err := m.ws.CanCreateTerminal(p); err != nil {
+		m.notice = err.Error()
+		return
+	}
+	m.noteLimit()
+	m.pendingSplit, m.form = dir, newForm(m.ws, p, back)
+}
+
+// persist saves the workspace configuration; failures are shown, not fatal.
+// Projects with running terminals record what is on screen first (see
+// Workspace.RecordLayout for when the saved layout is kept instead);
+// projects without keep whatever arrangement was restored from the file.
+func (m *Model) persist() {
+	for _, p := range m.ws.Projects {
+		if t := p.ActiveTerminal(); t != nil {
+			m.ws.RecordLayout(p, layoutFromPane(m.layouts[p]), t.Key())
+		}
+	}
+	if err := m.ws.Save(); err != nil {
+		m.notice = "could not save state: " + err.Error()
+		return
+	}
+	m.notice = ""
+}
+
+func (m Model) Init() tea.Cmd { return nil }
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		for _, p := range m.ws.Projects {
+			m.applyLayout(p)
+		}
+
+	case tea.KeyMsg:
+		if m.help {
+			if key.Matches(msg, keys.HelpClose) {
+				m.help = false
+			}
+			return m, nil
+		}
+		if m.panel != nil {
+			return m.updateManager(msg)
+		}
+		if m.form != nil {
+			return m.updateForm(msg)
+		}
+		if p, t := m.activeTerminal(); t != nil && m.focus == focusMain {
+			return m.updateTerminal(msg, p, t)
+		}
+		return m.updateSidebar(msg)
+
+	case terminalOutputMsg:
+		// Re-arm only if this terminal is still registered with that session.
+		if _, t := m.ws.Find(msg.id); t != nil && t.Session == msg.s {
+			return m, watchTerminal(t)
+		}
+
+	case terminalExitedMsg:
+		if m.quitting {
+			return m, nil // sessions closed by quit; the saved state already has them
+		}
+		if p, t := m.ws.Remove(msg.id); t != nil {
+			p.Notice = fmt.Sprintf("terminal %d %s", t.Num, exitNotice(msg.err))
+			m.dropPane(p, t)
+			m.refocus(p)
+			m.applyLayout(p) // the neighbour takes the freed space
+			m.persist()
+		}
+		m.settleFocus()
+		if m.panel != nil {
+			m.panel.reload(m.ws, m.layouts[m.panel.project]) // states may have changed
+		}
+	}
+	return m, nil
+}
+
+// updateTerminal routes keys while a terminal has focus. Only Esc and the
+// Alt shortcuts are handled here; everything else goes to the program.
+func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace.Terminal) (tea.Model, tea.Cmd) {
+	if m.deleting != nil {
+		return m.confirmDelete(msg, p)
+	}
+	switch {
+	case key.Matches(msg, keys.Sidebar):
+		m.focus = focusSidebar
+	case key.Matches(msg, keys.NextTerm):
+		m.cycleVisible(p, 1)
+		m.applyLayout(p) // zoom follows focus
+		m.persist()      // focus is part of the saved layout
+	case key.Matches(msg, keys.PrevTerm):
+		m.cycleVisible(p, -1)
+		m.applyLayout(p)
+		m.persist()
+	case key.Matches(msg, keys.NewTerm):
+		m.openForm(p, 0, focusMain)
+	case key.Matches(msg, keys.PaneSide):
+		m.openForm(p, splitSide, focusMain)
+	case key.Matches(msg, keys.PaneStack):
+		m.openForm(p, splitStack, focusMain)
+	case key.Matches(msg, keys.PaneLeft):
+		m.focusNeighbor(p, t, dirLeft)
+	case key.Matches(msg, keys.PaneRight):
+		m.focusNeighbor(p, t, dirRight)
+	case key.Matches(msg, keys.PaneUp):
+		m.focusNeighbor(p, t, dirUp)
+	case key.Matches(msg, keys.PaneDown):
+		m.focusNeighbor(p, t, dirDown)
+	case key.Matches(msg, keys.PaneGrow):
+		if m.layouts[p].resize(t, resizeStep) {
+			m.applyLayout(p)
+			m.persist()
+		}
+	case key.Matches(msg, keys.PaneShrink):
+		if m.layouts[p].resize(t, -resizeStep) {
+			m.applyLayout(p)
+			m.persist()
+		}
+	case key.Matches(msg, keys.PaneZoom):
+		m.toggleZoom(p)
+	case key.Matches(msg, keys.HideTerm):
+		m.hide(p, t) // the process keeps running; the manager (m) shows it again
+	case key.Matches(msg, keys.DeleteTerm):
+		m.deleting = t // destructive: ask first
+	default:
+		forwardKey(t.Session, msg)
+	}
+	return m, nil
+}
+
+// confirmDelete handles the key after alt+delete: y deletes the terminal's
+// definition for good (its worktree is kept), anything else cancels.
+func (m Model) confirmDelete(msg tea.KeyMsg, p *workspace.Project) (tea.Model, tea.Cmd) {
+	t := m.deleting
+	m.deleting = nil
+	if !key.Matches(msg, keys.Confirm) {
+		return m, nil
+	}
+	m.deleteTerminal(p, t)
+	return m, nil
+}
+
+// deleteTerminal is the one destructive operation: the process is stopped,
+// the definition forgotten, the pane removed. The worktree is left alone.
+func (m *Model) deleteTerminal(p *workspace.Project, t *workspace.Terminal) {
+	if _, gone := m.ws.Delete(t.ID); gone == nil {
+		return
+	}
+	_ = t.Session.Close() // its exit message finds no terminal and is ignored
+	m.dropPane(p, t)
+	m.refocus(p)
+	m.applyLayout(p)
+	m.settleFocus()
+	m.persist()
+	m.notice = fmt.Sprintf("deleted terminal %q", displayNameOf(t))
+	if t.Worktree != nil {
+		m.notice += " (worktree kept)"
+	}
+}
+
+// hide takes t out of p's visible layout and nothing else: the process,
+// the definition and any worktree stay exactly as they are. Focus moves to
+// a visible terminal; with none left the main pane says so and the
+// sidebar takes focus.
+func (m *Model) hide(p *workspace.Project, t *workspace.Terminal) {
+	if root := m.layouts[p]; len(root.leaves()) == len(p.Terminals) {
+		m.allVisible[p] = root.clone() // remember where everything was
+	}
+	m.dropPane(p, t)
+	m.refocus(p)
+	m.applyLayout(p)
+	m.settleFocus()
+	m.persist()
+}
+
+// show makes the running terminal t visible and focused. When the saved
+// layout describes exactly the terminals that would then be visible it is
+// reapplied (a hidden pane returns to its place); otherwise t is placed by
+// the usual rules: a balanced grid grows, a user-shaped layout has its
+// focused pane split.
+func (m *Model) show(p *workspace.Project, t *workspace.Terminal) {
+	root := m.layouts[p]
+	if !root.contains(t) {
+		var want []*workspace.Terminal // in creation order, so same-key shells keep their places
+		for _, cur := range p.Terminals {
+			if cur == t || root.contains(cur) {
+				want = append(want, cur)
+			}
+		}
+		if before := m.allVisible[p]; before != nil && sameTerminals(before.leaves(), want) && before.fits(m.mainArea()) {
+			m.layouts[p] = before.clone() // exactly the arrangement before the hide
+		} else if tree := m.fromSaved(p, want); tree != nil {
+			m.layouts[p] = tree
+		} else {
+			m.place(p, m.visibleActive(p), t, 0)
+		}
+	}
+	selectTerminal(p, t)
+	m.applyLayout(p)
+}
+
+// fromSaved rebuilds the pane tree from the project's saved layout when
+// that layout places exactly the terminals in want; it returns nil
+// otherwise.
+func (m *Model) fromSaved(p *workspace.Project, want []*workspace.Terminal) *pane {
+	if p.Layout == nil || len(p.Layout.Leaves()) != len(want) {
+		return nil
+	}
+	used := map[*workspace.Terminal]bool{}
+	tree := paneFromLayout(p.Layout, want, used)
+	if len(used) != len(want) || len(tree.leaves()) != len(want) || !tree.fits(m.mainArea()) {
+		return nil
+	}
+	return tree
+}
+
+// sameTerminals reports whether a and b hold the same terminals.
+func sameTerminals(a, b []*workspace.Terminal) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := map[*workspace.Terminal]bool{}
+	for _, t := range a {
+		set[t] = true
+	}
+	for _, t := range b {
+		if !set[t] {
+			return false
+		}
+	}
+	return true
+}
+
+// visibleActive is the focused terminal if it is visible, else the first
+// visible one, else nil.
+func (m *Model) visibleActive(p *workspace.Project) *workspace.Terminal {
+	root := m.layouts[p]
+	if t := p.ActiveTerminal(); t != nil && root.contains(t) {
+		return t
+	}
+	if leaves := root.leaves(); len(leaves) > 0 {
+		return leaves[0]
+	}
+	return nil
+}
+
+// refocus keeps the focused terminal visible: when the active terminal is
+// hidden (or gone) focus moves to the next visible terminal in creation
+// order, wrapping around.
+func (m *Model) refocus(p *workspace.Project) {
+	root := m.layouts[p]
+	if t := p.ActiveTerminal(); t == nil || root.contains(t) {
+		return
+	}
+	n := len(p.Terminals)
+	for i := 1; i <= n; i++ {
+		if t := p.Terminals[(p.ActiveIndex()+i)%n]; root.contains(t) {
+			selectTerminal(p, t)
+			return
+		}
+	}
+}
+
+// cycleVisible moves focus by delta among the visible terminals only, in
+// terminal order (by number); hidden terminals are never brought
+// back by navigation.
+func (m *Model) cycleVisible(p *workspace.Project, delta int) {
+	root := m.layouts[p]
+	var visible []*workspace.Terminal
+	cur := 0
+	for _, t := range p.Terminals {
+		if root.contains(t) {
+			if t == p.ActiveTerminal() {
+				cur = len(visible)
+			}
+			visible = append(visible, t)
+		}
+	}
+	if n := len(visible); n > 0 {
+		selectTerminal(p, visible[((cur+delta)%n+n)%n])
+	}
+}
+
+// settleFocus returns focus to the sidebar when the selected project has
+// nothing visible to type into.
+func (m *Model) settleFocus() {
+	if p, t := m.activeTerminal(); t == nil || m.layouts[p] == nil {
+		m.focus, m.zoom = focusSidebar, false
+	}
+}
+
+func selectTerminal(p *workspace.Project, t *workspace.Terminal) {
+	for i, cur := range p.Terminals {
+		if cur == t {
+			p.Select(i)
+		}
+	}
+}
+
+func displayNameOf(t *workspace.Terminal) string {
+	if t.Name == "" {
+		return fmt.Sprintf("terminal %d", t.Num)
+	}
+	return t.Name
+}
+
+// focusNeighbor moves focus to the visible pane next to t in direction d.
+func (m *Model) focusNeighbor(p *workspace.Project, t *workspace.Terminal, d direction) {
+	rs := m.paneRects(p)
+	if next := neighbor(rs, t, d); next != nil {
+		selectTerminal(p, next)
+		m.applyLayout(p) // zoom follows focus
+		m.persist()
+	}
+}
+
+// place adds a freshly created terminal to the project's layout. With no
+// direction asked for and an automatic layout showing every other terminal,
+// the balanced grid grows by one. Otherwise — an explicit alt+v / alt+h, or
+// a layout the user has shaped — the focused pane is split in dir
+// (auto-chosen when 0), or taken over when it is too small to split.
+func (m *Model) place(p *workspace.Project, focused, nt *workspace.Terminal, dir splitDir) {
+	root := m.layouts[p]
+	if dir == 0 && len(root.leaves()) == len(p.Terminals)-1 {
+		if grown := m.grownGrid(root, nt); grown != nil {
+			m.layouts[p] = grown
+			m.applyLayout(p)
+			return
+		}
+	}
+	if root == nil || focused == nil || !root.contains(focused) {
+		if root == nil {
+			m.layouts[p] = leaf(nt)
+		} else {
+			m.layouts[p] = root.insert(root.leaves()[0], nt, splitStack)
+		}
+		m.applyLayout(p)
+		return
+	}
+	r := m.paneRects(p)[focused]
+	if dir == 0 {
+		dir = autoDir(r)
+	}
+	if !canSplit(r, dir) {
+		other := splitSide + splitStack - dir
+		if canSplit(r, other) {
+			dir = other
+		} else {
+			root.swap(focused, nt) // no room: the new terminal replaces the old one in this pane
+			m.applyLayout(p)
+			return
+		}
+	}
+	m.layouts[p] = root.insert(focused, nt, dir)
+	m.applyLayout(p)
+}
+
+// grownGrid returns root with nt added as a balanced grid, or nil when root
+// is not an automatic layout or the grown grid would squeeze a pane below
+// the minimum size (the caller then falls back to splitting a pane, which
+// may hide a terminal — the small-window behaviour).
+func (m *Model) grownGrid(root *pane, nt *workspace.Terminal) *pane {
+	area := m.mainArea()
+	if root == nil {
+		return leaf(nt)
+	}
+	g, ok := gridOf(root)
+	if !ok || !g.balanced() {
+		return nil
+	}
+	grown := g.grow(nt, area).tree()
+	if !grown.fits(area) {
+		return nil
+	}
+	return grown
+}
+
+// dropPane removes t from p's layout (hiding, exiting or deleting it). The
+// neighbour takes the space; when that leaves an automatic layout showing
+// every other running terminal unbalanced (a middle column or row went),
+// the grid is rebuilt from the remaining terminals in reading order so it
+// stays a grid. Manual layouts are only ever collapsed.
+func (m *Model) dropPane(p *workspace.Project, t *workspace.Terminal) {
+	root := m.layouts[p]
+	if root == nil || !root.contains(t) {
+		return
+	}
+	g, wasAuto := gridOf(root)
+	for _, cur := range p.Terminals {
+		if cur != t && !root.contains(cur) {
+			wasAuto = false // a hidden terminal: the tree is not the whole picture
+		}
+	}
+	wasAuto = wasAuto && g.balanced()
+	collapsed := root.remove(t)
+	if wasAuto && collapsed != nil && !automatic(collapsed) {
+		remaining := g.without(t).rowMajor()
+		rebuilt := gridFor(remaining, chooseCols(len(remaining), m.mainArea())).tree()
+		if rebuilt.fits(m.mainArea()) {
+			collapsed = rebuilt
+		}
+	}
+	m.layouts[p] = collapsed
+}
+
+// mainArea is the region inside the main pane's frame.
+func (m Model) mainArea() rect {
+	return rect{0, 0, max(m.width-sidebarWidth-mainStyle.GetHorizontalFrameSize(), 1),
+		max(m.height-statusHeight-mainStyle.GetVerticalFrameSize(), 1)}
+}
+
+func (m Model) paneRects(p *workspace.Project) map[*workspace.Terminal]rect {
+	rs := map[*workspace.Terminal]rect{}
+	m.layouts[p].rects(m.mainArea(), rs)
+	return rs
+}
+
+// applyLayout resizes every visible session to its pane (minus the header
+// row). Hidden terminals keep their size until shown again. While zoomed, the
+// selected project's focused terminal gets the whole area instead.
+func (m *Model) applyLayout(p *workspace.Project) {
+	if m.width == 0 {
+		return
+	}
+	if t := p.ActiveTerminal(); m.zoom && t != nil && p == m.selectedProject() {
+		area := m.mainArea()
+		t.Session.Resize(max(area.w, 1), max(area.h-paneHeaderHeight, 1))
+		return
+	}
+	for t, r := range m.paneRects(p) {
+		t.Session.Resize(max(r.w, 1), max(r.h-paneHeaderHeight, 1))
+	}
+}
+
+const paneHeaderHeight = 1
+
+// updateSidebar handles navigation and program-level keys.
+func (m Model) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	last := len(m.ws.Projects) - 1
+	switch {
+	case key.Matches(msg, keys.Quit):
+		m.quitting = true
+		m.persist()
+		m.ws.CloseAll()
+		return m, tea.Quit
+	case key.Matches(msg, keys.Focus):
+		if p, t := m.activeTerminal(); t != nil && m.layouts[p] != nil { // something visible to type into
+			m.refocus(p)
+			m.focus = focusMain
+		}
+	case key.Matches(msg, keys.Down):
+		if m.cursor < last {
+			m.cursor++
+		}
+	case key.Matches(msg, keys.Up):
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case key.Matches(msg, keys.Top):
+		m.cursor = 0
+	case key.Matches(msg, keys.Bottom):
+		if last >= 0 {
+			m.cursor = last
+		}
+	case key.Matches(msg, keys.New):
+		if last >= 0 {
+			m.openForm(m.ws.Projects[m.cursor], 0, focusSidebar)
+		}
+	case key.Matches(msg, keys.SplitSide):
+		if last >= 0 {
+			m.openForm(m.ws.Projects[m.cursor], splitSide, focusSidebar)
+		}
+	case key.Matches(msg, keys.SplitStack):
+		if last >= 0 {
+			m.openForm(m.ws.Projects[m.cursor], splitStack, focusSidebar)
+		}
+	case key.Matches(msg, keys.Manage):
+		if last >= 0 {
+			p := m.ws.Projects[m.cursor]
+			m.panel = newManager(m.ws, p, m.layouts[p])
+		}
+	case key.Matches(msg, keys.Help):
+		m.help = true
+	case key.Matches(msg, keys.Zoom):
+		if p, t := m.activeTerminal(); t != nil {
+			m.focus = focusMain
+			m.toggleZoom(p)
+		}
+	case key.Matches(msg, keys.Select):
+		if last >= 0 {
+			return m.enterProject(m.ws.Projects[m.cursor])
+		}
+	}
+	return m, nil
+}
+
+// enterProject is what Enter on a project does: go to its workspace, and
+// never produce more than one new pane. A project with running terminals
+// is focused as it is — hidden terminals stay hidden, unless nothing at all
+// is visible, in which case the active one is shown. A project with saved
+// definitions and nothing running gets exactly one of them back (the one
+// that had focus, else the first restorable); the rest wait in the manager
+// or come back all at once with a there. An empty project gets its first
+// shell.
+func (m Model) enterProject(p *workspace.Project) (tea.Model, tea.Cmd) {
+	switch {
+	case p.ActiveTerminal() != nil:
+		m.selected, m.focus = m.projectIndex(p), focusMain
+		if m.layouts[p] == nil {
+			m.show(p, p.ActiveTerminal())
+		} else {
+			m.refocus(p)
+			m.applyLayout(p)
+		}
+		return m, nil
+	case len(p.Saved) > 0:
+		return m.restoreOne(p)
+	default:
+		return m.newTerminal(p)
+	}
+}
+
+// restoreOne brings back a single saved terminal of p (see
+// Workspace.RestoreOne) as the project's one visible pane. The saved layout
+// is kept for a later "restore all". When nothing is restorable the project
+// still opens with a fresh shell and the notice says what was unavailable.
+func (m Model) restoreOne(p *workspace.Project) (tea.Model, tea.Cmd) {
+	cols, rows := m.terminalSize()
+	res := m.ws.RestoreOne(p, cols, rows)
+	if len(res.Opened) == 0 {
+		notice := restoreNotice(res)
+		model, cmd := m.newTerminal(p)
+		fresh := model.(Model)
+		if notice != "" {
+			fresh.notice = notice // keep the "unavailable" summary; newTerminal's save would clear it
+		}
+		return fresh, cmd
+	}
+	cmd := m.showOpened(p, res.Opened[0])
+	m.notice = restoreNotice(res)
+	m.noteLimit()
+	return m, cmd
+}
+
+// showOpened puts a terminal that was just started into the project's
+// view: the project is selected, the terminal shown and focused, the
+// manager closed, the state saved. It returns the terminal's watcher.
+func (m *Model) showOpened(p *workspace.Project, t *workspace.Terminal) tea.Cmd {
+	m.selected, m.focus, m.panel = m.projectIndex(p), focusMain, nil
+	m.show(p, t)
+	m.persist()
+	return watchTerminal(t)
+}
+
+// updateForm drives the new-terminal dialog. Submitting creates the
+// terminal (and its worktree); errors keep the form open so the user can fix
+// the input.
+func (m Model) updateForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	opts, cancelled := m.form.update(msg)
+	switch {
+	case cancelled:
+		m.focus, m.form = m.form.back, nil
+		if _, t := m.activeTerminal(); t == nil {
+			m.focus = focusSidebar
+		}
+	case opts != nil:
+		p := m.form.project
+		m.selected = m.projectIndex(p)
+		focused := p.ActiveTerminal()
+		cols, rows := m.terminalSize()
+		t, err := m.ws.CreateTerminal(p, *opts, cols, rows)
+		if err != nil {
+			m.form.err = err.Error()
+			return m, nil
+		}
+		m.form, m.focus = nil, focusMain
+		m.place(p, focused, t, m.pendingSplit)
+		m.persist()
+		m.noteLimit()
+		return m, watchTerminal(t)
+	}
+	return m, nil
+}
+
+// newTerminal starts a plain shell for p (used by Enter on a project that
+// has no terminal yet), shows p and focuses the new terminal.
+func (m Model) newTerminal(p *workspace.Project) (tea.Model, tea.Cmd) {
+	m.selected = m.projectIndex(p)
+	focused := p.ActiveTerminal()
+	cols, rows := m.terminalSize()
+	t, err := m.ws.NewTerminal(p, cols, rows)
+	if err != nil {
+		p.Notice = "could not start shell: " + err.Error()
+		if p.ActiveTerminal() == nil {
+			m.focus = focusSidebar
+		}
+		return m, nil
+	}
+	m.focus = focusMain
+	m.place(p, focused, t, 0)
+	m.persist()
+	m.noteLimit()
+	return m, watchTerminal(t)
+}
+
+// toggleZoom flips zoom for the focused terminal. Zoom only changes what is
+// rendered and which session gets the full area; the layout tree is kept, so
+// unzooming restores the previous arrangement exactly.
+func (m *Model) toggleZoom(p *workspace.Project) {
+	m.zoom = !m.zoom
+	m.applyLayout(p)
+}
+
+// updateManager drives the terminal manager. Enter acts on the selected
+// terminal only; a restores every eligible saved terminal.
+func (m Model) updateManager(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	p := m.panel.project
+	switch m.panel.update(msg, m.ws) {
+	case mgClose:
+		m.panel = nil
+	case mgOpenAll:
+		next, cmd, res := m.restore(p)
+		if len(res.Opened) == 0 { // nothing started: the manager stays open and explains
+			next.panel.notice = restoreDetails(res)
+			if next.panel.notice == "" {
+				next.panel.notice = "nothing to restore"
+			}
+			next.notice = ""
+			next.panel.reload(next.ws, next.layouts[p])
+		}
+		return next, cmd
+	case mgChanged:
+		m.persist()
+		m.panel.reload(m.ws, m.layouts[p])
+	case mgNew:
+		if err := m.ws.CanCreateTerminal(p); err != nil { // at the limit: stay here and say why
+			m.panel.notice = err.Error()
+			break
+		}
+		m.panel = nil
+		m.openForm(p, 0, focusSidebar)
+	case mgHide:
+		if t := m.panel.selectedTerminal(); t != nil {
+			m.hide(p, t)
+			m.panel.reload(m.ws, m.layouts[p])
+			m.panel.notice = fmt.Sprintf("terminal %d hidden; it keeps running", t.Num)
+		}
+	case mgDelete:
+		if t := m.panel.selectedTerminal(); t != nil {
+			m.deleteTerminal(p, t)
+			m.panel.reload(m.ws, m.layouts[p])
+			m.panel.notice, m.notice = m.notice, ""
+		}
+	case mgShow:
+		r := m.panel.selected()
+		if r == nil || r.terminal == nil {
+			break
+		}
+		if t := r.terminal.Terminal; t != nil { // running, visible or hidden: just show it
+			m.selected, m.focus, m.panel = m.projectIndex(p), focusMain, nil
+			m.show(p, t)
+			m.persist()
+			return m, nil
+		}
+		cols, rows := m.terminalSize()
+		t, err := m.ws.OpenSaved(p, r.terminal.Definition, cols, rows) // saved: start only this one
+		if err != nil {
+			m.panel.notice = err.Error()
+			break
+		}
+		cmd := m.showOpened(p, t)
+		m.noteLimit()
+		return m, cmd
+	}
+	return m, nil
+}
+
+// restore is the explicit "restore all" (a in the manager): it reopens
+// every saved terminal of p that can run (reusing worktrees), rebuilds the
+// saved layout around them, restores focus and reports what could not be
+// restored in the status bar. With nothing opened the model is unchanged
+// apart from the notice.
+func (m Model) restore(p *workspace.Project) (Model, tea.Cmd, workspace.RestoreResult) {
+	cols, rows := m.terminalSize()
+	res, err := m.ws.OpenAll(p, cols, rows)
+	if err != nil {
+		m.notice = err.Error()
+		return m, nil, res
+	}
+	opened := res.Opened
+	if len(opened) == 0 {
+		m.notice = restoreNotice(res)
+		return m, nil, res
+	}
+	m.selected = m.projectIndex(p)
+	cmds := make([]tea.Cmd, 0, len(opened))
+	for _, t := range opened {
+		cmds = append(cmds, watchTerminal(t))
+	}
+	lastPlaced := m.arrange(p, opened)
+	if focused := m.terminalByKey(p, p.Focus); focused != nil && m.layouts[p].contains(focused) {
+		lastPlaced = focused // the saved focus wins when that terminal is visible
+	}
+	if lastPlaced != nil {
+		selectTerminal(p, lastPlaced)
+	}
+	m.refocus(p)
+	m.applyLayout(p)
+	m.focus, m.panel = focusMain, nil
+	m.persist()
+	m.notice = restoreNotice(res) // after persist, which clears the notice on success
+	m.noteLimit()
+	return m, tea.Batch(cmds...), res
+}
+
+// restoreNotice summarises a restore: "" when everything came back.
+func restoreNotice(res workspace.RestoreResult) string {
+	details := restoreDetails(res)
+	if details == "" {
+		return ""
+	}
+	n := len(res.Opened)
+	return fmt.Sprintf("restored %d terminal%s; %s", n, plural(n), details)
+}
+
+// restoreDetails lists what a restore could not do: "" when nothing.
+func restoreDetails(res workspace.RestoreResult) string {
+	var parts []string
+	if len(res.Skipped) > 0 {
+		parts = append(parts, fmt.Sprintf("%d unavailable: %s", len(res.Skipped), strings.Join(res.Skipped, ", ")))
+	}
+	if res.NotOpened > 0 {
+		parts = append(parts, fmt.Sprintf("%d not opened: max_terminals (%d) reached", res.NotOpened, res.Limit.Max))
+	}
+	return strings.Join(parts, "; ")
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// arrange lays out p after open-all: the saved layout is rebuilt from the
+// running terminals it still references, then every running terminal not in
+// it (including ones opened before) is placed: a grid grows as a grid, a
+// user-shaped layout has its largest pane split. Panes squeezed below the
+// minimum are hidden. It returns the last terminal placed, or nil.
+func (m *Model) arrange(p *workspace.Project, opened []*workspace.Terminal) *workspace.Terminal {
+	var last *workspace.Terminal
+	used := map[*workspace.Terminal]bool{}
+	if restored := paneFromLayout(p.Layout, p.Terminals, used); restored != nil {
+		m.layouts[p] = restored
+		m.applyLayout(p)
+		leaves := restored.leaves()
+		last = leaves[len(leaves)-1]
+	}
+	for _, t := range p.Terminals { // running terminals the saved layout did not cover
+		if !m.layouts[p].contains(t) && m.placeBalanced(p, t) {
+			last = t
+		}
+	}
+	m.enforceMinimums(p)
+	m.applyLayout(p)
+	if last != nil && !m.layouts[p].contains(last) {
+		if leaves := m.layouts[p].leaves(); len(leaves) > 0 {
+			last = leaves[len(leaves)-1]
+		}
+	}
+	_ = opened
+	return last
+}
+
+func (m Model) terminalByKey(p *workspace.Project, key string) *workspace.Terminal {
+	if key == "" {
+		return nil
+	}
+	for _, t := range p.Terminals {
+		if t.Key() == key {
+			return t
+		}
+	}
+	return nil
+}
+
+// placeBalanced inserts nt into a layout the saved arrangement did not
+// cover it in: an automatic layout grows as a grid; a user-shaped one gets
+// nt by splitting the largest pane that can still be split (auto
+// direction). It reports false when every pane is too small, in which case
+// nt stays hidden and reachable through alt+j / alt+k.
+func (m *Model) placeBalanced(p *workspace.Project, nt *workspace.Terminal) bool {
+	root := m.layouts[p]
+	if grown := m.grownGrid(root, nt); grown != nil {
+		m.layouts[p] = grown
+		m.applyLayout(p)
+		return true
+	}
+	rs := m.paneRects(p)
+	var best *workspace.Terminal
+	var bestDir splitDir
+	bestArea := -1
+	for _, t := range root.leaves() { // leaves() order keeps ties deterministic
+		r := rs[t]
+		dir := autoDir(r)
+		if !canSplit(r, dir) {
+			dir = splitSide + splitStack - dir
+			if !canSplit(r, dir) {
+				continue
+			}
+		}
+		if area := r.w * r.h; area > bestArea {
+			best, bestDir, bestArea = t, dir, area
+		}
+	}
+	if best == nil {
+		return false
+	}
+	m.layouts[p] = root.insert(best, nt, bestDir)
+	m.applyLayout(p)
+	return true
+}
+
+// watchTerminal blocks until the terminal has new output or exits.
+func watchTerminal(t *workspace.Terminal) tea.Cmd {
+	s := t.Session
+	return func() tea.Msg {
+		select {
+		case <-s.Done():
+			return terminalExitedMsg{id: t.ID, err: s.Err()}
+		case <-s.Output():
+			return terminalOutputMsg{id: t.ID, s: s}
+		}
+	}
+}
+
+func (m Model) selectedProject() *workspace.Project {
+	if m.selected < 0 || m.selected >= len(m.ws.Projects) {
+		return nil
+	}
+	return m.ws.Projects[m.selected]
+}
+
+// activeTerminal returns the selected project and its active terminal.
+func (m Model) activeTerminal() (*workspace.Project, *workspace.Terminal) {
+	p := m.selectedProject()
+	if p == nil {
+		return nil, nil
+	}
+	return p, p.ActiveTerminal()
+}
+
+func (m Model) projectIndex(p *workspace.Project) int {
+	for i, cur := range m.ws.Projects {
+		if cur == p {
+			return i
+		}
+	}
+	return -1
+}
+
+func exitNotice(err error) string {
+	if err == nil {
+		return "exited"
+	}
+	return "exited: " + err.Error()
+}
+
+// terminalSize is the screen size of every terminal: the main pane's inner
+// area.
+func (m Model) terminalSize() (cols, rows int) {
+	cols = m.width - sidebarWidth - mainStyle.GetHorizontalFrameSize()
+	rows = m.height - statusHeight - mainStyle.GetVerticalFrameSize()
+	return max(cols, 1), max(rows, 1)
+}
+
+func (m Model) View() string {
+	if m.width == 0 {
+		return "loading..."
+	}
+
+	paneHeight := m.height - statusHeight
+	if m.help {
+		style := mainStyle.Padding(0, 1)
+		screen := framed(style, true, m.width, paneHeight).Render(
+			viewHelp(m.width-style.GetHorizontalFrameSize(), paneHeight-style.GetVerticalFrameSize()))
+		return lipgloss.JoinVertical(lipgloss.Left, screen, m.viewStatus())
+	}
+	sidebar := framed(sidebarStyle, m.focus == focusSidebar, sidebarWidth, paneHeight).Render(m.viewSidebar())
+	mainPane := framed(mainStyle, m.focus == focusMain, m.width-sidebarWidth, paneHeight).Render(m.viewMain())
+
+	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, mainPane)
+	return lipgloss.JoinVertical(lipgloss.Left, body, m.viewStatus())
+}
+
+func (m Model) viewSidebar() string {
+	var b strings.Builder
+	b.WriteString(titleStyle.Render("Projects"))
+	b.WriteString("\n\n")
+
+	if len(m.ws.Projects) == 0 {
+		b.WriteString(hintStyle.Render("No Git repositories\nfound in:\n" + m.root))
+		return b.String()
+	}
+
+	for i, p := range m.ws.Projects {
+		// ● running workspace, ○ workspace that Enter will restore, otherwise blank.
+		line := "  " + p.Name
+		switch {
+		case len(p.Terminals) > 0:
+			line = "● " + p.Name
+		case len(p.Saved) > 0:
+			line = "○ " + p.Name
+		}
+		switch {
+		case i == m.cursor && m.focus == focusSidebar:
+			line = cursorStyle.Render(line + " ")
+		case i == m.selected:
+			line = selectedStyle.Render(line)
+		}
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+func (m Model) viewMain() string {
+	innerWidth := m.width - sidebarWidth - mainStyle.GetHorizontalFrameSize()
+	if m.panel != nil {
+		return m.panel.view(innerWidth)
+	}
+	if m.form != nil {
+		return m.form.view(innerWidth)
+	}
+	p := m.selectedProject()
+	if p == nil {
+		return "\n" + hintStyle.Render(" Select a project and press enter to open a shell there.")
+	}
+	if t := p.ActiveTerminal(); t != nil && m.layouts[p] != nil {
+		return m.viewPanes(p, t)
+	}
+	lines := []string{"", " " + titleStyle.Render(p.Name), " " + p.Path, ""}
+	if n := len(p.Terminals); n > 0 { // running, but every pane was hidden
+		lines = append(lines, " "+hintStyle.Render(fmt.Sprintf("%d terminal%s running, all hidden. Press m to show one.", n, plural(n))))
+		return strings.Join(lines, "\n")
+	}
+	if p.Notice != "" {
+		lines = append(lines, " "+hintStyle.Render(p.Notice))
+	}
+	if len(p.Saved) > 0 {
+		lines = append(lines, " "+hintStyle.Render("Press enter to open this project's terminal, or m to pick one."))
+	} else {
+		lines = append(lines, " "+hintStyle.Render("Press enter or n to open a shell here."))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// viewPanes renders the project's visible terminals in their layout.
+// Each pane has a one-line header naming its terminal; the focused pane's
+// header is highlighted and only its cursor is drawn.
+func (m Model) viewPanes(p *workspace.Project, active *workspace.Terminal) string {
+	area := m.mainArea()
+	if m.zoom {
+		return m.renderLeaf(active, area, m.focus == focusMain)
+	}
+	return m.renderPane(m.layouts[p], area, active)
+}
+
+func (m Model) renderPane(n *pane, r rect, active *workspace.Terminal) string {
+	if n == nil {
+		return ""
+	}
+	if n.isLeaf() {
+		return m.renderLeaf(n.term, r, n.term == active && m.focus == focusMain)
+	}
+	if n.dir == splitSide {
+		wa := splitSize(r.w, n.ratio, minPaneCols)
+		left := m.renderPane(n.a, rect{r.x, r.y, wa, r.h}, active)
+		right := m.renderPane(n.b, rect{r.x + wa + 1, r.y, r.w - wa - 1, r.h}, active)
+		divider := hintStyle.Render(strings.TrimRight(strings.Repeat("│\n", r.h), "\n"))
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
+	}
+	ha := splitSize(r.h, n.ratio, minPaneRows)
+	top := m.renderPane(n.a, rect{r.x, r.y, r.w, ha}, active)
+	bottom := m.renderPane(n.b, rect{r.x, r.y + ha + 1, r.w, r.h - ha - 1}, active)
+	divider := hintStyle.Render(strings.Repeat("─", r.w))
+	return lipgloss.JoinVertical(lipgloss.Left, top, divider, bottom)
+}
+
+// renderLeaf draws one terminal into exactly r.w x r.h cells.
+func (m Model) renderLeaf(t *workspace.Terminal, r rect, focused bool) string {
+	header := headerStyle(focused).Render(ansi.Truncate(" "+paneTitle(t)+" ", r.w, "…"))
+	lines := []string{header}
+	for i, line := range strings.Split(t.Session.Render(focused), "\n") {
+		if i >= r.h-paneHeaderHeight {
+			break
+		}
+		lines = append(lines, ansi.Truncate(line, r.w, ""))
+	}
+	return lipgloss.NewStyle().Width(r.w).MaxWidth(r.w).Height(r.h).MaxHeight(r.h).Render(strings.Join(lines, "\n"))
+}
+
+// headerStyle highlights the focused pane's header; this is the only place
+// focus is shown.
+func headerStyle(focused bool) lipgloss.Style {
+	if focused {
+		return cursorStyle
+	}
+	return hintStyle
+}
+
+// paneTitle names a pane: number, name (or program title), and branch.
+func paneTitle(t *workspace.Terminal) string {
+	return fmt.Sprintf("%d %s", t.Num, terminalLabel(t))
+}
+
+const maxLabelWidth = 18
+
+// terminalLabel is the user's name for the terminal, else the title its
+// program set, else "shell"; worktree terminals also show their branch.
+func terminalLabel(t *workspace.Terminal) string {
+	label := t.Name
+	if label == "" {
+		label = t.Session.Title()
+	}
+	if label == "" {
+		label = "shell"
+	}
+	label = ansi.Truncate(label, maxLabelWidth, "…")
+	if t.Worktree != nil {
+		label += " [" + t.Worktree.Branch + "]"
+	}
+	return label
+}
+
+func (m Model) viewStatus() string {
+	var bindings []key.Binding
+	var info, prompt string // prompt: a question awaiting y, shown like a notice
+	switch {
+	case m.help:
+		bindings = []key.Binding{keys.HelpClose}
+	case m.panel != nil:
+		bindings = keys.managerHelp()
+	case m.form != nil:
+		bindings = keys.formHelp()
+	case m.deleting != nil:
+		bindings = []key.Binding{keys.Confirm, keys.Cancel}
+		note := "removes the saved definition"
+		if m.deleting.Worktree != nil {
+			note = "worktree kept"
+		}
+		prompt = fmt.Sprintf("Permanently delete terminal %q? (%s)", displayNameOf(m.deleting), note)
+	case m.focus == focusMain:
+		bindings = keys.terminalHelp()
+		if p, t := m.activeTerminal(); t != nil {
+			info = terminalInfo(p, t)
+			if m.zoom {
+				info += " · zoom"
+			}
+		}
+	default:
+		bindings = keys.sidebarHelp()
+	}
+	parts := make([]string, 0, len(bindings)+2)
+	if m.notice != "" {
+		parts = append(parts, errorStyle.Render(m.notice))
+	}
+	if prompt != "" {
+		parts = append(parts, errorStyle.Render(prompt))
+	}
+	if info != "" {
+		parts = append(parts, hintStyle.Render(info))
+	}
+	for _, b := range bindings {
+		h := b.Help()
+		parts = append(parts, fmt.Sprintf("%s %s", h.Key, hintStyle.Render(h.Desc)))
+	}
+	line := ansi.Truncate(strings.Join(parts, "  •  "), max(m.width-statusStyle.GetHorizontalPadding(), 1), "…")
+	return statusStyle.Width(m.width).Render(line)
+}
+
+// terminalInfo describes the focused terminal: project, number, name and
+// whether it runs in a worktree.
+func terminalInfo(p *workspace.Project, t *workspace.Terminal) string {
+	info := fmt.Sprintf("%s · terminal %d", p.Name, t.Num)
+	if t.Name != "" {
+		info += " " + t.Name
+	}
+	if t.Worktree != nil {
+		info += " · worktree " + t.Worktree.Branch
+	}
+	return info
+}

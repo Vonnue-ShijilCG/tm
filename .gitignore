@@ -1,0 +1,32 @@
+# Build output
+/tm
+/bin/
+/dist/
+*.exe
+*.test
+
+# Coverage and profiling
+*.out
+*.prof
+coverage.*
+
+# Workspace data written by tm at runtime (never part of the source tree)
+.terminal-state.json
+.terminal-worktrees/
+
+# Local configuration and logs
+config.toml
+*.log
+
+# Temporary and editor files
+*.tmp
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.code-workspace
+
+# OS metadata
+.DS_Store
+Thumbs.db
