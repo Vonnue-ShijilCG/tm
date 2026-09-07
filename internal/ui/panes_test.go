@@ -40,7 +40,7 @@ func TestAltVCreatesSideBySidePanes(t *testing.T) {
 		t.Error("the new terminal should be focused")
 	}
 	view := m.View()
-	for _, want := range []string{"SCREEN:/ws/backend:t1", "SCREEN:/ws/backend:t2", "│"} {
+	for _, want := range []string{"SCREEN:/ws/backend:t1", "SCREEN:/ws/backend:t2", verticalDivider} {
 		if !strings.Contains(view, want) {
 			t.Errorf("both terminals should be visible with a divider, missing %q:\n%s", want, view)
 		}
@@ -60,7 +60,7 @@ func TestAltHCreatesStackedPanes(t *testing.T) {
 	if a.x != b.x || a.w != area.w || b.w != area.w || a.h+b.h+1 != area.h || b.y != a.y+a.h+1 {
 		t.Errorf("panes should be stacked over the area %+v: a=%+v b=%+v", area, a, b)
 	}
-	if !strings.Contains(m.View(), "─") {
+	if !strings.Contains(m.View(), horizontalDivider) {
 		t.Error("stacked panes should show a horizontal divider")
 	}
 }

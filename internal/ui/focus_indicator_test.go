@@ -10,8 +10,8 @@ import (
 // pane's header is the only focus indicator. (Lip Gloss emits no colour
 // under go test, so the styles are compared, not rendered.)
 func TestPaneHeadersAreTheOnlyTerminalIndicators(t *testing.T) {
-	if !reflect.DeepEqual(headerStyle(true), cursorStyle) || !reflect.DeepEqual(headerStyle(false), hintStyle) {
-		t.Error("the focused pane header must use the cursor highlight, others the hint style")
+	if !reflect.DeepEqual(headerStyle(true), cursorStyle) || !reflect.DeepEqual(headerStyle(false), paneBarStyle) {
+		t.Error("the focused pane header must use the cursor highlight, others the muted bar")
 	}
 
 	m, _, p := twoPanes(t)

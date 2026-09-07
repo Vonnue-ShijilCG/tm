@@ -1086,13 +1086,13 @@ func (m Model) renderPane(p *workspace.Project, n *pane, r rect, active *workspa
 		wa := splitSize(r.w, n.ratio, minPaneCols)
 		left := m.renderPane(p, n.a, rect{r.x, r.y, wa, r.h}, active)
 		right := m.renderPane(p, n.b, rect{r.x + wa + 1, r.y, r.w - wa - 1, r.h}, active)
-		divider := hintStyle.Render(strings.TrimRight(strings.Repeat("│\n", r.h), "\n"))
+		divider := dividerStyle.Render(strings.TrimRight(strings.Repeat(verticalDivider+"\n", r.h), "\n"))
 		return lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
 	}
 	ha := splitSize(r.h, n.ratio, minPaneRows)
 	top := m.renderPane(p, n.a, rect{r.x, r.y, r.w, ha}, active)
 	bottom := m.renderPane(p, n.b, rect{r.x, r.y + ha + 1, r.w, r.h - ha - 1}, active)
-	divider := hintStyle.Render(strings.Repeat("─", r.w))
+	divider := dividerStyle.Render(strings.Repeat(horizontalDivider, r.w))
 	return lipgloss.JoinVertical(lipgloss.Left, top, divider, bottom)
 }
 
@@ -1103,7 +1103,7 @@ func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, f
 		title += fmt.Sprintf(" %s %d", scrollMark, off)
 		screen = t.Session.RenderScrolled(off)
 	}
-	header := headerStyle(focused).Render(ansi.Truncate(" "+title+" ", r.w, "…"))
+	header := paneHeader(title, r.w, focused)
 	lines := []string{header}
 	for i, line := range strings.Split(screen, "\n") {
 		if i >= r.h-paneHeaderHeight {
@@ -1114,13 +1114,27 @@ func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, f
 	return lipgloss.NewStyle().Width(r.w).MaxWidth(r.w).Height(r.h).MaxHeight(r.h).Render(strings.Join(lines, "\n"))
 }
 
-// headerStyle highlights the focused pane's header; this is the only place
-// focus is shown.
+// Heavy dividers separate panes; with filled headers they make each pane's
+// extent obvious without counting cells.
+const (
+	verticalDivider   = "┃"
+	horizontalDivider = "━"
+)
+
+// paneHeader renders a pane's title bar, filled across the pane's full width
+// so that the bar is the pane's visible top edge.
+func paneHeader(title string, width int, focused bool) string {
+	return headerStyle(focused).Width(width).MaxWidth(width).Render(ansi.Truncate(" "+title+" ", width, "…"))
+}
+
+// headerStyle is a pane's filled title bar. Both variants have a background,
+// because the bar is the pane's only top edge; the focused one is the accent
+// colour, which remains the single indicator of focus.
 func headerStyle(focused bool) lipgloss.Style {
 	if focused {
 		return cursorStyle
 	}
-	return hintStyle
+	return paneBarStyle
 }
 
 // paneTitle is the terminal's identity as shown everywhere: `Terminal 2 ·

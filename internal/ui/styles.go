@@ -7,6 +7,8 @@ const sidebarWidth = 28
 var (
 	accent = lipgloss.Color("62")  // focused border / cursor
 	dim    = lipgloss.Color("240") // unfocused border / hints
+	rule   = lipgloss.Color("245") // dividers between panes: brighter than dim, so edges read at a glance
+	bar    = lipgloss.Color("238") // unfocused pane header bar
 
 	// The main pane has no padding so the emulated screen fills it exactly.
 	mainStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(dim)
@@ -22,6 +24,12 @@ var (
 	selectedStyle = lipgloss.NewStyle().Foreground(accent).Bold(true)
 
 	hintStyle = lipgloss.NewStyle().Foreground(dim)
+
+	// Pane headers are filled bars: they are a pane's only top edge, so they
+	// are drawn across its full width whether it has focus or not.
+	paneBarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(bar)
+
+	dividerStyle = lipgloss.NewStyle().Foreground(rule)
 
 	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 
