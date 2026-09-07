@@ -32,7 +32,7 @@ func (ws *Workspace) Restore() error {
 		}
 		keys := make([]string, len(sp.Terminals)) // "" marks a terminal we refused
 		for i, st := range sp.Terminals {
-			saved := SavedTerminal{Name: st.Name, Branch: st.Branch}
+			saved := SavedTerminal{Name: st.Name, Command: st.Command, Branch: st.Branch}
 			if st.Worktree != "" {
 				abs := filepath.Join(ws.Root, filepath.FromSlash(st.Worktree))
 				if ws.ownedName(p, abs) == "" {
@@ -64,7 +64,7 @@ func (ws *Workspace) Snapshot() state.File {
 		sp := state.Project{Name: p.Name}
 		var keys []string
 		for _, t := range p.Terminals {
-			st := state.Terminal{Name: t.Name}
+			st := state.Terminal{Name: t.Name, Command: t.Command}
 			if t.Worktree != nil {
 				st.Branch, st.Worktree = t.Worktree.Branch, ws.relPath(t.Worktree.Path)
 			}
@@ -72,7 +72,7 @@ func (ws *Workspace) Snapshot() state.File {
 			keys = append(keys, t.Key())
 		}
 		for _, s := range p.Saved {
-			sp.Terminals = append(sp.Terminals, state.Terminal{Name: s.Name, Branch: s.Branch, Worktree: ws.relPath(s.Worktree)})
+			sp.Terminals = append(sp.Terminals, state.Terminal{Name: s.Name, Command: s.Command, Branch: s.Branch, Worktree: ws.relPath(s.Worktree)})
 			keys = append(keys, s.key())
 		}
 		if len(sp.Terminals) == 0 {
@@ -225,6 +225,9 @@ func (ws *Workspace) open(p *Project, defs []SavedTerminal, one bool, cols, rows
 	var res RestoreResult
 	for _, s := range defs {
 		name := s.Name
+		if name == "" {
+			name = s.Command
+		}
 		if name == "" {
 			name = "shell"
 		}

@@ -193,6 +193,7 @@ func (f File) sanitized() File {
 		seen := map[string]bool{}
 		remap := map[int]int{} // original index -> index after filtering
 		for i, t := range p.Terminals {
+			t.Command = stripNewlines(t.Command)
 			t.Worktree = filepath.Clean(filepath.ToSlash(t.Worktree))
 			if t.Worktree == "." {
 				t.Worktree = ""
@@ -219,6 +220,20 @@ func (f File) sanitized() File {
 		out.Projects = append(out.Projects, sp)
 	}
 	return out
+}
+
+// stripNewlines removes newlines from a command loaded from disk so that one
+// stored definition types exactly one line into the shell; a command with an
+// embedded newline would otherwise appear to the terminal as two lines,
+// which is confusing and can corrupt the pane. This is a consistency
+// measure, not a security boundary: a single line can still chain commands
+// via ";", "&&", "||", "|", "&", "$(...)" or backticks, so removing
+// newlines does not prevent a stored command from doing anything a plain
+// command already could. Replacing with a space (rather than dropping the
+// character outright) avoids silently welding two commands into one runnable
+// line, e.g. "npm run devrm -rf build".
+func stripNewlines(s string) string {
+	return strings.NewReplacer("\n", " ", "\r", " ").Replace(s)
 }
 
 // ValidName reports whether name is a plain directory name.

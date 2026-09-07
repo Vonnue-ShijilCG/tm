@@ -10,6 +10,94 @@ import (
 	"github.com/Vonnue-ShijilCG/tm/internal/project"
 )
 
+func TestANewBranchWithAnUnknownBaseIsRefused(t *testing.T) {
+	ws, spawned := gitWorkspace(t)
+	p := ws.Projects[0]
+
+	_, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/x", Base: "no/such/branch"}, 80, 24)
+
+	if err == nil {
+		t.Fatal("creating a branch from a missing base should fail")
+	}
+	if !strings.Contains(err.Error(), "no/such/branch") {
+		t.Errorf("error = %v, want it to name the missing base", err)
+	}
+	if len(p.Terminals) != 0 || len(*spawned) != 0 {
+		t.Error("a refused base must leave no terminal behind")
+	}
+	dir := filepath.Join(ws.Root, WorktreesDir, p.Name, "feature-x")
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("a refused base must leave no worktree directory: %s", dir)
+	}
+}
+
+func TestANewBranchWithADashPrefixedBaseIsRefused(t *testing.T) {
+	ws, spawned := gitWorkspace(t)
+	p := ws.Projects[0]
+
+	_, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/x", Base: "--detach"}, 80, 24)
+
+	if err == nil {
+		t.Fatal("creating a branch from a dash-prefixed base should fail, not be interpreted as an option")
+	}
+	if !strings.Contains(err.Error(), "--detach") {
+		t.Errorf("error = %v, want it to name the rejected base", err)
+	}
+	if len(p.Terminals) != 0 || len(*spawned) != 0 {
+		t.Error("a refused base must leave no terminal behind")
+	}
+	dir := filepath.Join(ws.Root, WorktreesDir, p.Name, "feature-x")
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("a refused base must leave no worktree directory: %s", dir)
+	}
+}
+
+func TestANewBranchWithNoBaseIsRefused(t *testing.T) {
+	ws, spawned := gitWorkspace(t)
+	p := ws.Projects[0]
+
+	_, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/x", Base: ""}, 80, 24)
+
+	if err == nil {
+		t.Fatal("creating a branch with no base should fail")
+	}
+	if !strings.Contains(err.Error(), "base branch is required") {
+		t.Errorf("error = %v, want it to say a base is required", err)
+	}
+	if len(p.Terminals) != 0 || len(*spawned) != 0 {
+		t.Error("a refused base must leave no terminal behind")
+	}
+	dir := filepath.Join(ws.Root, WorktreesDir, p.Name, "feature-x")
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Errorf("a refused base must leave no worktree directory: %s", dir)
+	}
+}
+
+func TestANewBranchStartsFromItsBase(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+	if _, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/one", Base: ws.DefaultBranch(p)}, 80, 24); err != nil {
+		t.Fatalf("CreateTerminal: %v", err)
+	}
+	if _, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/two", Base: "feature/one"}, 80, 24); err != nil {
+		t.Fatalf("stacked branch: %v", err)
+	}
+}
+
+func TestAnExistingBranchIgnoresTheBase(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+	if _, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/first", Base: ws.DefaultBranch(p)}, 80, 24); err != nil {
+		t.Fatalf("CreateTerminal: %v", err)
+	}
+	// Delete the terminal so the branch is free, then reopen it by name with a
+	// base that does not exist: an existing branch needs no base at all.
+	ws.DeleteTerminal(p, p.Terminals[0].Definition(), p.Terminals[0])
+	if _, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/first", Base: "no/such/branch"}, 80, 24); err != nil {
+		t.Fatalf("an existing branch should ignore the base: %v", err)
+	}
+}
+
 // gitWorkspace builds <root>/app (a repo with one commit on main) and
 // <root>/plain (a directory with an empty .git, i.e. not a usable repo).
 func gitWorkspace(t *testing.T) (*Workspace, *[]*fakeSession) {
@@ -39,6 +127,23 @@ func gitWorkspace(t *testing.T) (*Workspace, *[]*fakeSession) {
 			*spawned = append(*spawned, f)
 			return f, nil
 		})
+	return ws, spawned
+}
+
+// gitWorkspaceAt builds a second workspace over an existing root, so a save
+// from one can be restored by the other.
+func gitWorkspaceAt(t *testing.T, root string) (*Workspace, *[]*fakeSession) {
+	t.Helper()
+	projects, err := project.Discover(root)
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	spawned := &[]*fakeSession{}
+	ws := New(root, projects, func(dir string, cols, rows int) (Session, error) {
+		f := &fakeSession{dir: dir, cols: cols, rows: rows}
+		*spawned = append(*spawned, f)
+		return f, nil
+	})
 	return ws, spawned
 }
 
@@ -91,7 +196,7 @@ func TestTerminalsWithDifferentWorktrees(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payment, err := ws.CreateTerminal(p, Options{Name: "Payment", Branch: "feature/payment", Worktree: true}, 80, 24) // new branch
+	payment, err := ws.CreateTerminal(p, Options{Name: "Payment", Branch: "feature/payment", Base: ws.DefaultBranch(p), Worktree: true}, 80, 24) // new branch
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,10 +239,10 @@ func TestWorktreeCreationErrors(t *testing.T) {
 		opts Options
 		want string
 	}{
-		{"same name twice", app, Options{Name: "Dup", Branch: "other", Worktree: true}, "already exists"},
+		{"same name twice", app, Options{Name: "Dup", Branch: "other", Base: ws.DefaultBranch(app), Worktree: true}, "already exists"},
 		{"branch checked out elsewhere", app, Options{Name: "Main2", Branch: "main", Worktree: true}, "already"},
 		{"missing branch", app, Options{Name: "X", Worktree: true}, "branch is required"},
-		{"bad name", app, Options{Name: "..", Branch: "b", Worktree: true}, "invalid worktree name"},
+		{"bad name", app, Options{Name: "..", Branch: "b", Base: ws.DefaultBranch(app), Worktree: true}, "invalid worktree name"},
 		{"non-git project", plain, Options{Name: "P", Branch: "b", Worktree: true}, "not a git repository"},
 	}
 	for _, tc := range cases {
@@ -196,11 +301,11 @@ func TestWorktreesListsOnlyOwnedWithState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payment, err := ws.CreateTerminal(p, Options{Name: "Payment", Branch: "feature/payment", Worktree: true}, 80, 24)
+	payment, err := ws.CreateTerminal(p, Options{Name: "Payment", Branch: "feature/payment", Base: ws.DefaultBranch(p), Worktree: true}, 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
-	stale, err := ws.CreateTerminal(p, Options{Name: "Stale", Branch: "feature/stale", Worktree: true}, 80, 24)
+	stale, err := ws.CreateTerminal(p, Options{Name: "Stale", Branch: "feature/stale", Base: ws.DefaultBranch(p), Worktree: true}, 80, 24)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +358,7 @@ func TestRemoveWorktreeRules(t *testing.T) {
 	p := ws.Projects[0]
 	mk := func(name, branch string) *Terminal {
 		t.Helper()
-		term, err := ws.CreateTerminal(p, Options{Name: name, Branch: branch, Worktree: true}, 80, 24)
+		term, err := ws.CreateTerminal(p, Options{Name: name, Branch: branch, Base: ws.DefaultBranch(p), Worktree: true}, 80, 24)
 		if err != nil {
 			t.Fatal(err)
 		}

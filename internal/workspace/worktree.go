@@ -68,8 +68,8 @@ func (ws *Workspace) Branches(p *Project) (branches []string, current string, er
 }
 
 // addWorktree creates the worktree for a terminal: an existing branch is
-// checked out, an unknown one is created from HEAD. It fails rather than
-// touching a path that already exists.
+// checked out, an unknown one is created from opts.Base. It fails rather
+// than touching a path that already exists.
 func (ws *Workspace) addWorktree(p *Project, opts Options) (*git.Worktree, error) {
 	if opts.Branch == "" {
 		return nil, errors.New("a branch is required to create a worktree")
@@ -80,6 +80,16 @@ func (ws *Workspace) addWorktree(p *Project, opts Options) (*git.Worktree, error
 			return nil, fmt.Errorf("%s is not a git repository", p.Name)
 		}
 		return nil, err
+	}
+
+	newBranch := !repo.HasBranch(opts.Branch)
+	if newBranch {
+		if opts.Base == "" {
+			return nil, errors.New("a base branch is required to create a new branch")
+		}
+		if !repo.HasRef(opts.Base) {
+			return nil, fmt.Errorf("base branch %q does not exist", opts.Base)
+		}
 	}
 
 	name := opts.Name
@@ -97,15 +107,25 @@ func (ws *Workspace) addWorktree(p *Project, opts Options) (*git.Worktree, error
 		return nil, err
 	}
 
-	if repo.HasBranch(opts.Branch) {
-		err = repo.AddWorktree(path, opts.Branch)
+	if newBranch {
+		err = repo.AddWorktreeNewBranch(path, opts.Branch, opts.Base)
 	} else {
-		err = repo.AddWorktreeNewBranch(path, opts.Branch)
+		err = repo.AddWorktree(path, opts.Branch)
 	}
 	if err != nil {
 		return nil, err
 	}
 	return &git.Worktree{Path: path, Branch: opts.Branch}, nil
+}
+
+// DefaultBranch is what a new branch in this project should start from.
+// It is "" when the project is not a Git repository.
+func (ws *Workspace) DefaultBranch(p *Project) string {
+	repo, err := git.Open(p.Path)
+	if err != nil {
+		return ""
+	}
+	return repo.DefaultBranch()
 }
 
 // WorktreeInfo describes one worktree tm owns for a project, as listed by

@@ -126,11 +126,46 @@ func (r *Repo) AddWorktree(path, branch string) error {
 	return err
 }
 
-// AddWorktreeNewBranch creates branch from the current HEAD and checks it
-// out into a new worktree at path.
-func (r *Repo) AddWorktreeNewBranch(path, branch string) error {
-	_, err := run(r.Dir, "worktree", "add", "-b", branch, path)
+// AddWorktreeNewBranch creates branch at base and checks it out into a new
+// worktree at path. An empty base means the repository's current HEAD.
+func (r *Repo) AddWorktreeNewBranch(path, branch, base string) error {
+	args := []string{"worktree", "add", "-b", branch, path}
+	if base != "" {
+		// "--" stops base from ever being parsed as an option, even if a
+		// future change makes something dash-prefixed reach this point.
+		args = append(args, "--", base)
+	}
+	_, err := run(r.Dir, args...)
 	return err
+}
+
+// DefaultBranch is the branch new work should start from: main, else master,
+// else whatever the repository currently has checked out.
+func (r *Repo) DefaultBranch() string {
+	for _, name := range []string{"main", "master"} {
+		if r.HasBranch(name) {
+			return name
+		}
+	}
+	branch, err := r.CurrentBranch()
+	if err != nil {
+		return ""
+	}
+	return branch
+}
+
+// HasRef reports whether ref resolves in this repository. Unlike HasBranch it
+// also accepts remote branches such as origin/main, tags and commit ids.
+//
+// Deliberately no "--" before ref: "git rev-parse --verify" requires exactly
+// one revision parameter, and inserting "--" makes it see two ("--" and ref),
+// so it fails with "Needed a single revision" even for a valid ref. In
+// practice this call already rejects every "-"-prefixed value (rev-parse
+// treats it as an option), so there is nothing for "--" to protect against
+// here.
+func (r *Repo) HasRef(ref string) bool {
+	_, err := run(r.Dir, "rev-parse", "--verify", "--quiet", ref)
+	return err == nil
 }
 
 // RemoveWorktree deletes the worktree at path. Without force git refuses

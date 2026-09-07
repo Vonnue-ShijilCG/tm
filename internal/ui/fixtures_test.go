@@ -21,7 +21,7 @@ func makeTerminal(t *testing.T, m Model, key, name, branch string) Model {
 	p := m.form.project
 	before = len(p.Terminals)
 	if branch == "" {
-		m = press(m, "tab", " ", "enter") // worktree off (a no-op on non-git projects)
+		m = press(m, "tab", "tab", " ", "enter") // skip Command, worktree off (a no-op on non-git projects)
 	} else {
 		m = typeText(m, branch)
 		m = press(m, "enter")

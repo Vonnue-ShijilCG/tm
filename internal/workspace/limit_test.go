@@ -155,7 +155,7 @@ func TestOpenAllStopsAtTheLimitAndKeepsTheRestSaved(t *testing.T) {
 	for _, name := range []string{"One", "Two", "Three", "Four", "Five", "Six"} {
 		opts := Options{Name: name}
 		if name == "Two" || name == "Five" {
-			opts = Options{Name: name, Branch: "wt/" + strings.ToLower(name), Worktree: true}
+			opts = Options{Name: name, Branch: "wt/" + strings.ToLower(name), Base: ws.DefaultBranch(app), Worktree: true}
 		}
 		term, err := ws.CreateTerminal(app, opts, 80, 24)
 		if err != nil {

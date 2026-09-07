@@ -109,7 +109,7 @@ func TestWorktreeFromExistingBranch(t *testing.T) {
 func TestWorktreeWithNewBranch(t *testing.T) {
 	r := initRepo(t)
 	path := filepath.Join(t.TempDir(), "pay")
-	if err := r.AddWorktreeNewBranch(path, "feature/payment"); err != nil {
+	if err := r.AddWorktreeNewBranch(path, "feature/payment", ""); err != nil {
 		t.Fatal(err)
 	}
 	if !r.HasBranch("feature/payment") {
@@ -145,7 +145,7 @@ func TestWorktreeRejectsExistingPathAndUnknownBranch(t *testing.T) {
 	if err := r.AddWorktree(filepath.Join(t.TempDir(), "x"), "does-not-exist"); err == nil {
 		t.Error("adding a worktree for an unknown branch should fail")
 	}
-	if err := r.AddWorktreeNewBranch(filepath.Join(t.TempDir(), "y"), "develop"); err == nil {
+	if err := r.AddWorktreeNewBranch(filepath.Join(t.TempDir(), "y"), "develop", ""); err == nil {
 		t.Error("creating a branch that already exists should fail")
 	}
 }
@@ -199,6 +199,100 @@ func TestIsDirtyAndForceRemove(t *testing.T) {
 	}
 	if _, err := IsDirty(filepath.Join(t.TempDir(), "nope")); err == nil {
 		t.Error("IsDirty on a missing directory should fail")
+	}
+}
+
+func TestWorktreeNewBranchStartsFromTheGivenBase(t *testing.T) {
+	r := initRepo(t)
+	head, err := run(r.Dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// feature/login gets a commit of its own, made inside its worktree so the
+	// project checkout is never touched.
+	first := filepath.Join(t.TempDir(), "first")
+	if err := r.AddWorktreeNewBranch(first, "feature/login", ""); err != nil {
+		t.Fatalf("create feature/login: %v", err)
+	}
+	if _, err := run(first, "-c", "user.name=t", "-c", "user.email=t@example.com",
+		"commit", "-q", "--allow-empty", "-m", "work"); err != nil {
+		t.Fatalf("commit on feature/login: %v", err)
+	}
+	tip, err := run(r.Dir, "rev-parse", "feature/login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tip == head {
+		t.Fatal("feature/login must be ahead of HEAD or this test proves nothing")
+	}
+
+	stacked := filepath.Join(t.TempDir(), "stacked")
+	if err := r.AddWorktreeNewBranch(stacked, "feature/login-fix", "feature/login"); err != nil {
+		t.Fatalf("create feature/login-fix: %v", err)
+	}
+	fix, err := run(r.Dir, "rev-parse", "feature/login-fix")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fix != tip {
+		t.Errorf("feature/login-fix is at %s, want the tip of feature/login %s", fix, tip)
+	}
+	if fix == head {
+		t.Error("feature/login-fix started from HEAD, ignoring its base")
+	}
+}
+
+func TestDefaultBranchPrefersMainThenMaster(t *testing.T) {
+	r := initRepo(t) // creates the repository on main
+	if got := r.DefaultBranch(); got != "main" {
+		t.Errorf("DefaultBranch() = %q, want main", got)
+	}
+	if _, err := run(r.Dir, "branch", "-m", "main", "master"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.DefaultBranch(); got != "master" {
+		t.Errorf("after renaming main, DefaultBranch() = %q, want master", got)
+	}
+	if _, err := run(r.Dir, "branch", "-m", "master", "trunk"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.DefaultBranch(); got != "trunk" {
+		t.Errorf("with neither main nor master, DefaultBranch() = %q, want the checked-out branch trunk", got)
+	}
+}
+
+func TestHasRefAcceptsBranchesAndRejectsTypos(t *testing.T) {
+	r := initRepo(t)
+	if _, err := run(r.Dir, "update-ref", "refs/remotes/origin/main", "HEAD"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(r.Dir, "tag", "v1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	head, err := run(r.Dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := strings.TrimSpace(head)
+	for _, ref := range []string{
+		"main", "develop", // local branches, both created by initRepo
+		"origin/main", // remote-tracking branch
+		"v1.0.0",      // tag
+		commit,        // commit id
+	} {
+		if !r.HasRef(ref) {
+			t.Errorf("HasRef(%q) = false, want true", ref)
+		}
+	}
+	for _, ref := range []string{
+		"no/such/branch",
+		"--all",     // dash-prefixed: rev-parse must treat this as an option, not a ref, and reject it
+		"--git-dir", // same
+	} {
+		if r.HasRef(ref) {
+			t.Errorf("HasRef(%q) = true, want false", ref)
+		}
 	}
 }
 

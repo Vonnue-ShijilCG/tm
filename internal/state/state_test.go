@@ -166,6 +166,28 @@ func TestTerminalCommandSurvivesARoundTrip(t *testing.T) {
 	}
 }
 
+func TestLoadStripsNewlinesFromCommand(t *testing.T) {
+	root := t.TempDir()
+	body := `{"version":3,"projects":[{"name":"api","terminals":[{"command":"npm run dev\nrm -rf build"}]}]}`
+	if err := os.WriteFile(filepath.Join(root, FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	got := out.Projects[0].Terminals[0].Command
+	if strings.ContainsAny(got, "\n\r") {
+		t.Errorf("command = %q, should have no newlines", got)
+	}
+	if strings.Contains(got, "devrm") {
+		t.Errorf("command = %q, must not silently weld the two lines together", got)
+	}
+	if got != "npm run dev rm -rf build" {
+		t.Errorf("command = %q, want %q", got, "npm run dev rm -rf build")
+	}
+}
+
 func TestVersion2FileLoadsWithNoCommand(t *testing.T) {
 	root := t.TempDir()
 	body := `{"version":2,"projects":[{"name":"api","terminals":[{"name":"old"}]}]}`

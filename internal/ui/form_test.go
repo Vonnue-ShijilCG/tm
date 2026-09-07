@@ -142,7 +142,7 @@ func TestFormWorktreeToggleOffAndMissingBranch(t *testing.T) {
 		t.Fatalf("empty branch should be rejected, form=%+v spawned=%d", m.form, len(*spawned))
 	}
 
-	m = press(m, "tab", " ") // move to the worktree field and toggle it off
+	m = press(m, "tab", "tab", " ") // move past Command to the worktree field and toggle it off
 	if m.form.field != fieldWorktree || m.form.worktree {
 		t.Fatalf("space on the worktree field should toggle it off (field=%d worktree=%v)", m.form.field, m.form.worktree)
 	}

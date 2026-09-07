@@ -191,15 +191,11 @@ func TestEnterRestoresOnlyUpToTheLimitAndKeepsTheRestSaved(t *testing.T) {
 	write("max_terminals = 4\n")
 	m2, spawned := restartModel(t, m)
 	p := m2.ws.Projects[0]
-	m2 = press(m2, "enter")
-	if len(*spawned) != 1 || len(p.Terminals) != 1 || m2.notice != "" {
-		t.Fatalf("enter restores one terminal: spawned=%d running=%d notice=%q", len(*spawned), len(p.Terminals), m2.notice)
-	}
-	m2 = press(m2, "esc", "m", "a")
+	m2 = press(m2, "enter") // enter restores everything it can, straight up to the limit
 	if len(*spawned) != 4 || len(p.Terminals) != 4 {
-		t.Fatalf("restore all under a lower limit: spawned=%d running=%d", len(*spawned), len(p.Terminals))
+		t.Fatalf("restore up to the limit on enter: spawned=%d running=%d", len(*spawned), len(p.Terminals))
 	}
-	if m2.notice != "restored 3 terminals; 2 not opened: max_terminals (4) reached" {
+	if m2.notice != "restored 4 terminals; 2 not opened: max_terminals (4) reached" {
 		t.Errorf("notice = %q", m2.notice)
 	}
 	if len(p.Saved) != 2 || len(savedNames(m2.root)) != 6 {

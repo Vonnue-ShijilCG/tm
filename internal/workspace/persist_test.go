@@ -18,7 +18,7 @@ func TestSnapshotIncludesRunningAndSavedTerminals(t *testing.T) {
 	app := ws.Projects[0]
 	plain, _ := ws.CreateTerminal(app, Options{Name: "Plain"}, 80, 24)
 	login, _ := ws.CreateTerminal(app, Options{Name: "Login", Branch: "develop", Worktree: true}, 80, 24)
-	pay, _ := ws.CreateTerminal(app, Options{Name: "Payment", Branch: "feature/payment", Worktree: true}, 80, 24)
+	pay, _ := ws.CreateTerminal(app, Options{Name: "Payment", Branch: "feature/payment", Base: ws.DefaultBranch(app), Worktree: true}, 80, 24)
 	_ = pay.Session.Close()
 	ws.Remove(pay.ID) // closed worktree terminal is remembered
 	_ = plain.Session.Close()
@@ -132,7 +132,7 @@ func TestRestoreToleratesMissingAndCorruptFiles(t *testing.T) {
 func TestOpenSavedReusesWorktreeAndPreventsDuplicates(t *testing.T) {
 	ws, spawned := gitWorkspace(t)
 	app := ws.Projects[0]
-	pay, _ := ws.CreateTerminal(app, Options{Name: "Payment", Branch: "feature/payment", Worktree: true}, 80, 24)
+	pay, _ := ws.CreateTerminal(app, Options{Name: "Payment", Branch: "feature/payment", Base: ws.DefaultBranch(app), Worktree: true}, 80, 24)
 	_ = pay.Session.Close()
 	ws.Remove(pay.ID)
 	before, _ := ws.Worktrees(app)
@@ -203,7 +203,7 @@ func TestOpenSavedReusesWorktreeAndPreventsDuplicates(t *testing.T) {
 func TestRemoveWorktreeDropsSavedDefinition(t *testing.T) {
 	ws, _ := gitWorkspace(t)
 	app := ws.Projects[0]
-	pay, _ := ws.CreateTerminal(app, Options{Name: "Payment", Branch: "feature/payment", Worktree: true}, 80, 24)
+	pay, _ := ws.CreateTerminal(app, Options{Name: "Payment", Branch: "feature/payment", Base: ws.DefaultBranch(app), Worktree: true}, 80, 24)
 	_ = pay.Session.Close()
 	ws.Remove(pay.ID)
 	if len(app.Saved) != 1 {
@@ -312,8 +312,8 @@ func TestOpenAllReopensValidSavedTerminalsOnly(t *testing.T) {
 	app := ws.Projects[0]
 	running, _ := ws.CreateTerminal(app, Options{Name: "Running"}, 80, 24)
 	login, _ := ws.CreateTerminal(app, Options{Name: "Login", Branch: "develop", Worktree: true}, 80, 24)
-	dirty, _ := ws.CreateTerminal(app, Options{Name: "Dirty", Branch: "feature/dirty", Worktree: true}, 80, 24)
-	missing, _ := ws.CreateTerminal(app, Options{Name: "Missing", Branch: "feature/missing", Worktree: true}, 80, 24)
+	dirty, _ := ws.CreateTerminal(app, Options{Name: "Dirty", Branch: "feature/dirty", Base: ws.DefaultBranch(app), Worktree: true}, 80, 24)
+	missing, _ := ws.CreateTerminal(app, Options{Name: "Missing", Branch: "feature/missing", Base: ws.DefaultBranch(app), Worktree: true}, 80, 24)
 	for _, term := range []*Terminal{login, dirty, missing} {
 		_ = term.Session.Close()
 		ws.Remove(term.ID)
@@ -391,4 +391,24 @@ func keysOf(m map[string]*Terminal) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+func TestCommandsAreSavedAndRestored(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+	if _, err := ws.CreateTerminal(p, Options{Command: "npm run dev"}, 80, 24); err != nil {
+		t.Fatalf("CreateTerminal: %v", err)
+	}
+	if err := ws.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	reloaded, _ := gitWorkspaceAt(t, ws.Root)
+	if err := reloaded.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	saved := reloaded.Projects[0].Saved
+	if len(saved) != 1 || saved[0].Command != "npm run dev" {
+		t.Fatalf("restored definitions = %+v, want one with the command", saved)
+	}
 }

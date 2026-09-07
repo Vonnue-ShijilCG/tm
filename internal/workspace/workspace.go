@@ -69,6 +69,7 @@ type Options struct {
 	Name     string // kept for saved-state compatibility; no longer shown or set by the form
 	Command  string // run in the terminal's shell when it starts; empty for a plain shell
 	Branch   string // branch to check out when Worktree is set
+	Base     string // what a new Branch starts from; ignored when Branch exists
 	Worktree bool   // create (or check out) Branch in its own worktree
 }
 

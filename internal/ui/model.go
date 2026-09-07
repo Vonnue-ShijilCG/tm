@@ -4,6 +4,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -603,14 +604,13 @@ func (m Model) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// enterProject is what Enter on a project does: go to its workspace, and
-// never produce more than one new pane. A project with running terminals
-// is focused as it is — hidden terminals stay hidden, unless nothing at all
-// is visible, in which case the active one is shown. A project with saved
-// definitions and nothing running gets exactly one of them back (the one
-// that had focus, else the first restorable); the rest wait in the manager
-// or come back all at once with a there. An empty project gets its first
-// shell.
+// enterProject is what Enter on a project does: go to its workspace. A
+// project with running terminals is focused as it is — hidden terminals
+// stay hidden, unless nothing at all is visible, in which case the active
+// one is shown. A project with saved definitions and nothing running gets
+// all of them back at once, in their saved layout (see Model.restore); when
+// none of them can actually run, the project falls back to a fresh shell
+// and the notice explains why. An empty project gets its first shell.
 func (m Model) enterProject(p *workspace.Project) (tea.Model, tea.Cmd) {
 	switch {
 	case p.ActiveTerminal() != nil:
@@ -623,32 +623,20 @@ func (m Model) enterProject(p *workspace.Project) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case len(p.Saved) > 0:
-		return m.restoreOne(p)
+		next, cmd, res := m.restore(p)
+		if len(res.Opened) == 0 {
+			notice := restoreNotice(res)
+			model, cmd := m.newTerminal(p)
+			fresh := model.(Model)
+			if notice != "" {
+				fresh.notice = notice // keep the "unavailable" summary; newTerminal's save would clear it
+			}
+			return fresh, cmd
+		}
+		return next, cmd
 	default:
 		return m.newTerminal(p)
 	}
-}
-
-// restoreOne brings back a single saved terminal of p (see
-// Workspace.RestoreOne) as the project's one visible pane. The saved layout
-// is kept for a later "restore all". When nothing is restorable the project
-// still opens with a fresh shell and the notice says what was unavailable.
-func (m Model) restoreOne(p *workspace.Project) (tea.Model, tea.Cmd) {
-	cols, rows := m.terminalSize()
-	res := m.ws.RestoreOne(p, cols, rows)
-	if len(res.Opened) == 0 {
-		notice := restoreNotice(res)
-		model, cmd := m.newTerminal(p)
-		fresh := model.(Model)
-		if notice != "" {
-			fresh.notice = notice // keep the "unavailable" summary; newTerminal's save would clear it
-		}
-		return fresh, cmd
-	}
-	cmd := m.showOpened(p, res.Opened[0])
-	m.notice = restoreNotice(res)
-	m.noteLimit()
-	return m, cmd
 }
 
 // showOpened puts a terminal that was just started into the project's
@@ -1143,7 +1131,33 @@ func headerStyle(focused bool) lipgloss.Style {
 // checkout is a worktree is otherwise not the user's concern, and custom
 // names are not part of the identity.
 func (m Model) paneTitle(p *workspace.Project, t *workspace.Terminal) string {
-	return identity(fmt.Sprintf("Terminal %d", t.Num), m.branches.get(t.Dir(p)), t.Worktree != nil)
+	return identity(terminalLabel(t), m.branches.get(t.Dir(p)), t.Worktree != nil)
+}
+
+// terminalLabel is a running terminal's display name wherever one is
+// needed: its command when it has one (more use than a number for telling
+// panes apart), else "Terminal N". Shared by the pane header, the Terminal
+// Manager and the deletion prompt so the three never drift apart.
+func terminalLabel(t *workspace.Terminal) string {
+	if t.Command != "" {
+		return stripControlChars(t.Command)
+	}
+	return fmt.Sprintf("Terminal %d", t.Num)
+}
+
+// stripControlChars removes control characters (C0, DEL and C1, including
+// U+009B which xterm in UTF-8 mode still honours as CSI) from s. A stored
+// command is free text that can contain raw ESC or other control bytes; left
+// in a label, they can rewrite the surrounding terminal display (pane
+// header, manager row, deletion prompt) instead of just being shown as
+// text. Everything else, including multi-byte UTF-8, is left unchanged.
+func stripControlChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
 
 // identity joins a terminal's label and its Git context: `label · ⎇ branch`,

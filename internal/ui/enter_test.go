@@ -31,7 +31,7 @@ func stateLeaves(l *state.Layout) int {
 	return stateLeaves(l.First) + stateLeaves(l.Second)
 }
 
-func TestEnterRestoresOnlyTheFocusedTerminalAndAKeepsTheLayout(t *testing.T) {
+func TestEnterRestoresEveryTerminalAndKeepsTheLayout(t *testing.T) {
 	m, root := arranged(t) // Login | (Payment / Dev), stack ratio 0.4, Login focused, then quit
 	m2, spawned := restartModel(t, m)
 	app := m2.ws.Projects[0]
@@ -40,46 +40,22 @@ func TestEnterRestoresOnlyTheFocusedTerminalAndAKeepsTheLayout(t *testing.T) {
 		t.Errorf("sidebar must not expose saved counts:\n%s", view)
 	}
 
-	m2 = press(m2, "enter")
-	if len(*spawned) != 1 || len(app.Terminals) != 1 || app.Terminals[0].Name != "Login" {
-		t.Fatalf("enter should restore the focused terminal only, spawned=%d terminals=%+v", len(*spawned), app.Terminals)
-	}
-	if !m2.layouts[app].isLeaf() || m2.focus != focusMain || m2.notice != "" {
-		t.Errorf("one pane, focused, no notice: layout=%+v focus=%v notice=%q", m2.layouts[app], m2.focus, m2.notice)
-	}
-	if len(app.Saved) != 2 || app.Layout == nil || len(app.Layout.Leaves()) != 3 {
-		t.Errorf("the other definitions and the whole saved layout must stay in memory: saved=%d layout=%v", len(app.Saved), app.Layout)
-	}
-	if f, _ := state.Load(root); stateLeaves(f.Projects[0].Layout) != 3 || len(f.Projects[0].Terminals) != 3 {
-		t.Errorf("enter must not rewrite the saved layout: %+v", f.Projects[0].Layout)
-	}
-	m2 = press(m2, "alt+n", "tab", " ", "enter") // a new plain terminal placed next to Login
-	if len(*spawned) != 2 || len(m2.layouts[app].leaves()) != 2 {
-		t.Fatalf("new terminal: spawned=%d visible=%d", len(*spawned), len(m2.layouts[app].leaves()))
-	}
-	if len(app.Layout.Leaves()) != 3 {
-		t.Error("creating a terminal must not throw the saved layout away while it still has terminals to restore")
-	}
-	m2 = press(m2, "alt+delete", "y") // drop the extra shell for good
-	if len(app.Terminals) != 1 {
-		t.Fatalf("after delete: terminals=%d", len(app.Terminals))
-	}
-	m2 = press(m2, "esc", "m", "a") // the saved layout describes exactly the terminals now running
-	if len(*spawned) != 4 || len(app.Terminals) != 3 {
-		t.Fatalf("a should restore the remaining two, spawned=%d terminals=%d", len(*spawned), len(app.Terminals))
+	m2 = press(m2, "enter") // enter should restore every saved terminal, not just the focused one
+	if len(*spawned) != 3 || len(app.Terminals) != 3 {
+		t.Fatalf("enter should restore all saved terminals, spawned=%d terminals=%+v", len(*spawned), app.Terminals)
 	}
 	r := m2.layouts[app]
 	if got := strings.Join(names(r), ","); got != "Login,Payment,Dev" || r.dir != splitSide || r.b.dir != splitStack {
-		t.Errorf("layout not restored: %s %+v", got, r)
+		t.Errorf("saved layout not rebuilt: %s %+v", got, r)
 	}
 	if ratio := r.b.ratio; ratio < 0.39 || ratio > 0.41 {
 		t.Errorf("ratio not restored: %v", ratio)
 	}
-	if app.ActiveTerminal().Name != "Login" || m2.focus != focusMain {
-		t.Errorf("focus not restored: %v", app.ActiveTerminal())
+	if app.ActiveTerminal().Name != "Login" || m2.focus != focusMain || m2.notice != "" {
+		t.Errorf("saved focus honoured, no notice: active=%v focus=%v notice=%q", app.ActiveTerminal(), m2.focus, m2.notice)
 	}
-	if m2.panel != nil {
-		t.Error("restore all should close the manager")
+	if len(app.Saved) != 0 {
+		t.Errorf("nothing should be left saved once everything is restored: saved=%d", len(app.Saved))
 	}
 	if list, _ := m2.ws.Worktrees(app); len(list) != 2 {
 		t.Errorf("worktrees must be reused, got %d", len(list))
@@ -120,14 +96,10 @@ func TestEnterPartialRestoreReportsUnavailable(t *testing.T) {
 	m2, spawned := restartModel(t, m)
 	m2 = press(m2, "enter")
 	app := m2.ws.Projects[0]
-	if len(*spawned) != 1 || app.Terminals[0].Name != "Login" || m2.notice != "" {
-		t.Fatalf("enter restores the focused Login and says nothing about the rest: spawned=%d notice=%q", len(*spawned), m2.notice)
-	}
-	m2 = press(m2, "esc", "m", "a")
 	if len(*spawned) != 2 || len(app.Terminals) != 2 {
-		t.Fatalf("a should restore Dev and skip Payment, spawned=%d", len(*spawned))
+		t.Fatalf("enter should restore everything it can (Login and Dev) and skip Payment, spawned=%d", len(*spawned))
 	}
-	if !strings.Contains(m2.notice, "restored 1 terminal;") || !strings.Contains(m2.notice, "1 unavailable") || !strings.Contains(m2.notice, "Payment") {
+	if !strings.Contains(m2.notice, "restored 2 terminals;") || !strings.Contains(m2.notice, "1 unavailable") || !strings.Contains(m2.notice, "Payment") {
 		t.Errorf("notice = %q", m2.notice)
 	}
 	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "feature-payment")); !os.IsNotExist(err) {
@@ -136,9 +108,12 @@ func TestEnterPartialRestoreReportsUnavailable(t *testing.T) {
 	if got := strings.Join(names(m2.layouts[app]), ","); got != "Login,Dev" {
 		t.Errorf("layout should collapse around the missing terminal: %s", got)
 	}
+	if app.ActiveTerminal().Name != "Login" || m2.focus != focusMain {
+		t.Errorf("saved focus (Login) is still available so it should win: %v", app.ActiveTerminal())
+	}
 }
 
-func TestEnterFallsBackToFirstRestorableWhenFocusedIsUnavailable(t *testing.T) {
+func TestEnterFallsBackWhenTheSavedFocusIsUnavailable(t *testing.T) {
 	m, root := arranged(t) // Login focused
 	if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "develop")); err != nil {
 		t.Fatal(err)
@@ -146,11 +121,17 @@ func TestEnterFallsBackToFirstRestorableWhenFocusedIsUnavailable(t *testing.T) {
 	m2, spawned := restartModel(t, m)
 	m2 = press(m2, "enter")
 	app := m2.ws.Projects[0]
-	if len(*spawned) != 1 || app.Terminals[0].Name != "Payment" {
-		t.Fatalf("Payment is the first restorable definition in saved order, got spawned=%d %+v", len(*spawned), app.Terminals)
+	if len(*spawned) != 2 || len(app.Terminals) != 2 {
+		t.Fatalf("Payment and Dev are restorable even though Login (the saved focus) is not: spawned=%d %+v", len(*spawned), app.Terminals)
 	}
-	if !strings.Contains(m2.notice, "restored 1 terminal;") || !strings.Contains(m2.notice, "Login") {
+	if !strings.Contains(m2.notice, "restored 2 terminals;") || !strings.Contains(m2.notice, "Login") {
 		t.Errorf("notice should explain the fallback: %q", m2.notice)
+	}
+	// Login (unavailable) drops out of the saved side|stack layout, leaving
+	// just the Payment/Dev stack; arrange places Dev last, so Dev is where
+	// focus falls back to.
+	if app.ActiveTerminal().Name != "Dev" {
+		t.Errorf("the unavailable saved focus cannot win, want fallback to Dev: %v", app.ActiveTerminal())
 	}
 	if _, err := os.Stat(filepath.Join(root, workspace.WorktreesDir, "app", "develop")); !os.IsNotExist(err) {
 		t.Error("missing worktree must not be recreated")
@@ -189,13 +170,13 @@ func TestEnterKeepsProjectsSeparate(t *testing.T) {
 	}
 	m2, spawned2 := restartModel(t, m)
 	backend, ecommerce := m2.ws.Projects[0], m2.ws.Projects[1]
-	m2 = press(m2, "enter")             // backend: one of its two shells
+	m2 = press(m2, "enter")             // backend: both of its saved shells come back
 	m2 = press(m2, "esc", "j", "enter") // ecommerce
 	m2 = press(m2, "esc", "k", "enter") // back to backend: running, so nothing new
-	if len(*spawned2) != 2 {
-		t.Fatalf("spawned %d, want 2 (one per project, no duplicates on re-enter)", len(*spawned2))
+	if len(*spawned2) != 3 {
+		t.Fatalf("spawned %d, want 3 (backend's two plus ecommerce's one, no duplicates on re-enter)", len(*spawned2))
 	}
-	if len(m2.layouts[backend].leaves()) != 1 || len(m2.layouts[ecommerce].leaves()) != 1 || len(backend.Saved) != 1 {
+	if len(m2.layouts[backend].leaves()) != 2 || len(m2.layouts[ecommerce].leaves()) != 1 || len(backend.Saved) != 0 {
 		t.Errorf("layouts mixed: backend=%d ecommerce=%d backend saved=%d", len(m2.layouts[backend].leaves()), len(m2.layouts[ecommerce].leaves()), len(backend.Saved))
 	}
 	for _, term := range m2.layouts[backend].leaves() {

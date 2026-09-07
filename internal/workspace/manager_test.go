@@ -29,8 +29,8 @@ func TestRowsAreTerminalFirstAndListUnusedWorktreesApart(t *testing.T) {
 	app := ws.Projects[0]
 	ws.NewTerminal(app, 80, 24)
 	login, _ := ws.CreateTerminal(app, Options{Name: "Login", Branch: "develop", Worktree: true}, 80, 24)
-	orphan, _ := ws.CreateTerminal(app, Options{Name: "Old", Branch: "feature/old", Worktree: true}, 80, 24)
-	pay, _ := ws.CreateTerminal(app, Options{Name: "Payment", Branch: "feature/pay", Worktree: true}, 80, 24)
+	orphan, _ := ws.CreateTerminal(app, Options{Name: "Old", Branch: "feature/old", Base: ws.DefaultBranch(app), Worktree: true}, 80, 24)
+	pay, _ := ws.CreateTerminal(app, Options{Name: "Payment", Branch: "feature/pay", Base: ws.DefaultBranch(app), Worktree: true}, 80, 24)
 	ws.Remove(pay.ID)    // exits: saved
 	ws.detach(orphan.ID) // gone without cleanup, as an older tm left it: its worktree is now unused
 
@@ -147,6 +147,37 @@ func TestRestoreOnePrefersTheFocusedThenTheFirstRestorable(t *testing.T) {
 	res = ws.RestoreOne(app, 80, 24)
 	if len(res.Opened) != 0 || res.NotOpened == 0 {
 		t.Errorf("restore one at the limit: %+v", res)
+	}
+}
+
+func TestRestoreSkippedLabelPrefersCommandOverName(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	app := ws.Projects[0]
+	// The new form never sets Name, so a skipped definition must be labelled
+	// by its Command rather than falling straight through to "shell".
+	deploy, err := ws.CreateTerminal(app, Options{Command: "deploy", Branch: "develop", Worktree: true}, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws.Remove(deploy.ID)
+	os.RemoveAll(deploy.Worktree.Path)
+
+	res := ws.RestoreOne(app, 80, 24)
+	if len(res.Opened) != 0 || len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0], "deploy (worktree directory missing)") {
+		t.Errorf("skipped label should use Command, not \"shell\": %+v", res.Skipped)
+	}
+
+	// A definition with neither Name nor Command still falls back to "shell".
+	app.Saved = nil
+	plain, err := ws.CreateTerminal(app, Options{Branch: "feature/plain", Base: ws.DefaultBranch(app), Worktree: true}, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws.Remove(plain.ID)
+	os.RemoveAll(plain.Worktree.Path)
+	res = ws.RestoreOne(app, 80, 24)
+	if len(res.Opened) != 0 || len(res.Skipped) != 1 || !strings.Contains(res.Skipped[0], "shell (worktree directory missing)") {
+		t.Errorf("fallback to \"shell\" when Name and Command are both empty: %+v", res.Skipped)
 	}
 }
 

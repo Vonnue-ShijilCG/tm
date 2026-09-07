@@ -400,11 +400,7 @@ func TestAsymmetricSavedLayoutRestoresExactly(t *testing.T) {
 
 	m2, spawned := restartModel(t, m)
 	p2 := m2.ws.Projects[0]
-	m2 = press(m2, "enter") // one terminal back...
-	if len(*spawned) != 1 || !m2.layouts[p2].isLeaf() || len(p2.Layout.Leaves()) != 2 {
-		t.Fatalf("enter restores one pane and keeps the saved layout: spawned=%d", len(*spawned))
-	}
-	m2 = press(m2, "esc", "m", "a") // ...then the rest, in the saved arrangement
+	m2 = press(m2, "enter") // both come back at once, in the saved arrangement
 	root := m2.layouts[p2]
 	if len(*spawned) != 2 || root == nil || root.isLeaf() {
 		t.Fatalf("restore: spawned=%d root=%+v", len(*spawned), root)

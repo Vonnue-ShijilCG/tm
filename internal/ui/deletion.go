@@ -18,7 +18,7 @@ import (
 func deletionPrompt(ws *workspace.Workspace, p *workspace.Project, def workspace.SavedTerminal, running *workspace.Terminal) string {
 	who := "this saved terminal"
 	if running != nil {
-		who = fmt.Sprintf("Terminal %d", running.Num)
+		who = terminalLabel(running)
 	}
 	if def.Worktree == "" {
 		if running != nil {
@@ -44,7 +44,7 @@ func deletionPrompt(ws *workspace.Workspace, p *workspace.Project, def workspace
 func deletionNotice(def workspace.SavedTerminal, running *workspace.Terminal, note string) string {
 	s := "deleted saved terminal"
 	if running != nil {
-		s = fmt.Sprintf("deleted Terminal %d", running.Num)
+		s = "deleted " + terminalLabel(running)
 	}
 	switch {
 	case note != "":

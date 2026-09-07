@@ -253,8 +253,12 @@ func (mg *manager) lines(i int, r managerRow, width int) []string {
 	}
 
 	label, program, state := "Terminal", "", "saved"
+	if cmd := r.terminal.Definition.Command; cmd != "" {
+		label = stripControlChars(cmd)
+	}
 	if t := r.terminal.Terminal; t != nil {
-		label, program, state = fmt.Sprintf("Terminal %d", t.Num), programOf(t), "hidden"
+		label = terminalLabel(t)
+		program, state = programOf(t), "hidden"
 		if r.visible {
 			mark, state = "●", "visible"
 		}

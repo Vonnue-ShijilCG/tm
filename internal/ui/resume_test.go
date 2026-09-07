@@ -49,7 +49,7 @@ func TestStateIsSavedOnCreateCloseAndQuit(t *testing.T) {
 	if m.form == nil {
 		t.Fatal("form should stay open after the branch error")
 	}
-	m = press(m, "tab", " ", "enter") // ...so one tab reaches the worktree toggle; off -> plain terminal
+	m = press(m, "tab", "tab", " ", "enter") // ...so two tabs (skipping Command) reach the worktree toggle; off -> plain terminal
 	f, _ = state.Load(root)
 	if len(f.Projects[0].Terminals) != 2 {
 		t.Fatalf("state after second create = %+v", f.Projects[0].Terminals)
@@ -72,15 +72,17 @@ func TestStateIsSavedOnCreateCloseAndQuit(t *testing.T) {
 		t.Error("closing must not delete the worktree")
 	}
 
-	// Enter on the project restores one (the last focused, Login); a in the
-	// manager brings the other back; quit saves them as running.
+	// Enter on the project restores both saved terminals at once; quit
+	// saves them as running.
 	m = press(m, "enter")
-	if len(*spawned) != 3 || m.ws.Projects[0].Terminals[0].Name != "Login" {
-		t.Fatalf("enter should restore Login only, spawned=%d (notice=%q)", len(*spawned), m.notice)
+	hasLogin := false
+	for _, term := range m.ws.Projects[0].Terminals {
+		if term.Name == "Login" {
+			hasLogin = true
+		}
 	}
-	m = press(m, "esc", "m", "a")
-	if len(*spawned) != 4 {
-		t.Fatalf("a should restore the rest, spawned=%d (notice=%q)", len(*spawned), m.notice)
+	if len(*spawned) != 4 || len(m.ws.Projects[0].Terminals) != 2 || !hasLogin {
+		t.Fatalf("enter should restore both saved terminals, spawned=%d terminals=%+v (notice=%q)", len(*spawned), m.ws.Projects[0].Terminals, m.notice)
 	}
 	m = press(m, "esc")
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})

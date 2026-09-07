@@ -66,7 +66,7 @@ func TestDeleteTerminalRemovesItsDedicatedWorktree(t *testing.T) {
 
 	// A saved definition whose worktree directory vanished: the definition
 	// goes and git's stale record is pruned, without failing.
-	pay, _ := ws.CreateTerminal(app, Options{Name: "Pay", Branch: "feature/pay", Worktree: true}, 80, 24)
+	pay, _ := ws.CreateTerminal(app, Options{Name: "Pay", Branch: "feature/pay", Base: ws.DefaultBranch(app), Worktree: true}, 80, 24)
 	ws.Remove(pay.ID)
 	os.RemoveAll(pay.Worktree.Path)
 	if info, ok := ws.WorktreeStatus(app, pay.Worktree.Path); !ok || !info.Missing {

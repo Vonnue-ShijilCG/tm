@@ -295,7 +295,7 @@ func TestHidingTheLastVisibleTerminalIsAllowed(t *testing.T) {
 	}
 }
 
-func TestSavedLayoutSurvivesEnterUntilEverythingIsBack(t *testing.T) {
+func TestSavedLayoutRestoresEntirelyOnEnter(t *testing.T) {
 	m, _, _ := gridModel(t, 4, 100, 30)
 	root := m.root
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
@@ -305,17 +305,9 @@ func TestSavedLayoutSurvivesEnterUntilEverythingIsBack(t *testing.T) {
 	}
 	m2, spawned := restartModel(t, m)
 	p := m2.ws.Projects[0]
-	m2 = press(m2, "enter")
-	if len(*spawned) != 1 || !m2.layouts[p].isLeaf() {
-		t.Fatalf("enter: spawned=%d", len(*spawned))
-	}
-	f1, _ := state.Load(root)
-	if stateLeaves(f1.Projects[0].Layout) != 4 || dumpLayout(f1.Projects[0].Layout) != dumpLayout(f0.Projects[0].Layout) {
-		t.Errorf("enter must not rewrite the saved layout:\n%s\n%s", dumpLayout(f0.Projects[0].Layout), dumpLayout(f1.Projects[0].Layout))
-	}
-	m2 = press(m2, "esc", "m", "a")
+	m2 = press(m2, "enter") // everything comes back at once, in the saved 2x2 grid
 	if len(*spawned) != 4 || shape(m2.layouts[p]) != "2,2" {
-		t.Errorf("a should restore the 2x2 grid: spawned=%d shape=%s", len(*spawned), shape(m2.layouts[p]))
+		t.Fatalf("enter should restore the 2x2 grid: spawned=%d shape=%s", len(*spawned), shape(m2.layouts[p]))
 	}
 	// Now everything the layout knows is visible: a resize is the user's new layout.
 	m2 = press(m2, "alt+=")
