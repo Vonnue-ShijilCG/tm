@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -17,6 +18,10 @@ type fakeSession struct {
 	keys       []uv.KeyPressEvent
 	text       []string
 	title      string
+	history    int  // lines of scrollback the fake claims to have
+	alt        bool // the fake program is on the alternate screen
+	mouse      bool // the fake program has enabled mouse tracking
+	wheels     []wheelCall
 	closed     bool
 	output     chan struct{}
 	done       chan struct{}
@@ -31,11 +36,27 @@ func (f *fakeSession) SendKey(k uv.KeyPressEvent) { f.keys = append(f.keys, k) }
 func (f *fakeSession) SendText(t string)          { f.text = append(f.text, t) }
 func (f *fakeSession) Resize(c, r int)            { f.cols, f.rows = c, r }
 func (f *fakeSession) Render(bool) string         { return "SCREEN:" + f.dir + ":" + f.title }
-func (f *fakeSession) Title() string              { return f.title }
-func (f *fakeSession) Output() <-chan struct{}    { return f.output }
-func (f *fakeSession) Done() <-chan struct{}      { return f.done }
-func (f *fakeSession) Err() error                 { return f.err }
-func (f *fakeSession) Close() error               { f.closed = true; close(f.done); return nil }
+func (f *fakeSession) RenderScrolled(off int) string {
+	return fmt.Sprintf("SCROLLED:%d:%s", off, f.dir)
+}
+func (f *fakeSession) ScrollbackLen() int  { return f.history }
+func (f *fakeSession) IsAltScreen() bool   { return f.alt }
+func (f *fakeSession) MouseTracking() bool { return f.mouse }
+func (f *fakeSession) SendWheel(up bool, x, y int) {
+	f.wheels = append(f.wheels, wheelCall{up, x, y})
+}
+
+// wheelCall is one SendWheel the UI made on a fake session.
+type wheelCall struct {
+	up   bool
+	x, y int
+}
+
+func (f *fakeSession) Title() string           { return f.title }
+func (f *fakeSession) Output() <-chan struct{} { return f.output }
+func (f *fakeSession) Done() <-chan struct{}   { return f.done }
+func (f *fakeSession) Err() error              { return f.err }
+func (f *fakeSession) Close() error            { f.closed = true; close(f.done); return nil }
 
 // newTestModel wires a Model to fake sessions and reports every spawn.
 func newTestModel(t *testing.T) (Model, *[]*fakeSession) {

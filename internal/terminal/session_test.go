@@ -136,3 +136,79 @@ func waitFor(t *testing.T, s *Session, want string) {
 		}
 	}
 }
+
+func TestRenderScrolledShowsHistoryAboveTheScreen(t *testing.T) {
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "i=1; while [ $i -le 30 ]; do printf 'line-%s\\n' $i; i=$((i+1)); done; sleep 30"}, Dir: t.TempDir(), Cols: 20, Rows: 5})
+	waitFor(t, s, "line-30")
+
+	// 30 lines through a 5-row screen: rows hold line-27..line-30 plus the
+	// cursor row, everything before is history.
+	if n := s.ScrollbackLen(); n != 26 {
+		t.Fatalf("ScrollbackLen() = %d, want 26", n)
+	}
+
+	got := strings.Split(s.RenderScrolled(3), "\n")
+	if len(got) != 5 {
+		t.Fatalf("RenderScrolled(3) has %d lines, want 5:\n%s", len(got), strings.Join(got, "\n"))
+	}
+	if !strings.Contains(got[0], "line-24") || !strings.Contains(got[2], "line-26") || !strings.Contains(got[3], "line-27") || !strings.Contains(got[4], "line-28") {
+		t.Errorf("RenderScrolled(3) shows wrong lines:\n%s", strings.Join(got, "\n"))
+	}
+
+	top := strings.Split(s.RenderScrolled(1000), "\n") // clamps to the history length
+	if !strings.Contains(top[0], "line-1\x1b") && !strings.HasSuffix(strings.TrimRight(top[0], " "), "line-1") {
+		t.Errorf("RenderScrolled(1000) should start at the oldest line:\n%s", strings.Join(top, "\n"))
+	}
+
+	if live := s.RenderScrolled(0); live != s.Render(false) {
+		t.Errorf("RenderScrolled(0) should equal the live screen\n got: %q\nwant: %q", live, s.Render(false))
+	}
+}
+
+func TestIsAltScreenFollowsTheProgram(t *testing.T) {
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "printf 'main\\n'; sleep 0.3; printf '\\033[?1049halt\\n'; sleep 30"}, Dir: t.TempDir(), Cols: 20, Rows: 5})
+	waitFor(t, s, "main")
+	if s.IsAltScreen() {
+		t.Fatal("IsAltScreen() = true before the program switched screens")
+	}
+	waitFor(t, s, "alt")
+	if !s.IsAltScreen() {
+		t.Fatal("IsAltScreen() = false after \\e[?1049h")
+	}
+	if n := s.ScrollbackLen(); n != 0 {
+		t.Errorf("ScrollbackLen() on the alternate screen = %d, want 0", n)
+	}
+}
+
+func TestSendWheelReachesAProgramThatTracksTheMouse(t *testing.T) {
+	// The program enables normal mouse tracking with SGR encoding, then echoes
+	// whatever it reads with escapes made visible.
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "printf '\\033[?1000h\\033[?1006h'; cat -v"}, Dir: t.TempDir(), Cols: 40, Rows: 5})
+	waitUntil(t, s.MouseTracking, "program to enable mouse tracking")
+
+	s.SendWheel(true, 5, 3)
+
+	waitFor(t, s, "^[[<64;6;4M") // SGR wheel-up at 1-based column 6, row 4
+}
+
+func TestMouseTrackingFollowsTheProgram(t *testing.T) {
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "sleep 0.3; printf '\\033[?1002h'; sleep 0.5; printf '\\033[?1002l'; sleep 30"}, Dir: t.TempDir(), Cols: 20, Rows: 5})
+	if s.MouseTracking() {
+		t.Fatal("MouseTracking() = true before the program asked for it")
+	}
+	waitUntil(t, s.MouseTracking, "mouse tracking on")
+	waitUntil(t, func() bool { return !s.MouseTracking() }, "mouse tracking off")
+}
+
+// waitUntil polls cond until it holds or the timeout passes.
+func waitUntil(t *testing.T, cond func() bool, what string) {
+	t.Helper()
+	deadline := time.Now().Add(waitTimeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %s", what)
+}

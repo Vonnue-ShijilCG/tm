@@ -29,6 +29,11 @@ type Session interface {
 	SendText(string)
 	Resize(cols, rows int)
 	Render(showCursor bool) string
+	RenderScrolled(offset int) string // the screen scrolled back offset lines into history
+	ScrollbackLen() int               // lines of history available to RenderScrolled
+	IsAltScreen() bool                // the program runs full-screen and keeps no history
+	MouseTracking() bool              // the program asked for mouse events and should get the wheel
+	SendWheel(up bool, x, y int)      // one wheel notch at screen-relative cell (x, y), encoded as the program expects
 	Title() string
 	Output() <-chan struct{}
 	Done() <-chan struct{}

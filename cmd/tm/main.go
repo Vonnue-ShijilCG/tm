@@ -31,6 +31,6 @@ func run() error {
 		return fmt.Errorf("discover projects in %s: %w", root, err)
 	}
 
-	_, err = tea.NewProgram(ui.New(root, projects), tea.WithAltScreen()).Run()
+	_, err = tea.NewProgram(ui.New(root, projects), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
 	return err
 }

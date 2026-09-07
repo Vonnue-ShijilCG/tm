@@ -16,15 +16,20 @@ type fakeSession struct {
 	closed     bool
 }
 
-func (f *fakeSession) SendKey(uv.KeyPressEvent) {}
-func (f *fakeSession) SendText(string)          {}
-func (f *fakeSession) Resize(c, r int)          { f.cols, f.rows = c, r }
-func (f *fakeSession) Render(bool) string       { return "" }
-func (f *fakeSession) Title() string            { return "" }
-func (f *fakeSession) Output() <-chan struct{}  { return nil }
-func (f *fakeSession) Done() <-chan struct{}    { return nil }
-func (f *fakeSession) Err() error               { return nil }
-func (f *fakeSession) Close() error             { f.closed = true; return nil }
+func (f *fakeSession) SendKey(uv.KeyPressEvent)  {}
+func (f *fakeSession) SendText(string)           {}
+func (f *fakeSession) Resize(c, r int)           { f.cols, f.rows = c, r }
+func (f *fakeSession) Render(bool) string        { return "" }
+func (f *fakeSession) RenderScrolled(int) string { return "" }
+func (f *fakeSession) ScrollbackLen() int        { return 0 }
+func (f *fakeSession) IsAltScreen() bool         { return false }
+func (f *fakeSession) MouseTracking() bool       { return false }
+func (f *fakeSession) SendWheel(bool, int, int)  {}
+func (f *fakeSession) Title() string             { return "" }
+func (f *fakeSession) Output() <-chan struct{}   { return nil }
+func (f *fakeSession) Done() <-chan struct{}     { return nil }
+func (f *fakeSession) Err() error                { return nil }
+func (f *fakeSession) Close() error              { f.closed = true; return nil }
 
 // TestMain points the configuration at an empty directory so every test
 // sees the default limit regardless of the developer's own config file.

@@ -62,6 +62,8 @@ type Model struct {
 
 	zoom bool // render only the focused terminal at full size; the layout tree is untouched
 
+	scroll map[*workspace.Terminal]int // lines scrolled back into history per pane; absent or 0 = live
+
 	deleting     *workspace.Terminal          // alt+delete pressed: waiting for y to delete this terminal for good
 	deletePrompt string                       // the question shown while deleting is set
 	layouts      map[*workspace.Project]*pane // visible panes per project; nil root = none (running terminals not in the tree are hidden)
@@ -75,7 +77,7 @@ type Model struct {
 // New builds a Model for the given workspace root and its projects, and
 // restores saved terminal definitions from the workspace state file.
 func New(root string, projects []project.Project) Model {
-	m := Model{root: root, ws: workspace.New(root, projects, spawnShell), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}, branches: newBranchLookup()}
+	m := Model{root: root, ws: workspace.New(root, projects, spawnShell), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}, scroll: map[*workspace.Terminal]int{}, branches: newBranchLookup()}
 	if err := m.ws.Restore(); err != nil {
 		m.notice = "could not read saved state: " + err.Error()
 	}
@@ -133,6 +135,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, p := range m.ws.Projects {
 			m.applyLayout(p)
 		}
+
+	case tea.MouseMsg:
+		m.handleMouse(msg)
 
 	case tea.KeyMsg:
 		if m.help {
@@ -227,6 +232,7 @@ func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace
 	case key.Matches(msg, keys.DeleteTerm):
 		m.deleting, m.deletePrompt = t, deletionPrompt(m.ws, p, t.Definition(), t) // destructive: ask first
 	default:
+		delete(m.scroll, t) // typing returns a scrolled pane to live first
 		forwardKey(t.Session, msg)
 	}
 	return m, nil
@@ -480,6 +486,7 @@ func (m *Model) grownGrid(root *pane, nt *workspace.Terminal) *pane {
 // the grid is rebuilt from the remaining terminals in reading order so it
 // stays a grid. Manual layouts are only ever collapsed.
 func (m *Model) dropPane(p *workspace.Project, t *workspace.Terminal) {
+	delete(m.scroll, t)
 	root := m.layouts[p]
 	if root == nil || !root.contains(t) {
 		return
@@ -520,6 +527,9 @@ func (m Model) paneRects(p *workspace.Project) map[*workspace.Terminal]rect {
 func (m *Model) applyLayout(p *workspace.Project) {
 	if m.width == 0 {
 		return
+	}
+	for _, t := range p.Terminals { // the emulator reflows on resize, so history offsets no longer line up
+		delete(m.scroll, t)
 	}
 	if t := p.ActiveTerminal(); m.zoom && t != nil && p == m.selectedProject() {
 		area := m.mainArea()
@@ -1088,9 +1098,14 @@ func (m Model) renderPane(p *workspace.Project, n *pane, r rect, active *workspa
 
 // renderLeaf draws one terminal into exactly r.w x r.h cells.
 func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, focused bool) string {
-	header := headerStyle(focused).Render(ansi.Truncate(" "+m.paneTitle(p, t)+" ", r.w, "…"))
+	title, screen := m.paneTitle(p, t), t.Session.Render(focused)
+	if off := m.scroll[t]; off > 0 {
+		title += fmt.Sprintf(" %s %d", scrollMark, off)
+		screen = t.Session.RenderScrolled(off)
+	}
+	header := headerStyle(focused).Render(ansi.Truncate(" "+title+" ", r.w, "…"))
 	lines := []string{header}
-	for i, line := range strings.Split(t.Session.Render(focused), "\n") {
+	for i, line := range strings.Split(screen, "\n") {
 		if i >= r.h-paneHeaderHeight {
 			break
 		}
