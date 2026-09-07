@@ -112,6 +112,21 @@ and filtering as the user types:
   pressing Enter is unchanged.
 - `Esc` clears a highlight if there is one, otherwise cancels the form.
 
+## Delivery: two phases, two plans
+
+The spec is one design but too large for a single implementation plan, and the
+halves are independently useful:
+
+**Phase 1 — location resolution.** The branch determines the destination, a branch
+already checked out reuses its location, one worktree per branch, many terminals
+per directory, the Location line replaces the toggle, duplicate commands confirm.
+The Branch field stays a plain text input. This alone removes the dead end and
+unblocks dev-server-plus-shell.
+
+**Phase 2 — the picker.** The filtering list, recency ordering and location
+annotations for both the Branch and From fields, replacing the truncated hint.
+This needs Phase 1's location data to annotate rows, so it follows.
+
 ## Code changes by package
 
 - **`git`**: `Branches()` returns `[]Branch{Name, Updated, Worktree}` instead of
@@ -143,7 +158,7 @@ and filtering as the user types:
 | --- | --- |
 | Branch checked out in the project checkout | Terminal opens in the checkout; no worktree made. |
 | Branch in a foreign worktree | Terminal opens there; tm notes it did not create it. |
-| Branch with a worktree whose directory is missing | Reported; tm offers to recreate it rather than silently making a second. |
+| Branch with a worktree whose directory is missing | Refused with the path, and the stale entry is listed in the manager for removal, as today. tm does not silently create a second. |
 | Empty branch field | Project checkout. |
 | New branch, empty base | Refused, as today. |
 | Duplicate command in the same directory | Confirmed once, then allowed. |
