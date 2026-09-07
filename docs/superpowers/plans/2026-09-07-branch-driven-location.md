@@ -433,8 +433,18 @@ type Location struct {
     Terminals []*Terminal // tm's terminals already running at Path
 }
 
-func (ws *Workspace) Locate(p *Project, branch string) Location
+// Snapshot gathers the repository state once; Locate then answers with no
+// further git calls, so a caller may resolve on every keystroke.
+func (ws *Workspace) Snapshot(p *Project) LocationSource
+func (s LocationSource) Locate(branch string) Location
 ```
+
+**Why a snapshot rather than `Locate(p, branch)` directly:** the form resolves a
+location on every keystroke in the branch field. Reaching for git each time would
+mean `git.Open`, `worktree list`, `HasBranch` and `CurrentBranch` per character —
+over a hundred subprocesses while typing a 40-character branch name, and a
+visible stall on a repository with 180 branches. The existing form already avoids
+this by fetching branches once in `newForm`. Gather once, resolve in memory.
 
 This produces every row of the behaviour table. Task 5 only renders it.
 
@@ -451,7 +461,7 @@ func TestLocateAnEmptyBranchIsTheProjectCheckout(t *testing.T) {
 	ws, _ := gitWorkspace(t)
 	p := ws.Projects[0]
 
-	loc := ws.Locate(p, "")
+	loc := ws.Snapshot(p).Locate("")
 
 	if loc.Kind != LocationCheckout {
 		t.Errorf("Kind = %v, want LocationCheckout", loc.Kind)
@@ -469,7 +479,7 @@ func TestLocateTheCheckoutsOwnBranchIsTheCheckout(t *testing.T) {
 		t.Fatalf("Branches: %v", err)
 	}
 
-	loc := ws.Locate(p, current)
+	loc := ws.Snapshot(p).Locate(current)
 
 	if loc.Kind != LocationCheckout {
 		t.Errorf("Kind = %v, want LocationCheckout for the checked-out branch", loc.Kind)
@@ -487,7 +497,7 @@ func TestLocateAnExistingWorktreeAndItsTerminals(t *testing.T) {
 		t.Fatalf("CreateTerminal: %v", err)
 	}
 
-	loc := ws.Locate(p, "feature/login")
+	loc := ws.Snapshot(p).Locate("feature/login")
 
 	if loc.Kind != LocationWorktree {
 		t.Errorf("Kind = %v, want LocationWorktree", loc.Kind)
@@ -522,7 +532,7 @@ func TestLocateAnUncheckedOutBranchIsANewWorktree(t *testing.T) {
 		t.Skip("fixture has only one branch")
 	}
 
-	loc := ws.Locate(p, free)
+	loc := ws.Snapshot(p).Locate(free)
 
 	if loc.Kind != LocationNewWorktree {
 		t.Errorf("Kind = %v, want LocationNewWorktree for a branch checked out nowhere", loc.Kind)
@@ -535,7 +545,7 @@ func TestLocateAnUncheckedOutBranchIsANewWorktree(t *testing.T) {
 func TestLocateAnUnknownBranchNeedsABase(t *testing.T) {
 	ws, _ := gitWorkspace(t)
 
-	loc := ws.Locate(ws.Projects[0], "feature/does-not-exist")
+	loc := ws.Snapshot(ws.Projects[0]).Locate("feature/does-not-exist")
 
 	if loc.Kind != LocationNewWorktree {
 		t.Errorf("Kind = %v, want LocationNewWorktree", loc.Kind)
@@ -549,7 +559,7 @@ func TestLocateAnUnknownBranchNeedsABase(t *testing.T) {
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/workspace -run TestLocate -v`
-Expected: FAIL to build — `ws.Locate undefined`, `LocationCheckout undefined`.
+Expected: FAIL to build — `ws.Snapshot undefined`, `LocationCheckout undefined`.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -584,51 +594,86 @@ type Location struct {
 	Terminals []*Terminal // tm's terminals already running at Path
 }
 
-// Locate resolves a branch name to the one place a terminal for it can run.
-// An empty branch means the project checkout. tm can only report on terminals
-// it started: Terminals being empty does not prove the directory is idle.
-func (ws *Workspace) Locate(p *Project, branch string) Location {
+// LocationSource is the repository state Locate needs, gathered once so that a
+// caller resolving on every keystroke costs no git subprocesses.
+type LocationSource struct {
+	ws        *Workspace
+	project   *Project
+	isGit     bool
+	current   string          // branch the project checkout has
+	branches  map[string]bool // every local branch
+	worktrees []git.Worktree  // every checkout git reports, tm's or not
+}
+
+// Snapshot gathers the repository state a form needs, in one pass.
+func (ws *Workspace) Snapshot(p *Project) LocationSource {
+	src := LocationSource{ws: ws, project: p, branches: map[string]bool{}}
 	repo, err := git.Open(p.Path)
 	if err != nil {
-		return ws.withTerminals(p, Location{Kind: LocationPlainDir, Path: p.Path})
+		return src
+	}
+	src.isGit = true
+	src.current, _ = repo.CurrentBranch()
+	if names, err := repo.Branches(); err == nil {
+		for _, b := range names {
+			src.branches[b] = true
+		}
+	}
+	src.worktrees, _ = repo.Worktrees()
+	return src
+}
+
+// Locate resolves a branch to the one place a terminal for it can run, using
+// only the snapshot. An empty branch means the project checkout. tm can report
+// only on terminals it started: an empty Terminals list does not prove the
+// directory is idle.
+func (s LocationSource) Locate(branch string) Location {
+	if !s.isGit {
+		return s.withTerminals(Location{Kind: LocationPlainDir, Path: s.project.Path})
 	}
 	if branch == "" {
-		current, _ := repo.CurrentBranch()
-		return ws.withTerminals(p, Location{Kind: LocationCheckout, Path: p.Path, Branch: current})
+		return s.withTerminals(Location{Kind: LocationCheckout, Path: s.project.Path, Branch: s.current})
 	}
-	if wt, ok := repo.WorktreeFor(branch); ok {
-		if wt.IsMain {
-			return ws.withTerminals(p, Location{Kind: LocationCheckout, Path: wt.Path, Branch: branch})
+	for _, wt := range s.worktrees {
+		if wt.Branch != branch {
+			continue
 		}
-		return ws.withTerminals(p, Location{
+		if wt.IsMain {
+			return s.withTerminals(Location{Kind: LocationCheckout, Path: wt.Path, Branch: branch})
+		}
+		return s.withTerminals(Location{
 			Kind:    LocationWorktree,
 			Path:    wt.Path,
 			Branch:  branch,
-			Foreign: ws.ownedName(p, wt.Path) == "",
+			Foreign: s.ws.ownedName(s.project, wt.Path) == "",
 		})
 	}
-	path, err := WorktreePath(ws.Root, p.Name, branch)
+	path, err := WorktreePath(s.ws.Root, s.project.Name, branch)
 	if err != nil {
 		path = ""
 	}
-	return ws.withTerminals(p, Location{
+	return s.withTerminals(Location{
 		Kind:      LocationNewWorktree,
 		Path:      path,
 		Branch:    branch,
-		NewBranch: !repo.HasBranch(branch),
+		NewBranch: !s.branches[branch],
 	})
 }
 
 // withTerminals fills in the terminals tm is running at the location's path.
-func (ws *Workspace) withTerminals(p *Project, loc Location) Location {
-	for _, t := range p.Terminals {
-		if t.Dir(p) == loc.Path {
+func (s LocationSource) withTerminals(loc Location) Location {
+	for _, t := range s.project.Terminals {
+		if t.Dir(s.project) == loc.Path {
 			loc.Terminals = append(loc.Terminals, t)
 		}
 	}
 	return loc
 }
 ```
+
+Note `Snapshot` uses `repo.Worktrees()` directly rather than
+`ws.Worktrees(p)`, because the latter filters out every worktree tm did not
+create — and a foreign worktree is exactly what case 4 must resolve.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -772,7 +817,9 @@ func (ws *Workspace) Snapshot(p *Project) LocationSource
 func (s LocationSource) Locate(branch string) Location
 ```
 
-`newForm` calls `ws.Snapshot(p)` once and stores the result as `f.snap`; every
+`newForm` calls `ws.Snapshot(p)` once and stores the result as `f.snap` (type
+`workspace.LocationSource`), setting `f.loc = f.snap.Locate("")` for the initial
+empty-branch state; every
 keystroke calls `f.snap.Locate(...)`, which touches no subprocess. The snapshot
 goes stale if the repository changes while the form is open, which is acceptable
 — the form is short-lived, and creation still validates against live git.
