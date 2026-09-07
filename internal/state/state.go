@@ -181,8 +181,10 @@ func Save(root string, f File) error {
 
 // sanitized drops entries that could not have been written by tm: project
 // names that are not a single path segment and worktree paths that are
-// absolute or escape the workspace. A worktree appears at most once; plain
-// terminals may repeat (a project can have several shells).
+// absolute or escape the workspace. A worktree may be shared by several
+// terminals, distinguished by name and command; only an exact duplicate
+// (same name, command and worktree) collapses to one. Plain terminals may
+// repeat too (a project can have several shells).
 func (f File) sanitized() File {
 	out := File{Version: f.Version, Projects: []Project{}}
 	for _, p := range f.Projects {
@@ -202,10 +204,11 @@ func (f File) sanitized() File {
 				continue
 			}
 			if t.Worktree != "" {
-				if seen[t.Worktree] {
+				key := t.Name + "\x00" + t.Command + "\x00" + t.Worktree
+				if seen[key] {
 					continue
 				}
-				seen[t.Worktree] = true
+				seen[key] = true
 			}
 			remap[i] = len(terms)
 			terms = append(terms, t)

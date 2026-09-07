@@ -2,7 +2,6 @@ package workspace
 
 import (
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -112,15 +111,17 @@ func (ws *Workspace) projectByName(name string) *Project {
 	return nil
 }
 
-// remember adds a saved definition. A worktree is remembered once and not
-// while a running terminal uses it; plain terminals may repeat.
+// remember keeps a definition that is not running. A worktree may hold
+// several definitions, distinguished by their full identity (name, command
+// and worktree path, which Key() already expresses) - two shells in a
+// directory are no more a conflict than two in the project checkout. Plain
+// terminals (no worktree) are never deduplicated here: unnamed shells with
+// no command share a key and are matched positionally on restore, so both
+// must stay in Saved for that matching to have two entries to work with.
 func (p *Project) remember(s SavedTerminal) {
 	if s.Worktree != "" {
-		if p.terminalUsing(s.Worktree) != nil {
-			return
-		}
 		for _, cur := range p.Saved {
-			if cur.Worktree == s.Worktree {
+			if cur.key() == s.key() {
 				return
 			}
 		}
@@ -152,13 +153,14 @@ func (ws *Workspace) OpenSaved(p *Project, s SavedTerminal, cols, rows int) (*Te
 		}
 		return t, err
 	}
-	if t := p.terminalUsing(s.Worktree); t != nil {
-		return nil, fmt.Errorf("terminal %d is already running in this worktree", t.Num)
+	// A terminal may live in any checkout of this project, including worktrees
+	// another tool created. Removal stays restricted to tm's own directory by
+	// RemoveWorktree, which is the guard that actually protects the user.
+	repo, err := git.Open(p.Path)
+	if err != nil {
+		return nil, err
 	}
-	if ws.ownedName(p, s.Worktree) == "" {
-		return nil, fmt.Errorf("refusing to open %s: not under %s", s.Worktree, WorktreesDir)
-	}
-	worktrees, err := ws.Worktrees(p)
+	worktrees, err := repo.Worktrees()
 	if err != nil {
 		return nil, err
 	}

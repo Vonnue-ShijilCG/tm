@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Vonnue-ShijilCG/tm/internal/git"
 	"github.com/Vonnue-ShijilCG/tm/internal/project"
 	"github.com/Vonnue-ShijilCG/tm/internal/state"
 )
@@ -170,19 +171,25 @@ func TestOpenSavedReusesWorktreeAndPreventsDuplicates(t *testing.T) {
 		t.Errorf("reopened terminal should get the next number, got %d", reopened.Num)
 	}
 
-	// Opening again while it runs is refused.
-	if _, err := ws.OpenSaved(app, saved, 80, 24); err == nil || !strings.Contains(err.Error(), "already running") {
-		t.Errorf("duplicate open: err = %v", err)
+	// Opening the same definition again while it runs now succeeds too: a
+	// worktree may host more than one terminal, just like the project
+	// checkout.
+	again, err := ws.OpenSaved(app, saved, 80, 24)
+	if err != nil {
+		t.Errorf("second open in the same worktree: %v", err)
 	}
-	if len(*spawned) != 2 {
-		t.Error("refused open must not spawn")
+	if again.Worktree == nil || again.Worktree.Path != pay.Worktree.Path {
+		t.Errorf("second terminal should also run in the reused worktree: %+v", again)
+	}
+	if len(*spawned) != 3 {
+		t.Errorf("second open should spawn a session, got %d", len(*spawned))
 	}
 
 	// A saved plain terminal reopens in the project checkout.
 	app.remember(SavedTerminal{Name: "Plain"})
 	plain, err := ws.OpenSaved(app, find("Plain"), 80, 24)
-	if err != nil || plain.Worktree != nil || (*spawned)[2].dir != app.Path || plain.Name != "Plain" {
-		t.Errorf("plain reopen: term=%+v err=%v dir=%s", plain, err, (*spawned)[2].dir)
+	if err != nil || plain.Worktree != nil || (*spawned)[3].dir != app.Path || plain.Name != "Plain" {
+		t.Errorf("plain reopen: term=%+v err=%v dir=%s", plain, err, (*spawned)[3].dir)
 	}
 
 	// Missing and stale worktrees are never created behind the user's back.
@@ -410,5 +417,73 @@ func TestCommandsAreSavedAndRestored(t *testing.T) {
 	saved := reloaded.Projects[0].Saved
 	if len(saved) != 1 || saved[0].Command != "npm run dev" {
 		t.Fatalf("restored definitions = %+v, want one with the command", saved)
+	}
+}
+
+func TestTwoTerminalsInOneWorktreeBothSurviveARestart(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+	for _, cmd := range []string{"claude", "npm run dev"} {
+		if _, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/pair", Base: ws.DefaultBranch(p), Command: cmd}, 80, 24); err != nil {
+			t.Fatalf("create %q: %v", cmd, err)
+		}
+	}
+	if err := ws.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	reloaded, _ := gitWorkspaceAt(t, ws.Root)
+	if err := reloaded.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	saved := reloaded.Projects[0].Saved
+	if len(saved) != 2 {
+		t.Fatalf("restored %d definitions, want 2: %+v", len(saved), saved)
+	}
+	got := map[string]bool{}
+	for _, s := range saved {
+		got[s.Command] = true
+	}
+	if !got["claude"] || !got["npm run dev"] {
+		t.Errorf("restored commands = %+v, want both claude and npm run dev", saved)
+	}
+}
+
+func TestASecondSavedTerminalInOneWorktreeCanBeOpened(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+	first, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/pair", Base: ws.DefaultBranch(p), Command: "claude"}, 80, 24)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	def := SavedTerminal{Command: "npm run dev", Branch: "feature/pair", Worktree: first.Worktree.Path}
+	if _, err := ws.OpenSaved(p, def, 80, 24); err != nil {
+		t.Fatalf("opening a second terminal in the same worktree: %v", err)
+	}
+	if len(p.Terminals) != 2 {
+		t.Fatalf("project has %d terminals, want 2", len(p.Terminals))
+	}
+}
+
+func TestATerminalInAForeignWorktreeReopensAfterARestart(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+
+	// A worktree created outside tm, the way another tool would make one.
+	foreign := filepath.Join(t.TempDir(), "foreign")
+	repo, err := git.Open(p.Path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := repo.AddWorktreeNewBranch(foreign, "feature/foreign", ws.DefaultBranch(p)); err != nil {
+		t.Fatalf("creating a foreign worktree: %v", err)
+	}
+
+	def := SavedTerminal{Command: "claude", Branch: "feature/foreign", Worktree: foreign}
+	if _, err := ws.OpenSaved(p, def, 80, 24); err != nil {
+		t.Fatalf("opening a terminal in a worktree tm did not create: %v", err)
+	}
+	if got := p.Terminals[0].Dir(p); got != foreign {
+		t.Errorf("terminal runs in %q, want the foreign worktree %q", got, foreign)
 	}
 }

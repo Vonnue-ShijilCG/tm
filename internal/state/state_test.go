@@ -82,7 +82,9 @@ func TestLoadIgnoresUnknownFieldsAndInvalidEntries(t *testing.T) {
 	      {"name": "Abs", "worktree": "/etc"},
 	      {"name": "Escape", "worktree": "../../etc"},
 	      {"name": "Dup", "worktree": ".terminal-worktrees/app/dup"},
-	      {"name": "Dup2", "worktree": ".terminal-worktrees/app/dup"},
+	      {"name": "Dup", "worktree": ".terminal-worktrees/app/dup"},
+	      {"name": "Pair", "command": "claude", "worktree": ".terminal-worktrees/app/pair"},
+	      {"name": "Pair", "command": "npm run dev", "worktree": ".terminal-worktrees/app/pair"},
 	      {}, {}
 	    ]},
 	    {"name": "../evil", "terminals": [{"name": "x"}]},
@@ -103,7 +105,13 @@ func TestLoadIgnoresUnknownFieldsAndInvalidEntries(t *testing.T) {
 		t.Fatalf("projects = %+v, want only app", f.Projects)
 	}
 	got := f.Projects[0].Terminals
-	want := []Terminal{{Name: "Ok", Worktree: ".terminal-worktrees/app/ok"}, {Name: "Dup", Worktree: ".terminal-worktrees/app/dup"}, {}, {}}
+	want := []Terminal{
+		{Name: "Ok", Worktree: ".terminal-worktrees/app/ok"},
+		{Name: "Dup", Worktree: ".terminal-worktrees/app/dup"}, // an exact duplicate still collapses to one
+		{Name: "Pair", Command: "claude", Worktree: ".terminal-worktrees/app/pair"},
+		{Name: "Pair", Command: "npm run dev", Worktree: ".terminal-worktrees/app/pair"}, // different command: both kept, a worktree may hold several terminals
+		{}, {},
+	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("terminals = %+v, want %+v", got, want)
 	}

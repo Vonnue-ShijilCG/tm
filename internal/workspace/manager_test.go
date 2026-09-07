@@ -100,8 +100,15 @@ func TestOpenSavedStartsExactlyOneAndReusesTheWorktree(t *testing.T) {
 	if after, _ := ws.Worktrees(app); len(after) != len(before) {
 		t.Errorf("worktree must be reused: %d -> %d", len(before), len(after))
 	}
-	if _, err := ws.OpenSaved(app, SavedTerminal{Name: "Login", Branch: "develop", Worktree: login.Worktree.Path}, 80, 24); err == nil || !strings.Contains(err.Error(), "already running") {
-		t.Errorf("a worktree in use is refused: %v", err)
+	// A second definition for the same worktree now opens rather than being
+	// refused: two shells may share a worktree just as they can share the
+	// project checkout.
+	t3, err := ws.OpenSaved(app, SavedTerminal{Name: "Login2", Command: "npm run dev", Branch: "develop", Worktree: login.Worktree.Path}, 80, 24)
+	if err != nil || t3.Worktree == nil || t3.Worktree.Path != login.Worktree.Path {
+		t.Fatalf("a second terminal in the same worktree should be allowed: %+v %v", t3, err)
+	}
+	if len(app.Terminals) != 2 {
+		t.Errorf("both terminals sharing the worktree should be running, got %d", len(app.Terminals))
 	}
 }
 
