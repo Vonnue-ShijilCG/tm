@@ -95,8 +95,8 @@ func TestFormCreatesWorktreeTerminal(t *testing.T) {
 	}
 }
 
-func TestFormNewBranchAndDuplicateBranchError(t *testing.T) {
-	m, spawned, _ := gitModel(t)
+func TestFormNewBranchAndReusingItOpensTheSameWorktree(t *testing.T) {
+	m, spawned, root := gitModel(t)
 
 	m = press(m, "n")
 	m = typeText(m, "feature/payment") // does not exist yet
@@ -108,27 +108,30 @@ func TestFormNewBranchAndDuplicateBranchError(t *testing.T) {
 		t.Fatalf("create with new branch failed: form=%+v spawned=%d", m.form, len(*spawned))
 	}
 
-	// The same branch again from terminal mode: alt+n opens the form, create
-	// fails, the form stays open with the error and nothing was spawned.
+	// The same branch again from terminal mode: alt+n opens the form, and
+	// since the branch already has a worktree, create reuses it rather than
+	// failing (git allows a branch in only one checkout).
 	m = press(m, "alt+n")
 	if m.form == nil || m.form.back != focusMain {
 		t.Fatal("alt+n should open the form and remember to return to the terminal")
 	}
 	m = typeText(m, "feature/payment")
+	if !strings.Contains(m.View(), "(existing)") {
+		t.Errorf("typing a branch that now exists should say so:\n%s", m.View())
+	}
 	m = press(m, "enter")
-	if m.form == nil || !strings.Contains(m.form.err, "already exists") {
-		t.Fatalf("a branch whose worktree already exists should keep the form open with an error, form=%+v", m.form)
+	if m.form != nil {
+		t.Fatalf("reusing an existing worktree should succeed and close the form, form=%+v", m.form)
 	}
-	if !strings.Contains(m.View(), "already exists") {
-		t.Error("error should be rendered in the form")
+	if len(*spawned) != 2 {
+		t.Fatalf("reuse should still spawn a second terminal, spawned=%d", len(*spawned))
 	}
-	if len(*spawned) != 1 {
-		t.Error("failed create must not spawn a shell")
+	wantDir := filepath.Join(root, workspace.WorktreesDir, "app", "feature-payment")
+	if (*spawned)[0].dir != wantDir || (*spawned)[1].dir != wantDir {
+		t.Errorf("both terminals should share the worktree dir %s, spawned=%+v", wantDir, *spawned)
 	}
-
-	m = press(m, "esc")
-	if m.form != nil || m.focus != focusMain {
-		t.Errorf("esc should cancel back to the terminal, form=%v focus=%v", m.form, m.focus)
+	if m.focus != focusMain {
+		t.Error("new terminal should be focused")
 	}
 }
 

@@ -82,6 +82,14 @@ func (ws *Workspace) addWorktree(p *Project, opts Options) (*git.Worktree, error
 		return nil, err
 	}
 
+	if wt, ok := repo.WorktreeFor(opts.Branch); ok {
+		// Git allows a branch in only one checkout, so the answer is never to
+		// create a second: the terminal belongs in the one that exists. This
+		// includes worktrees tm did not create; removal is still restricted to
+		// tm's own directory by RemoveWorktree.
+		return &git.Worktree{Path: wt.Path, Branch: opts.Branch}, nil
+	}
+
 	newBranch := !repo.HasBranch(opts.Branch)
 	if newBranch {
 		if opts.Base == "" {

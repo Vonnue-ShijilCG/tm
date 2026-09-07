@@ -98,6 +98,40 @@ func TestAnExistingBranchIgnoresTheBase(t *testing.T) {
 	}
 }
 
+func TestABranchWithAWorktreeReusesItRatherThanFailing(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+
+	first, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/login", Base: ws.DefaultBranch(p)}, 80, 24)
+	if err != nil {
+		t.Fatalf("first terminal: %v", err)
+	}
+	path := first.Worktree.Path
+
+	second, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/login"}, 80, 24)
+	if err != nil {
+		t.Fatalf("second terminal on the same branch should reuse the worktree, got: %v", err)
+	}
+	if second.Worktree == nil || second.Worktree.Path != path {
+		t.Fatalf("second terminal is at %+v, want the same worktree %q", second.Worktree, path)
+	}
+	if len(p.Terminals) != 2 {
+		t.Fatalf("project has %d terminals, want 2", len(p.Terminals))
+	}
+}
+
+func TestReusingAWorktreeNeedsNoBase(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+	if _, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/x", Base: ws.DefaultBranch(p)}, 80, 24); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	// The branch now exists and has a worktree, so no base is needed or used.
+	if _, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/x", Base: "no/such/base"}, 80, 24); err != nil {
+		t.Fatalf("reuse should ignore the base entirely, got: %v", err)
+	}
+}
+
 // gitWorkspace builds <root>/app (a repo with one commit on main) and
 // <root>/plain (a directory with an empty .git, i.e. not a usable repo).
 func gitWorkspace(t *testing.T) (*Workspace, *[]*fakeSession) {
@@ -240,7 +274,6 @@ func TestWorktreeCreationErrors(t *testing.T) {
 		want string
 	}{
 		{"same name twice", app, Options{Name: "Dup", Branch: "other", Base: ws.DefaultBranch(app), Worktree: true}, "already exists"},
-		{"branch checked out elsewhere", app, Options{Name: "Main2", Branch: "main", Worktree: true}, "already"},
 		{"missing branch", app, Options{Name: "X", Worktree: true}, "branch is required"},
 		{"bad name", app, Options{Name: "..", Branch: "b", Base: ws.DefaultBranch(app), Worktree: true}, "invalid worktree name"},
 		{"non-git project", plain, Options{Name: "P", Branch: "b", Worktree: true}, "not a git repository"},
@@ -258,6 +291,24 @@ func TestWorktreeCreationErrors(t *testing.T) {
 	// A non-git project still gets ordinary terminals.
 	if _, err := ws.CreateTerminal(plain, Options{Name: "Shell"}, 80, 24); err != nil {
 		t.Errorf("plain terminal in non-git project failed: %v", err)
+	}
+}
+
+// TestBranchCheckedOutElsewhereReusesThatWorktree replaces the old
+// "branch checked out elsewhere" failure case in TestWorktreeCreationErrors:
+// requesting "main" (checked out in the project's own checkout, not a linked
+// worktree) used to be refused with "already"; now the reuse contract means
+// the terminal is simply placed in that existing checkout instead.
+func TestBranchCheckedOutElsewhereReusesThatWorktree(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	app := ws.Projects[0]
+
+	term, err := ws.CreateTerminal(app, Options{Name: "Main2", Branch: "main", Worktree: true}, 80, 24)
+	if err != nil {
+		t.Fatalf("reusing the branch checked out in the project's own checkout should succeed, got: %v", err)
+	}
+	if term.Worktree == nil || term.Worktree.Path != app.Path {
+		t.Errorf("term.Worktree = %+v, want path %q (the project's own checkout)", term.Worktree, app.Path)
 	}
 }
 
