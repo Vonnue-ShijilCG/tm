@@ -602,7 +602,7 @@ import (
 )
 
 func TestFormReportsTheProjectCheckoutWhenNoBranchIsTyped(t *testing.T) {
-	m := gitModel(t)
+	m, _, _ := gitModel(t)
 	m = press(m, "n")
 	if m.form == nil {
 		t.Fatal("n should open the form")
@@ -619,7 +619,7 @@ func TestFormReportsTheProjectCheckoutWhenNoBranchIsTyped(t *testing.T) {
 }
 
 func TestFormReportsANewWorktreeForAnUnknownBranch(t *testing.T) {
-	m := gitModel(t)
+	m, _, _ := gitModel(t)
 	m = press(m, "n")
 	m = typeText(m, "feature/brand-new")
 
@@ -634,7 +634,7 @@ func TestFormReportsANewWorktreeForAnUnknownBranch(t *testing.T) {
 }
 ```
 
-`gitModel(t)` is the existing Git-backed helper used by `resume_test.go` and `form_test.go`. Check its exact signature before use and match it.
+`gitModel(t)` is the existing Git-backed helper in `internal/ui/form_test.go`. Its signature is `func gitModel(t *testing.T) (Model, *[]*fakeSession, string)` — a model, the spawned fake sessions, and the workspace root — so call it as `m, _, _ := gitModel(t)` when only the model is needed.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -790,7 +790,7 @@ Append to `internal/ui/location_test.go`:
 
 ```go
 func TestADuplicateCommandInTheSameDirectoryAsksFirst(t *testing.T) {
-	m := gitModel(t)
+	m, _, _ := gitModel(t)
 	m = press(m, "n")
 	m = press(m, "tab") // to Command
 	m = typeText(m, "claude")
@@ -818,7 +818,7 @@ func TestADuplicateCommandInTheSameDirectoryAsksFirst(t *testing.T) {
 }
 
 func TestADifferentCommandInTheSameDirectoryDoesNotAsk(t *testing.T) {
-	m := gitModel(t)
+	m, _, _ := gitModel(t)
 	m = press(m, "n")
 	m = press(m, "tab")
 	m = typeText(m, "claude")
