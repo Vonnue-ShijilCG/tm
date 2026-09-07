@@ -795,30 +795,34 @@ git commit -m "Add a command field to the new-terminal form"
 
 - [ ] **Step 1: Write the failing test**
 
-Append to `internal/git/git_test.go`:
+Append to `internal/git/git_test.go`. Note that `initRepo` builds its repo on
+`main`, adds a `develop` branch, and passes the git identity per command, so any
+commit a test makes must pass `-c user.name` / `-c user.email` too:
 
 ```go
 func TestWorktreeNewBranchStartsFromTheGivenBase(t *testing.T) {
 	r := initRepo(t)
-	if err := r.AddWorktreeNewBranch(filepath.Join(t.TempDir(), "wt"), "feature/login", ""); err != nil {
+	head, err := run(r.Dir, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// feature/login gets a commit of its own, made inside its worktree so the
+	// project checkout is never touched.
+	first := filepath.Join(t.TempDir(), "first")
+	if err := r.AddWorktreeNewBranch(first, "feature/login", ""); err != nil {
 		t.Fatalf("create feature/login: %v", err)
+	}
+	if _, err := run(first, "-c", "user.name=t", "-c", "user.email=t@example.com",
+		"commit", "-q", "--allow-empty", "-m", "work"); err != nil {
+		t.Fatalf("commit on feature/login: %v", err)
 	}
 	tip, err := run(r.Dir, "rev-parse", "feature/login")
 	if err != nil {
 		t.Fatal(err)
 	}
-	head, err := run(r.Dir, "rev-parse", "HEAD")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if tip != head {
-		t.Fatalf("an empty base should branch from HEAD: %s vs %s", tip, head)
-	}
-
-	// A commit on feature/login moves it ahead of HEAD; a branch based on it
-	// must start there, not at HEAD.
-	if _, err := run(r.Dir, "commit", "--allow-empty", "-m", "work", "--", ); err != nil {
-		_ = err // committing on a checked-out branch happens in the worktree below
+	if tip == head {
+		t.Fatal("feature/login must be ahead of HEAD or this test proves nothing")
 	}
 
 	stacked := filepath.Join(t.TempDir(), "stacked")
@@ -829,37 +833,39 @@ func TestWorktreeNewBranchStartsFromTheGivenBase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	base, err := run(r.Dir, "rev-parse", "feature/login")
-	if err != nil {
-		t.Fatal(err)
+	if fix != tip {
+		t.Errorf("feature/login-fix is at %s, want the tip of feature/login %s", fix, tip)
 	}
-	if fix != base {
-		t.Errorf("feature/login-fix is at %s, want the tip of feature/login %s", fix, base)
+	if fix == head {
+		t.Error("feature/login-fix started from HEAD, ignoring its base")
 	}
 }
 
-func TestDefaultBranchPrefersMain(t *testing.T) {
-	r := initRepo(t)
-	current, err := r.CurrentBranch()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := run(r.Dir, "branch", "main"); err != nil && current != "main" {
-		t.Fatal(err)
-	}
+func TestDefaultBranchPrefersMainThenMaster(t *testing.T) {
+	r := initRepo(t) // creates the repository on main
 	if got := r.DefaultBranch(); got != "main" {
 		t.Errorf("DefaultBranch() = %q, want main", got)
+	}
+	if _, err := run(r.Dir, "branch", "-m", "main", "master"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.DefaultBranch(); got != "master" {
+		t.Errorf("after renaming main, DefaultBranch() = %q, want master", got)
+	}
+	if _, err := run(r.Dir, "branch", "-m", "master", "trunk"); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.DefaultBranch(); got != "trunk" {
+		t.Errorf("with neither main nor master, DefaultBranch() = %q, want the checked-out branch trunk", got)
 	}
 }
 
 func TestHasRefAcceptsBranchesAndRejectsTypos(t *testing.T) {
 	r := initRepo(t)
-	current, err := r.CurrentBranch()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !r.HasRef(current) {
-		t.Errorf("HasRef(%q) = false, want true", current)
+	for _, ref := range []string{"main", "develop"} { // both created by initRepo
+		if !r.HasRef(ref) {
+			t.Errorf("HasRef(%q) = false, want true", ref)
+		}
 	}
 	if r.HasRef("no/such/branch") {
 		t.Error("HasRef on a missing ref = true, want false")
@@ -867,7 +873,7 @@ func TestHasRefAcceptsBranchesAndRejectsTypos(t *testing.T) {
 }
 ```
 
-If `path/filepath` is not imported in `git_test.go`, add it. Remove the stray empty-commit block if `initRepo` already leaves a usable HEAD — the assertions that matter are the two `rev-parse` comparisons.
+If `path/filepath` is not imported in `git_test.go`, add it.
 
 - [ ] **Step 2: Run test to verify it fails**
 
