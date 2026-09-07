@@ -38,7 +38,7 @@ Setup for all examples: workspace `~/work`, project `app`, whose checkout is on 
 | 5 | Types `feature/old` (exists, checked out nowhere) | New worktree `~/work/.terminal-worktrees/app/feature-old` | `new worktree · .terminal-worktrees/app/feature-old` | tm creates the worktree and checks the branch out into it |
 | 6 | Types `feature/new` (does not exist) | New branch, new worktree | `new branch` on the Branch row, the `From` field appears, `new worktree · …/feature-new` | Branch created from the base, worktree created |
 | 7 | Types `feature/login` again, with a second terminal | Same existing worktree | Location line lists the terminal already there | A second terminal in that worktree — allowed |
-| 8 | Types `feature/login`, command `claude`, and `claude` already runs there | Same existing worktree | Confirmation: `claude is already running here. Start another? y/n` | Only on an exact command match in the same directory |
+| 8 | Types `feature/login`, command `claude`, and `claude` already runs there | Same existing worktree | `claude is already running here. Press enter again to start another.` | Only on an exact command match in the same directory |
 | 9 | Non-Git project | Project directory | `project directory (not a git repository)` | A shell there; no branch or base fields at all |
 
 ---
@@ -289,9 +289,39 @@ func TestASecondSavedTerminalInOneWorktreeCanBeOpened(t *testing.T) {
 }
 ```
 
+Also append this test, which covers the second gate — it is the one that catches
+the foreign-worktree trap:
+
+```go
+func TestATerminalInAForeignWorktreeReopensAfterARestart(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+
+	// A worktree created outside tm, the way another tool would make one.
+	foreign := filepath.Join(t.TempDir(), "foreign")
+	repo, err := git.Open(p.Path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := repo.AddWorktreeNewBranch(foreign, "feature/foreign", ws.DefaultBranch(p)); err != nil {
+		t.Fatalf("creating a foreign worktree: %v", err)
+	}
+
+	def := SavedTerminal{Command: "claude", Branch: "feature/foreign", Worktree: foreign}
+	if _, err := ws.OpenSaved(p, def, 80, 24); err != nil {
+		t.Fatalf("opening a terminal in a worktree tm did not create: %v", err)
+	}
+	if got := p.Terminals[0].Dir(p); got != foreign {
+		t.Errorf("terminal runs in %q, want the foreign worktree %q", got, foreign)
+	}
+}
+```
+
+Add `path/filepath` and the `git` package to that file's imports if absent.
+
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/workspace -run 'OneWorktree' -v`
+Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/workspace -run 'OneWorktree|ForeignWorktree' -v`
 Expected: the OpenSaved test FAILs with `terminal 1 is already running in this worktree`; the restart test FAILs with `restored 1 definitions, want 2`, because `remember` dropped the second.
 
 - [ ] **Step 3: Write minimal implementation**
@@ -303,6 +333,45 @@ In `internal/workspace/persist.go`, delete the refusal in `OpenSaved`:
 		return nil, fmt.Errorf("terminal %d is already running in this worktree", t.Num)
 	}
 ```
+
+**There is a SECOND gate immediately below it, and missing it is the trap in this
+task.** `OpenSaved` also rejects any path it cannot find in `ws.Worktrees(p)`,
+and that function skips every worktree `ownedName` rejects — so a worktree tm did
+not create is never listed, and reopening one dies on `worktree no longer in git`
+even though git knows about it perfectly well. A terminal in a Claude Code
+worktree would work when created and fail after a restart, which is worse than
+refusing up front.
+
+Remove the ownership guard and widen the lookup to every worktree git reports,
+not just tm's:
+
+```go
+	if ws.ownedName(p, s.Worktree) == "" {
+		return nil, fmt.Errorf("refusing to open %s: not under %s", s.Worktree, WorktreesDir)
+	}
+	worktrees, err := ws.Worktrees(p)
+```
+
+becomes:
+
+```go
+	// A terminal may live in any checkout of this project, including worktrees
+	// another tool created. Removal stays restricted to tm's own directory by
+	// RemoveWorktree, which is the guard that actually protects the user.
+	repo, err := git.Open(p.Path)
+	if err != nil {
+		return nil, err
+	}
+	worktrees, err := repo.Worktrees()
+	if err != nil {
+		return nil, err
+	}
+```
+
+The `listed` loop below it then works unchanged, because `git.Worktree` and
+`WorktreeInfo` both expose `Path` and `Branch`. Confirm the field names line up
+when you make the change; if the loop needs adjusting, adjust the loop, not the
+guard.
 
 and simplify `remember` so a worktree no longer limits how many definitions it holds. Definitions are still deduplicated by their full identity, which `Key()` already expresses:
 
@@ -672,10 +741,41 @@ Add the resolved location to the struct and refresh it whenever the branch text 
 ```go
 	case f.field == fieldBranch && f.canWorktree:
 		f.branch, _ = f.branch.Update(msg)
-		f.loc = f.ws.Locate(f.project, strings.TrimSpace(f.branch.Value()))
+		f.loc = f.snap.Locate(strings.TrimSpace(f.branch.Value()))
 ```
 
-This requires the form to hold the workspace; `newForm` already receives it, so store it as `f.ws`.
+**Do NOT call `ws.Locate` here.** It opens the repository and runs `worktree
+list`, `HasBranch` and `CurrentBranch` — three or four git subprocesses. Calling
+it per keystroke means well over a hundred subprocesses while typing a branch
+name, and the form would visibly stall on a repo with 180 branches. The existing
+form already avoids this by fetching branches **once** in `newForm`.
+
+So `Locate` must resolve from data gathered once. Change Task 4's signature to
+take a snapshot, and have the form hold it:
+
+```go
+// LocationSource is everything Locate needs, gathered once when the form opens.
+type LocationSource struct {
+	project   *Project
+	isGit     bool
+	current   string         // branch the project checkout has
+	branches  map[string]bool
+	worktrees []git.Worktree // every checkout git reports for this project
+	owned     func(string) bool
+	terminals func(string) []*Terminal
+}
+
+// Snapshot gathers the repository state a form needs, in one pass.
+func (ws *Workspace) Snapshot(p *Project) LocationSource
+
+// Locate resolves a branch against the snapshot with no further git calls.
+func (s LocationSource) Locate(branch string) Location
+```
+
+`newForm` calls `ws.Snapshot(p)` once and stores the result as `f.snap`; every
+keystroke calls `f.snap.Locate(...)`, which touches no subprocess. The snapshot
+goes stale if the repository changes while the form is open, which is acceptable
+— the form is short-lived, and creation still validates against live git.
 
 `submit` no longer consults a toggle. The location decides:
 
@@ -811,9 +911,9 @@ func TestADuplicateCommandInTheSameDirectoryAsksFirst(t *testing.T) {
 		t.Errorf("the form should say the command is already running:\n%s", m.form.view(80))
 	}
 
-	m = press(m, "y")
+	m = press(m, "enter")
 	if m.form != nil {
-		t.Fatalf("y should confirm and create: %s", m.notice)
+		t.Fatalf("a second enter should confirm and create: %s", m.notice)
 	}
 }
 
@@ -849,7 +949,7 @@ Add the pending confirmation to the form struct and check it in `submit`, before
 		for _, t := range f.loc.Terminals {
 			if t.Command == opts.Command {
 				f.confirmDup = opts.Command
-				f.err = fmt.Sprintf("%s is already running here. Press y to start another.", opts.Command)
+				f.err = fmt.Sprintf("%s is already running here. Press enter again to start another.", opts.Command)
 				return nil, false
 			}
 		}
@@ -857,15 +957,17 @@ Add the pending confirmation to the form struct and check it in `submit`, before
 	f.confirmDup = ""
 ```
 
-In `update`, accept `y` while a confirmation is pending, before the field switch:
+Confirmation is **pressing Enter again**, not a `y` key. A form is a text-entry
+context: intercepting `y` would stop the user typing `y` as the first character
+of anything after a warned submit. Submitting twice reads naturally — "I meant
+it" — and needs no new binding.
 
-```go
-	if f.confirmDup != "" && msg.String() == "y" {
-		return f.submit() // confirmDup now equals the command, so the check is skipped
-	}
-```
+`submit` already returns without options the first time and records
+`f.confirmDup`. The second Enter reaches `submit` again, where the guard above
+now passes because `f.confirmDup == opts.Command`, and the terminal is created.
 
-Typing anything else clears the pending confirmation, since the command may have changed:
+Any other key clears the pending confirmation, since the command may have
+changed underneath it:
 
 ```go
 	if f.confirmDup != "" && !key.Matches(msg, keys.FormSubmit) {
@@ -952,4 +1054,4 @@ In a scratch workspace only, never a real repository, walk the behaviour table:
 5. `n`, type a branch that exists but is checked out nowhere — `new worktree · …`.
 6. `n`, type a name that matches nothing — `new branch`, the `From` field appears.
 7. Create two terminals on one branch — both open in the same worktree, both come back after `q` and `Enter`.
-8. Create a terminal whose command already runs there — the form asks; `y` creates it.
+8. Create a terminal whose command already runs there — the form asks; a second `Enter` creates it.
