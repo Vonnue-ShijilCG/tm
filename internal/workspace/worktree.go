@@ -191,7 +191,7 @@ func (ws *Workspace) RemoveWorktree(p *Project, wt WorktreeInfo, force bool) err
 		if err := repo.Prune(); err != nil {
 			return err
 		}
-		p.forget("", wt.Path)
+		p.forget("", "", wt.Path)
 		return nil
 	}
 	if !force {
@@ -206,6 +206,6 @@ func (ws *Workspace) RemoveWorktree(p *Project, wt WorktreeInfo, force bool) err
 	if err := repo.RemoveWorktree(wt.Path, force); err != nil {
 		return err
 	}
-	p.forget("", wt.Path)
+	p.forget("", "", wt.Path)
 	return nil
 }

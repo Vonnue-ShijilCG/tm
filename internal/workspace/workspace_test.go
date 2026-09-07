@@ -14,10 +14,11 @@ type fakeSession struct {
 	dir        string
 	cols, rows int
 	closed     bool
+	text       []string
 }
 
 func (f *fakeSession) SendKey(uv.KeyPressEvent)  {}
-func (f *fakeSession) SendText(string)           {}
+func (f *fakeSession) SendText(s string)         { f.text = append(f.text, s) }
 func (f *fakeSession) Resize(c, r int)           { f.cols, f.rows = c, r }
 func (f *fakeSession) Render(bool) string        { return "" }
 func (f *fakeSession) RenderScrolled(int) string { return "" }

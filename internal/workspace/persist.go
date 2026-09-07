@@ -15,6 +15,7 @@ import (
 // is an absolute path, "" for a terminal in the project checkout.
 type SavedTerminal struct {
 	Name     string
+	Command  string
 	Branch   string
 	Worktree string
 }
@@ -128,10 +129,10 @@ func (p *Project) remember(s SavedTerminal) {
 }
 
 // forget drops the saved definition for a worktree path, or the first
-// plain terminal with that name when worktree is "".
-func (p *Project) forget(name, worktree string) {
+// plain terminal with that name and command when worktree is "".
+func (p *Project) forget(name, command, worktree string) {
 	for i, s := range p.Saved {
-		if s.Worktree == worktree && (worktree != "" || s.Name == name) {
+		if s.Worktree == worktree && (worktree != "" || (s.Name == name && s.Command == command)) {
 			p.Saved = append(p.Saved[:i], p.Saved[i+1:]...)
 			return
 		}
@@ -145,9 +146,9 @@ func (p *Project) forget(name, worktree string) {
 // On success the definition leaves p.Saved (it is running now).
 func (ws *Workspace) OpenSaved(p *Project, s SavedTerminal, cols, rows int) (*Terminal, error) {
 	if s.Worktree == "" {
-		t, err := ws.startTerminal(p, s.Name, nil, cols, rows)
+		t, err := ws.startTerminal(p, s.Name, s.Command, nil, cols, rows)
 		if err == nil {
-			p.forget(s.Name, "")
+			p.forget(s.Name, s.Command, "")
 		}
 		return t, err
 	}
@@ -177,9 +178,9 @@ func (ws *Workspace) OpenSaved(p *Project, s SavedTerminal, cols, rows int) (*Te
 	if _, err := os.Stat(s.Worktree); err != nil {
 		return nil, errors.New("worktree directory missing")
 	}
-	t, err := ws.startTerminal(p, s.Name, &git.Worktree{Path: s.Worktree, Branch: branch}, cols, rows)
+	t, err := ws.startTerminal(p, s.Name, s.Command, &git.Worktree{Path: s.Worktree, Branch: branch}, cols, rows)
 	if err == nil {
-		p.forget("", s.Worktree)
+		p.forget("", "", s.Worktree)
 	}
 	return t, err
 }

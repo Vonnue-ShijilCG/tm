@@ -50,6 +50,7 @@ type Terminal struct {
 	ID       int           // unique across the workspace; used to route messages
 	Num      int           // 1-based, stable for the life of the project; shown in the pane header
 	Name     string        // optional label chosen by the user
+	Command  string        // run in the shell when this terminal starts; "" for a plain shell
 	Worktree *git.Worktree // nil when the terminal runs in the project checkout
 	Session  Session
 }
@@ -66,6 +67,7 @@ func (t *Terminal) Dir(p *Project) string {
 // shell in the project directory.
 type Options struct {
 	Name     string // kept for saved-state compatibility; no longer shown or set by the form
+	Command  string // run in the terminal's shell when it starts; empty for a plain shell
 	Branch   string // branch to check out when Worktree is set
 	Worktree bool   // create (or check out) Branch in its own worktree
 }
@@ -184,7 +186,7 @@ func (ws *Workspace) CreateTerminal(p *Project, opts Options, cols, rows int) (*
 			return nil, err
 		}
 	}
-	return ws.startTerminal(p, opts.Name, wt, cols, rows)
+	return ws.startTerminal(p, opts.Name, opts.Command, wt, cols, rows)
 }
 
 // CanCreateTerminal is the single rule every creation path goes through:
@@ -226,11 +228,11 @@ func (ws *Workspace) CurrentLimit() Limit { return ws.limit() }
 // startTerminal spawns the session and registers the terminal. It enforces
 // the limit as the final guard for every path, including reopening saved
 // definitions.
-func (ws *Workspace) startTerminal(p *Project, name string, wt *git.Worktree, cols, rows int) (*Terminal, error) {
+func (ws *Workspace) startTerminal(p *Project, name, command string, wt *git.Worktree, cols, rows int) (*Terminal, error) {
 	if err := ws.CanCreateTerminal(p); err != nil {
 		return nil, err
 	}
-	t := &Terminal{Name: name, Worktree: wt}
+	t := &Terminal{Name: name, Command: command, Worktree: wt}
 	s, err := ws.spawn(t.Dir(p), cols, rows)
 	if err != nil {
 		return nil, err
@@ -241,6 +243,9 @@ func (ws *Workspace) startTerminal(p *Project, name string, wt *git.Worktree, co
 	p.Terminals = append(p.Terminals, t)
 	p.active = len(p.Terminals) - 1
 	p.Notice = ""
+	if command != "" { // typed into the shell, so the pane is a usable prompt when it ends
+		s.SendText(command + "\n")
+	}
 	return t, nil
 }
 
@@ -281,7 +286,7 @@ func (ws *Workspace) DeleteTerminal(p *Project, def SavedTerminal, t *Terminal) 
 	if t != nil {
 		ws.detach(t.ID)
 	} else {
-		p.forget(def.Name, def.Worktree)
+		p.forget(def.Name, def.Command, def.Worktree)
 	}
 	if def.Worktree == "" {
 		return ""
@@ -328,7 +333,7 @@ func (t *Terminal) Definition() SavedTerminal { return t.saved() }
 
 // saved is the terminal's persistent definition.
 func (t *Terminal) saved() SavedTerminal {
-	s := SavedTerminal{Name: t.Name}
+	s := SavedTerminal{Name: t.Name, Command: t.Command}
 	if t.Worktree != nil {
 		s.Branch, s.Worktree = t.Worktree.Branch, t.Worktree.Path
 	}

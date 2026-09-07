@@ -15,16 +15,18 @@ type Layout struct {
 	First, Second *Layout
 }
 
-// Key identifies a terminal across restarts: its name plus its worktree
-// path. Unnamed plain terminals share a key and are matched in order.
+// Key identifies a terminal across restarts: its name, its command and its
+// worktree path. Unnamed plain terminals with no command share a key and are
+// matched in order; a command makes two shells in one checkout distinct.
 func (t *Terminal) Key() string {
-	if t.Worktree == nil {
-		return t.Name + "\x00"
+	worktree := ""
+	if t.Worktree != nil {
+		worktree = t.Worktree.Path
 	}
-	return t.Name + "\x00" + t.Worktree.Path
+	return t.Name + "\x00" + t.Command + "\x00" + worktree
 }
 
-func (s SavedTerminal) key() string { return s.Name + "\x00" + s.Worktree }
+func (s SavedTerminal) key() string { return s.Name + "\x00" + s.Command + "\x00" + s.Worktree }
 
 // Leaves returns the keys in reading order.
 func (l *Layout) Leaves() []string {

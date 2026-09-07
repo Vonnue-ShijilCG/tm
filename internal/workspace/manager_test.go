@@ -187,7 +187,7 @@ func TestRecordLayoutKeepsSavedLayoutWhileTerminalsArePending(t *testing.T) {
 		t.Error("new terminals do not throw the saved layout away while B can still come back")
 	}
 	// B deleted for good: nothing pending, the live tree becomes the layout.
-	p.forget("B", "")
+	p.forget("B", "", "")
 	ws.RecordLayout(p, withD, d.Key())
 	if p.Layout != withD {
 		t.Error("with nothing pending the live tree is recorded")

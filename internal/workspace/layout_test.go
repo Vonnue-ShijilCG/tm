@@ -81,10 +81,10 @@ func TestRestoreDropsLayoutLeavesForRefusedTerminals(t *testing.T) {
 	}
 	// "Elsewhere" belongs to another project's worktree dir and is refused; its leaf is
 	// gone and the stack collapsed to C.
-	if got := app.Layout.Leaves(); !reflect.DeepEqual(got, []string{"A\x00", "C\x00"}) {
+	if got := app.Layout.Leaves(); !reflect.DeepEqual(got, []string{"A\x00\x00", "C\x00\x00"}) {
 		t.Errorf("leaves = %q", got)
 	}
-	if app.Layout.Second == nil || app.Layout.Second.Key != "C\x00" {
+	if app.Layout.Second == nil || app.Layout.Second.Key != "C\x00\x00" {
 		t.Errorf("stack should collapse to C: %+v", app.Layout)
 	}
 	if app.Focus != "" {
