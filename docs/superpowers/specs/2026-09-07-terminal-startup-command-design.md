@@ -41,7 +41,7 @@ it is visible, and it enters shell history.
 
 ## Data model and persistence
 
-- `state.Terminal` gains `command string \`json:"command,omitempty"\``.
+- `state.Terminal` gains an optional `Command string` field, serialised as `command` and omitted when empty.
 - `state.Version` goes 2 → 3. The bump is documentary: `Load` does not reject
   unknown versions and a missing field means no command, so v2 files load
   unchanged and v3 files remain readable by older builds. An older build that
