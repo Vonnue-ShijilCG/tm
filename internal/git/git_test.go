@@ -315,3 +315,34 @@ func TestPruneDropsStaleWorktree(t *testing.T) {
 		t.Errorf("stale worktree should be gone after prune: %+v", list)
 	}
 }
+
+func TestWorktreeForFindsWhereABranchIsCheckedOut(t *testing.T) {
+	r := initRepo(t) // repo on main, plus a develop branch
+	linked := filepath.Join(t.TempDir(), "linked")
+	if err := r.AddWorktree(linked, "develop"); err != nil {
+		t.Fatalf("AddWorktree: %v", err)
+	}
+
+	main, ok := r.WorktreeFor("main")
+	if !ok {
+		t.Fatal(`WorktreeFor("main") = not found, want the project checkout`)
+	}
+	if !main.IsMain {
+		t.Errorf("main is at %q with IsMain=false, want the primary checkout", main.Path)
+	}
+
+	dev, ok := r.WorktreeFor("develop")
+	if !ok {
+		t.Fatal(`WorktreeFor("develop") = not found, want the linked worktree`)
+	}
+	if dev.IsMain {
+		t.Error("develop resolved to the primary checkout, want the linked worktree")
+	}
+	if dev.Path != linked {
+		t.Errorf("develop is at %q, want %q", dev.Path, linked)
+	}
+
+	if _, ok := r.WorktreeFor("no/such/branch"); ok {
+		t.Error(`WorktreeFor("no/such/branch") = found, want not found`)
+	}
+}

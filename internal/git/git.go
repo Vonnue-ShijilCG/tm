@@ -119,6 +119,26 @@ func (r *Repo) Worktrees() ([]Worktree, error) {
 	return list, nil
 }
 
+// WorktreeFor returns the checkout that currently holds branch, and whether
+// one does. Git allows a branch in at most one checkout, so the result is
+// unique; IsMain distinguishes the project's own checkout from a linked
+// worktree. A branch checked out nowhere returns false.
+func (r *Repo) WorktreeFor(branch string) (Worktree, bool) {
+	if branch == "" {
+		return Worktree{}, false
+	}
+	list, err := r.Worktrees()
+	if err != nil {
+		return Worktree{}, false
+	}
+	for _, wt := range list {
+		if wt.Branch == branch {
+			return wt, true
+		}
+	}
+	return Worktree{}, false
+}
+
 // AddWorktree checks out an existing branch into a new worktree at path.
 // Git refuses if the branch is already checked out elsewhere.
 func (r *Repo) AddWorktree(path, branch string) error {
