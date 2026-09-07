@@ -15,6 +15,8 @@ Workspace
 - Several independent terminals per project, in split panes, with zoom.
 - Optional isolated Git worktree per terminal, so a checkout in one terminal
   never disturbs another.
+- A terminal can remember a command, so reopening a workspace brings back your
+  dev server or agent session instead of an empty shell.
 - Hide a running terminal and bring it back later.
 - Mouse wheel scrolls a terminal's history.
 - Terminal definitions and layouts survive restarts. Processes do not.
@@ -40,8 +42,9 @@ tm
 ```
 
 - `Enter` on a project opens a shell in it.
-- `n` adds another terminal. For a Git project you can give it a branch and
-  its own worktree.
+- `n` adds another terminal. You can give it a command to run, and for a Git
+  project a branch with its own worktree; a new branch also asks what it starts
+  from, defaulting to `main`.
 - `Esc` returns to the sidebar, `s` shows every shortcut, `q` quits.
 - Inside a terminal everything you type reaches the program. Only `Esc` and a
   few `Alt` chords belong to `tm`; press `s` in the sidebar to see them.
@@ -56,6 +59,11 @@ tm
 
 `tm` only removes worktrees it created and that no terminal still uses. The
 project's own checkout is never touched.
+
+The state file records the command each terminal runs, and `tm` runs it when
+that terminal starts. Treat it like a `Makefile` or a `.envrc`: only run `tm`
+in a workspace whose `.terminal-state.json` you trust, since opening a project
+there runs the commands it contains.
 
 ## Development
 

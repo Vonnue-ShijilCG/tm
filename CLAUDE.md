@@ -32,8 +32,8 @@ cmd/tm  →  ui  →  workspace  →  { project, git, config, state }
 - **`project`**: `Discover(root)` — every direct subdirectory with a `.git` entry.
 - **`git`**: thin wrapper over the `git` CLI (branches, worktrees, dirty check). `git.Head(dir)` reads `.git/HEAD` directly without spawning a process; the UI uses it via a 1s TTL cache (`ui/branches.go`) because rendering happens on every output event.
 - **`terminal`**: `Start(Config)` runs a command in a PTY and mirrors output into a `vt.Emulator`. Exposes `Output()`/`Done()` channels; the UI's per-terminal watcher command turns those into Bubble Tea messages.
-- **`workspace`**: the runtime tree `Workspace → Project → Terminal`. Owns terminal creation (with the per-project limit), worktree creation/removal, hidden/saved bookkeeping and the state snapshot. It depends only on the `Session` interface and a `Spawner` func, so tests inject fakes and never open a PTY.
-- **`state`**: the JSON file format (`Version = 2`). Stores only metadata: names, branches, workspace-relative worktree paths, an index-based layout tree. Malformed layout nodes decode to empty nodes and are sanitised away rather than failing the load.
+- **`workspace`**: the runtime tree `Workspace → Project → Terminal`. Owns terminal creation (with the per-project limit), worktree creation/removal, hidden/saved bookkeeping and the state snapshot. A terminal's `Command` is written into its shell by `startTerminal`, the single choke point every start path goes through, so `terminal.Spawner` never learns about commands. It depends only on the `Session` interface and a `Spawner` func, so tests inject fakes and never open a PTY.
+- **`state`**: the JSON file format (`Version = 3`). Stores only metadata: names, branches, commands, workspace-relative worktree paths, an index-based layout tree. Malformed layout nodes decode to empty nodes and are sanitised away rather than failing the load.
 - **`config`**: `$XDG_CONFIG_HOME/tm/config.toml` with `max_terminals`. Re-read on every creation attempt (`workspace.LimitSource`), so edits apply without restart; invalid values fall back to the default and carry a `Notice`.
 - **`ui`**: the Bubble Tea `Model` (`ui/model.go`), the new-terminal form, the per-project Terminal Manager (`ui/manager.go`), and the pane tree.
 
@@ -53,7 +53,7 @@ The same arrangement exists in three shapes; keep conversions in sync when touch
 
 ### Terminal identity
 
-A `workspace.Terminal` has three identifiers with different jobs: `ID` (unique across the workspace, routes messages), `Num` (1-based, stable per project, shown in headers as `Terminal N`), and `Key()` (name + worktree path, used to match terminals across restarts). Unnamed plain terminals share a key and are matched in order, so they may swap cells after a restore; worktree terminals keep their exact place. `Name` is legacy: no longer entered in the form, only kept for state compatibility, but tests still set it to address terminals.
+A `workspace.Terminal` has three identifiers with different jobs: `ID` (unique across the workspace, routes messages), `Num` (1-based, stable per project, shown in headers when the terminal has no command), and `Key()` (name + command + worktree path, used to match terminals across restarts). Unnamed plain terminals with no command share a key and are matched in order, so they may swap cells after a restore; a command or a worktree makes a terminal keep its exact place. `Name` is legacy: no longer entered in the form, only kept for state compatibility, but tests still set it to address terminals.
 
 ### Hidden vs. saved vs. visible
 
@@ -64,6 +64,8 @@ A `workspace.Terminal` has three identifiers with different jobs: `ID` (unique a
 ### Worktree safety
 
 All tm-created worktrees live under `<root>/.terminal-worktrees/<project>/<sanitised-name>`. `WorktreePath` sanitises to a single path segment and verifies it cannot escape that directory. tm only ever removes worktrees inside that directory that no other terminal uses; the project's own checkout is never touched. `Restore` also drops saved entries whose worktree path is not owned.
+
+Creating a worktree on a branch that does not already exist requires `Options.Base`; `addWorktree` validates it before any filesystem work, ahead of `WorktreePath` and `os.MkdirAll`, so a refused base leaves no directory, no branch and no terminal behind. The existing-vs-new decision uses `HasBranch`, which checks local branches only; the base itself is validated with `HasRef`, which also resolves remote branches such as `origin/main`, tags and commit ids. Keep the two distinct: using `HasRef` for the existing-branch check would make a remote-only name look local. An existing branch ignores the base entirely. `Workspace.DefaultBranch(p)` is what the UI pre-fills the form's From field with: `main`, else `master`, else the project checkout's current branch, and `""` for a non-Git project.
 
 ### Scrollback
 
