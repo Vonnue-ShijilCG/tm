@@ -16,9 +16,10 @@ import (
 // FileName is the state file, relative to the workspace root.
 const FileName = ".terminal-state.json"
 
-// Version is written to new files so the format can evolve. Version 2 added
-// the optional per-project layout; version 1 files load unchanged.
-const Version = 2
+// Version is written to new files so the format can evolve. Version 3 added
+// the optional per-terminal command; versions 1 and 2 load unchanged, since
+// a missing command simply means none.
+const Version = 3
 
 // File is the persisted workspace state.
 type File struct {
@@ -105,8 +106,10 @@ func sanitizeLayout(l *Layout, remap map[int]int, seen map[int]bool, depth int) 
 
 // Terminal is one saved terminal definition. Worktree is relative to the
 // workspace root and empty for terminals running in the project checkout.
+// Command is run in the terminal's shell each time the terminal is started.
 type Terminal struct {
 	Name     string `json:"name,omitempty"`
+	Command  string `json:"command,omitempty"`
 	Branch   string `json:"branch,omitempty"`
 	Worktree string `json:"worktree,omitempty"`
 }

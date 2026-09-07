@@ -144,3 +144,39 @@ func TestValidators(t *testing.T) {
 		}
 	}
 }
+
+func TestTerminalCommandSurvivesARoundTrip(t *testing.T) {
+	root := t.TempDir()
+	in := File{Version: Version, Projects: []Project{{
+		Name:      "api",
+		Terminals: []Terminal{{Command: "npm run dev"}, {Name: "shell"}},
+	}}}
+	if err := Save(root, in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	out, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := out.Projects[0].Terminals[0].Command; got != "npm run dev" {
+		t.Errorf("command = %q, want %q", got, "npm run dev")
+	}
+	if got := out.Projects[0].Terminals[1].Command; got != "" {
+		t.Errorf("a terminal with no command loaded %q, want empty", got)
+	}
+}
+
+func TestVersion2FileLoadsWithNoCommand(t *testing.T) {
+	root := t.TempDir()
+	body := `{"version":2,"projects":[{"name":"api","terminals":[{"name":"old"}]}]}`
+	if err := os.WriteFile(filepath.Join(root, FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := out.Projects[0].Terminals[0].Command; got != "" {
+		t.Errorf("command = %q, want empty for a v2 file", got)
+	}
+}
