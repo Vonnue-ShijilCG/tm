@@ -16,8 +16,10 @@ func TestHelpOpensFromSidebarAndEscRestoresState(t *testing.T) {
 		t.Fatal("s in the sidebar should open help")
 	}
 	view := m.View()
-	for _, want := range []string{"keyboard shortcuts", "SIDEBAR", "TERMINAL", "NEW TERMINAL", "MANAGE TERMINALS", "HELP",
-		"alt+x", "shift+tab", "close help", "m ", "hide terminal", "show / restore", "delete forever", "open/resume"} {
+	for _, want := range []string{"keyboard shortcuts", "SIDEBAR", "TERMINAL", "NEW TERMINAL", "MANAGE TERMINALS", "MOUSE", "HELP",
+		"alt+x", "shift+tab", "close help", "m ", "hide terminal", "show / restore", "delete forever", "open/resume",
+		"wheel", "scroll history", // the wheel is not a key binding but belongs on the shortcut screen
+		"tab / l", "g / home", "G / end", "esc / q", "tab / ↓", "shift+tab / ↑"} { // alternates are shown, not just the first key
 		if !strings.Contains(view, want) {
 			t.Errorf("help view missing %q:\n%s", want, view)
 		}

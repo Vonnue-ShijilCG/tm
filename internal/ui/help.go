@@ -70,6 +70,9 @@ func distribute(sections []helpSection, height int) [][]helpSection {
 	}
 }
 
+// helpKeyWidth is the key column width, sized for the longest label.
+const helpKeyWidth = 13
+
 func renderSections(sections []helpSection, width int) string {
 	var b strings.Builder
 	for i, s := range sections {
@@ -79,7 +82,7 @@ func renderSections(sections []helpSection, width int) string {
 		b.WriteString(selectedStyle.Render(s.Title) + "\n")
 		for _, binding := range s.Bindings {
 			h := binding.Help()
-			b.WriteString(ansi.Truncate(fmt.Sprintf("%-9s %s", h.Key, hintStyle.Render(h.Desc)), width, "…") + "\n")
+			b.WriteString(ansi.Truncate(fmt.Sprintf("%-*s %s", helpKeyWidth, h.Key, hintStyle.Render(h.Desc)), width, "…") + "\n")
 		}
 	}
 	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(strings.TrimRight(b.String(), "\n"))

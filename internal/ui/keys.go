@@ -7,15 +7,15 @@ import "github.com/charmbracelet/bubbles/key"
 // status bar render their WithHelp text, so adding a binding here is enough
 // for it to show up everywhere.
 //
-// Conflict policy for terminal mode (see also the README): everything the
-// user types reaches the program in the PTY — letters, digits, Tab and
-// Shift+Tab (completion), Ctrl+C/D/Z/\, plain arrows, function keys. The
-// application reserves exactly two kinds of key while a terminal has focus:
-// a lone Esc (back to the sidebar) and a small set of Alt chords. Alt chords
-// were chosen because bash, zsh and fish leave them unbound by default; the
-// known costs are documented in the README (Emacs' M-x/M-v, readline's M-n
-// and M--, a lone Esc in Vim/less/Claude Code). Plain letters such as s, m
-// and z are application keys only in the sidebar and always PTY input in a
+// Conflict policy for terminal mode (summarised under Limitations in the
+// README): everything the user types reaches the program in the PTY —
+// letters, digits, Tab and Shift+Tab (completion), Ctrl+C/D/Z/\, plain
+// arrows, function keys. The application reserves exactly two kinds of key
+// while a terminal has focus: a lone Esc (back to the sidebar) and a small
+// set of Alt chords. Alt chords were chosen because bash, zsh and fish leave
+// them unbound by default; the known costs are Emacs' M-x/M-v, readline's
+// M-n and M--, and a lone Esc in Vim/less/Claude Code. Plain letters such as
+// s, m and z are application keys only in the sidebar and always PTY input in a
 // terminal.
 type keyMap struct {
 	// Sidebar.
@@ -76,18 +76,22 @@ type keyMap struct {
 
 	// Help screen.
 	HelpClose key.Binding
+
+	// Mouse. Not a key: never matched against input, listed on the help
+	// screen only (see handleMouse).
+	Scroll key.Binding
 }
 
 var keys = keyMap{
 	Up:         key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k / ↑", "prev project")),
 	Down:       key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j / ↓", "next project")),
-	Top:        key.NewBinding(key.WithKeys("g", "home"), key.WithHelp("g", "first project")),
-	Bottom:     key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G", "last project")),
+	Top:        key.NewBinding(key.WithKeys("g", "home"), key.WithHelp("g / home", "first project")),
+	Bottom:     key.NewBinding(key.WithKeys("G", "end"), key.WithHelp("G / end", "last project")),
 	Select:     key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "open/resume")),
 	New:        key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "new terminal")),
 	SplitSide:  key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "split beside")),
 	SplitStack: key.NewBinding(key.WithKeys("h"), key.WithHelp("h", "split below")),
-	Focus:      key.NewBinding(key.WithKeys("tab", "l", "right"), key.WithHelp("tab", "to terminal")),
+	Focus:      key.NewBinding(key.WithKeys("tab", "l", "right"), key.WithHelp("tab / l", "to terminal")),
 	Manage:     key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "manage terminals")),
 	Help:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "help")),
 	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "quit")),
@@ -111,8 +115,8 @@ var keys = keyMap{
 	PaneZoom:   key.NewBinding(key.WithKeys("alt+z"), key.WithHelp("alt+z", "zoom pane")),
 	Zoom:       key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "zoom terminal")),
 
-	FormNext:   key.NewBinding(key.WithKeys("tab", "down"), key.WithHelp("tab", "next field")),
-	FormPrev:   key.NewBinding(key.WithKeys("shift+tab", "up"), key.WithHelp("shift+tab", "prev field")),
+	FormNext:   key.NewBinding(key.WithKeys("tab", "down"), key.WithHelp("tab / ↓", "next field")),
+	FormPrev:   key.NewBinding(key.WithKeys("shift+tab", "up"), key.WithHelp("shift+tab / ↑", "prev field")),
 	FormToggle: key.NewBinding(key.WithKeys(" ", "left", "right"), key.WithHelp("space", "worktree y/n")),
 	FormSubmit: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "create")),
 	FormCancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
@@ -129,7 +133,9 @@ var keys = keyMap{
 	Confirm: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "confirm")),
 	Cancel:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc/other", "cancel")),
 
-	HelpClose: key.NewBinding(key.WithKeys("esc", "s", "q"), key.WithHelp("esc", "close help")),
+	HelpClose: key.NewBinding(key.WithKeys("esc", "s", "q"), key.WithHelp("esc / q", "close help")),
+
+	Scroll: key.NewBinding(key.WithHelp("wheel", "scroll history")),
 }
 
 // helpSection groups bindings by the context in which they apply.
@@ -148,6 +154,7 @@ func helpSections() []helpSection {
 		{"NEW TERMINAL", []key.Binding{k.FormNext, k.FormPrev, k.FormToggle, k.FormSubmit, k.FormCancel}},
 		{"MANAGE TERMINALS", []key.Binding{k.MgDown, k.MgUp, k.MgShow, k.MgHide, k.MgNew, k.MgOpenAll, k.MgDelete, k.MgClose}},
 		{"CONFIRM", []key.Binding{k.Confirm, k.Cancel}},
+		{"MOUSE", []key.Binding{k.Scroll}},
 		{"HELP", []key.Binding{k.HelpClose}},
 	}
 }
