@@ -42,9 +42,11 @@ tm
 ```
 
 - `Enter` on a project opens a shell in it.
-- `n` adds another terminal. You can give it a command to run, and for a Git
-  project a branch with its own worktree; a new branch also asks what it starts
-  from, defaulting to `main`.
+- `n` adds another terminal. Give it a command to run, and a branch: the branch
+  decides where the terminal opens. A branch already checked out — in your
+  project or in a worktree any tool created — opens a terminal there; a branch
+  checked out nowhere gets a worktree, and a new branch also asks what it starts
+  from. Leave the branch empty for a shell in the project itself.
 - `Esc` returns to the sidebar, `s` shows every shortcut, `q` quits.
 - Inside a terminal everything you type reaches the program. Only `Esc` and a
   few `Alt` chords belong to `tm`; press `s` in the sidebar to see them.
