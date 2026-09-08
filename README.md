@@ -13,8 +13,11 @@ Workspace
 ```
 
 - Several independent terminals per project, in split panes, with zoom.
-- Optional isolated Git worktree per terminal, so a checkout in one terminal
-  never disturbs another.
+- The branch you pick decides where a terminal opens: your checkout, the
+  worktree that branch already lives in, or a new one. A branch checked out
+  somewhere is reused, never duplicated.
+- Any number of terminals in one directory, so a dev server and a prompt can
+  share a branch.
 - A terminal can remember a command, so reopening a workspace brings back your
   dev server or agent session instead of an empty shell.
 - Hide a running terminal and bring it back later.
@@ -41,7 +44,9 @@ cd ~/workspace   # api/, web/, ... are Git repositories
 tm
 ```
 
-- `Enter` on a project opens a shell in it.
+- `Enter` on a project brings back every terminal it had, in the layout you
+  left them, each running its command again. A project with nothing saved gets
+  one fresh shell.
 - `n` adds another terminal. Give it a command to run, and a branch: the branch
   decides where the terminal opens. A branch already checked out — in your
   project or in a worktree any tool created — opens a terminal there; a branch

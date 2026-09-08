@@ -1,7 +1,8 @@
 # Branch-driven terminal location, and a real branch picker — design
 
 Date: 2026-09-07
-Status: draft for review
+Status: Phase 1 shipped in v0.4.0. Phase 2 (the branch picker) is designed here
+but not implemented.
 
 ## Problem
 
