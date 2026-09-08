@@ -30,6 +30,8 @@ func deletionPrompt(ws *workspace.Workspace, p *workspace.Project, def workspace
 	switch {
 	case !listed:
 		return fmt.Sprintf("Delete %s? Its worktree is no longer known to git.", who)
+	case info.Foreign:
+		return fmt.Sprintf("Delete %s? Its worktree was not created by tm, so tm will leave it as is.", who)
 	case info.Missing:
 		return fmt.Sprintf("Delete %s? Its worktree directory is already gone.", who)
 	case info.Dirty:

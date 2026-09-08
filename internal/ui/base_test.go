@@ -6,27 +6,24 @@ import (
 )
 
 func TestBaseFieldAppearsOnlyForANewBranch(t *testing.T) {
-	m, _ := newTestModel(t)
-	m = press(m, "n") // form for a project the fake workspace treats as non-Git
-	if m.form == nil {
+	m, _, _ := gitModel(t) // real repo with branches "main" (current) and "develop"
+	m = press(m, "n")
+	m = typeText(m, "develop") // existing
+	f := m.form
+	if f == nil {
 		t.Fatal("n should open the form")
 	}
-	f := m.form
-	// newTestModel's fixture project is a non-Git fake path, so canWorktree was
-	// false when newForm ran and worktree defaulted to false with it; set both
-	// here to exercise the worktree-with-a-new-branch case the test is after.
-	f.canWorktree, f.branches, f.worktree = true, []string{"main", "feature/login"}, true
-
-	f.branch.SetValue("feature/login") // existing
-	if f.branchIsNew() {
+	if f.loc.NewBranch {
 		t.Error("an existing branch must not be treated as new")
 	}
 	if strings.Contains(f.view(80), "From") {
 		t.Error("no base is chosen for an existing branch")
 	}
 
-	f.branch.SetValue("feature/new") // does not exist
-	if !f.branchIsNew() {
+	m = press(m, "esc", "n")
+	m = typeText(m, "feature/new") // does not exist
+	f = m.form
+	if !f.loc.NewBranch {
 		t.Error("an unknown branch must be treated as new")
 	}
 	if !strings.Contains(f.view(80), "From") {
@@ -35,11 +32,10 @@ func TestBaseFieldAppearsOnlyForANewBranch(t *testing.T) {
 }
 
 func TestFormPassesTheBaseForANewBranch(t *testing.T) {
-	m, _ := newTestModel(t)
+	m, _, _ := gitModel(t)
 	m = press(m, "n")
+	m = typeText(m, "feature/new")
 	f := m.form
-	f.canWorktree, f.branches, f.worktree = true, []string{"main"}, true
-	f.branch.SetValue("feature/new")
 	f.base.SetValue("main")
 
 	opts, cancelled := f.submit()
@@ -55,11 +51,11 @@ func TestBaseFieldAutocompletesAgainstBranches(t *testing.T) {
 	m, _, _ := gitModel(t) // real repo with branches "main" (current) and "develop"
 	m = press(m, "n")
 	f := m.form
-	if !f.canWorktree || !f.worktree {
-		t.Fatalf("a git project should open the form with worktree on: %+v", f)
+	if !f.canWorktree {
+		t.Fatalf("a git project should open the form with worktree support: %+v", f)
 	}
 
-	f.branch.SetValue("feature/experiment") // unknown, so the From field is offered
+	m = typeText(m, "feature/experiment") // unknown, so the From field is offered
 	f.setField(fieldBase)
 	f.base.SetValue("de") // matches only "develop", not "main"
 
@@ -73,11 +69,10 @@ func TestBaseFieldAutocompletesAgainstBranches(t *testing.T) {
 }
 
 func TestFormRefusesAnEmptyBase(t *testing.T) {
-	m, _ := newTestModel(t)
+	m, _, _ := gitModel(t)
 	m = press(m, "n")
+	m = typeText(m, "feature/new")
 	f := m.form
-	f.canWorktree, f.branches, f.worktree = true, []string{"main"}, true
-	f.branch.SetValue("feature/new")
 	f.base.SetValue("")
 
 	opts, _ := f.submit()

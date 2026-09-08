@@ -433,9 +433,9 @@ type Location struct {
     Terminals []*Terminal // tm's terminals already running at Path
 }
 
-// Snapshot gathers the repository state once; Locate then answers with no
+// Locator gathers the repository state once; Locate then answers with no
 // further git calls, so a caller may resolve on every keystroke.
-func (ws *Workspace) Snapshot(p *Project) LocationSource
+func (ws *Workspace) Locator(p *Project) LocationSource
 func (s LocationSource) Locate(branch string) Location
 ```
 
@@ -461,7 +461,7 @@ func TestLocateAnEmptyBranchIsTheProjectCheckout(t *testing.T) {
 	ws, _ := gitWorkspace(t)
 	p := ws.Projects[0]
 
-	loc := ws.Snapshot(p).Locate("")
+	loc := ws.Locator(p).Locate("")
 
 	if loc.Kind != LocationCheckout {
 		t.Errorf("Kind = %v, want LocationCheckout", loc.Kind)
@@ -479,7 +479,7 @@ func TestLocateTheCheckoutsOwnBranchIsTheCheckout(t *testing.T) {
 		t.Fatalf("Branches: %v", err)
 	}
 
-	loc := ws.Snapshot(p).Locate(current)
+	loc := ws.Locator(p).Locate(current)
 
 	if loc.Kind != LocationCheckout {
 		t.Errorf("Kind = %v, want LocationCheckout for the checked-out branch", loc.Kind)
@@ -497,7 +497,7 @@ func TestLocateAnExistingWorktreeAndItsTerminals(t *testing.T) {
 		t.Fatalf("CreateTerminal: %v", err)
 	}
 
-	loc := ws.Snapshot(p).Locate("feature/login")
+	loc := ws.Locator(p).Locate("feature/login")
 
 	if loc.Kind != LocationWorktree {
 		t.Errorf("Kind = %v, want LocationWorktree", loc.Kind)
@@ -532,7 +532,7 @@ func TestLocateAnUncheckedOutBranchIsANewWorktree(t *testing.T) {
 		t.Skip("fixture has only one branch")
 	}
 
-	loc := ws.Snapshot(p).Locate(free)
+	loc := ws.Locator(p).Locate(free)
 
 	if loc.Kind != LocationNewWorktree {
 		t.Errorf("Kind = %v, want LocationNewWorktree for a branch checked out nowhere", loc.Kind)
@@ -545,7 +545,7 @@ func TestLocateAnUncheckedOutBranchIsANewWorktree(t *testing.T) {
 func TestLocateAnUnknownBranchNeedsABase(t *testing.T) {
 	ws, _ := gitWorkspace(t)
 
-	loc := ws.Snapshot(ws.Projects[0]).Locate("feature/does-not-exist")
+	loc := ws.Locator(ws.Projects[0]).Locate("feature/does-not-exist")
 
 	if loc.Kind != LocationNewWorktree {
 		t.Errorf("Kind = %v, want LocationNewWorktree", loc.Kind)
@@ -559,7 +559,7 @@ func TestLocateAnUnknownBranchNeedsABase(t *testing.T) {
 - [ ] **Step 2: Run tests to verify they fail**
 
 Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/workspace -run TestLocate -v`
-Expected: FAIL to build — `ws.Snapshot undefined`, `LocationCheckout undefined`.
+Expected: FAIL to build — `ws.Locator undefined`, `LocationCheckout undefined`.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -605,8 +605,10 @@ type LocationSource struct {
 	worktrees []git.Worktree  // every checkout git reports, tm's or not
 }
 
-// Snapshot gathers the repository state a form needs, in one pass.
-func (ws *Workspace) Snapshot(p *Project) LocationSource {
+// Locator gathers the repository state a form needs, in one pass. It is NOT
+// (*Workspace).Snapshot — that name is already taken by the state-file snapshot
+// in persist.go, and Go has no method overloading.
+func (ws *Workspace) Locator(p *Project) LocationSource {
 	src := LocationSource{ws: ws, project: p, branches: map[string]bool{}}
 	repo, err := git.Open(p.Path)
 	if err != nil {
@@ -671,7 +673,7 @@ func (s LocationSource) withTerminals(loc Location) Location {
 }
 ```
 
-Note `Snapshot` uses `repo.Worktrees()` directly rather than
+Note `Locator` uses `repo.Worktrees()` directly rather than
 `ws.Worktrees(p)`, because the latter filters out every worktree tm did not
 create — and a foreign worktree is exactly what case 4 must resolve.
 
@@ -796,7 +798,7 @@ name, and the form would visibly stall on a repo with 180 branches. The existing
 form already avoids this by fetching branches **once** in `newForm`.
 
 So `Locate` must resolve from data gathered once. Change Task 4's signature to
-take a snapshot, and have the form hold it:
+take a locator, and have the form hold it:
 
 ```go
 // LocationSource is everything Locate needs, gathered once when the form opens.
@@ -810,14 +812,16 @@ type LocationSource struct {
 	terminals func(string) []*Terminal
 }
 
-// Snapshot gathers the repository state a form needs, in one pass.
-func (ws *Workspace) Snapshot(p *Project) LocationSource
+// Locator gathers the repository state a form needs, in one pass. It is NOT
+// (*Workspace).Snapshot — that name is already taken by the state-file snapshot
+// in persist.go, and Go has no method overloading.
+func (ws *Workspace) Locator(p *Project) LocationSource
 
 // Locate resolves a branch against the snapshot with no further git calls.
 func (s LocationSource) Locate(branch string) Location
 ```
 
-`newForm` calls `ws.Snapshot(p)` once and stores the result as `f.snap` (type
+`newForm` calls `ws.Locator(p)` once and stores the result as `f.snap` (type
 `workspace.LocationSource`), setting `f.loc = f.snap.Locate("")` for the initial
 empty-branch state; every
 keystroke calls `f.snap.Locate(...)`, which touches no subprocess. The snapshot

@@ -51,11 +51,11 @@ func TestFormCreatesWorktreeTerminal(t *testing.T) {
 	m, spawned, root := gitModel(t)
 
 	m = press(m, "n")
-	if m.form == nil || !m.form.canWorktree || !m.form.worktree {
-		t.Fatalf("n on a git project should open the form with worktree enabled: %+v", m.form)
+	if m.form == nil || !m.form.canWorktree {
+		t.Fatalf("n on a git project should open the form: %+v", m.form)
 	}
 	view := m.View()
-	for _, want := range []string{"New terminal · app", "Branch", "Worktree", "yes"} {
+	for _, want := range []string{"New terminal · app", "Branch", "project checkout"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("form view missing %q:\n%s", want, view)
 		}
@@ -63,10 +63,16 @@ func TestFormCreatesWorktreeTerminal(t *testing.T) {
 	if strings.Contains(view, "Name") {
 		t.Errorf("the form no longer asks for a name:\n%s", view)
 	}
+	if strings.Contains(view, "Worktree") {
+		t.Errorf("the worktree toggle should be gone:\n%s", view)
+	}
 
 	m = typeText(m, "develop") // the branch field has focus straight away; an existing branch
 	if !strings.Contains(m.View(), "(existing)") {
 		t.Errorf("typing an existing branch should say so:\n%s", m.View())
+	}
+	if !strings.Contains(m.View(), "new worktree") {
+		t.Errorf("an existing branch with no worktree yet should report a new worktree:\n%s", m.View())
 	}
 	m = press(m, "enter")
 
@@ -135,26 +141,17 @@ func TestFormNewBranchAndReusingItOpensTheSameWorktree(t *testing.T) {
 	}
 }
 
-func TestFormWorktreeToggleOffAndMissingBranch(t *testing.T) {
+func TestFormEmptyBranchOpensTheProjectCheckout(t *testing.T) {
 	m, spawned, _ := gitModel(t)
 	app := m.ws.Projects[0]
 
 	m = press(m, "n")
-	m = press(m, "enter") // worktree on, branch empty
-	if m.form == nil || !strings.Contains(m.form.err, "branch is required") || len(*spawned) != 0 {
-		t.Fatalf("empty branch should be rejected, form=%+v spawned=%d", m.form, len(*spawned))
-	}
-
-	m = press(m, "tab", "tab", " ") // move past Command to the worktree field and toggle it off
-	if m.form.field != fieldWorktree || m.form.worktree {
-		t.Fatalf("space on the worktree field should toggle it off (field=%d worktree=%v)", m.form.field, m.form.worktree)
-	}
-	m = press(m, "enter")
+	m = press(m, "enter") // branch left empty: the project's own checkout, no toggle to flip
 	if m.form != nil || len(*spawned) != 1 || (*spawned)[0].dir != app.Path {
-		t.Fatalf("with worktree off a plain shell should start in the project dir, spawned=%+v", *spawned)
+		t.Fatalf("an empty branch should start a plain shell in the project dir, form=%v spawned=%+v", m.form, *spawned)
 	}
 	if app.Terminals[0].Worktree != nil {
-		t.Error("plain terminal must not have a worktree")
+		t.Error("a terminal in the project checkout must not have a worktree")
 	}
 }
 
@@ -168,7 +165,7 @@ func TestFormOnNonGitProjectCreatesPlainTerminal(t *testing.T) {
 	if !strings.Contains(m.View(), "not a git repository") || strings.Contains(m.View(), "Name") {
 		t.Errorf("form should explain why worktrees are unavailable and ask for nothing else:\n%s", m.View())
 	}
-	m = press(m, "tab", " ") // nothing to edit: these are no-ops
+	m = press(m, "tab") // nothing to edit: a no-op with only Command in the field list
 	m = press(m, "enter")
 	if m.form != nil || len(*spawned) != 1 || (*spawned)[0].dir != "/ws/ecommerce" {
 		t.Fatalf("plain terminal should be created: form=%v spawned=%+v", m.form, *spawned)

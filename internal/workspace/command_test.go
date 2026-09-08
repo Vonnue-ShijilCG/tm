@@ -47,7 +47,7 @@ func TestDefinitionsAreDistinguishedByCommand(t *testing.T) {
 	p.remember(SavedTerminal{Command: "npm run dev"})
 	p.remember(SavedTerminal{Command: "go test ./..."})
 
-	p.forget("", "npm run dev", "")
+	p.forget(SavedTerminal{Command: "npm run dev"})
 
 	if len(p.Saved) != 1 || p.Saved[0].Command != "go test ./..." {
 		t.Fatalf("saved = %+v, want only the go test definition", p.Saved)

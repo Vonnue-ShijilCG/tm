@@ -86,13 +86,25 @@ func TestClosingAnyTerminalIsRememberedAndDeleteForgets(t *testing.T) {
 func TestRestoreMatchesProjectsAndValidatesPaths(t *testing.T) {
 	ws, _ := gitWorkspace(t)
 	app := ws.Projects[0]
+	// A real worktree git actually knows about: "Login" below must survive
+	// Restore because git reports it, not merely because its path looks
+	// right. Closing it (rather than deleting) leaves the checkout itself
+	// in place while clearing the bookkeeping this test is not about.
+	login, err := ws.CreateTerminal(app, Options{Name: "Login", Branch: "develop", Worktree: true}, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = login.Session.Close()
+	ws.Remove(login.ID)
+	app.Saved = nil
+
 	saved := state.File{Projects: []state.Project{
 		{Name: "app", Terminals: []state.Terminal{
 			{Name: "Plain"},
-			{Name: "Login", Branch: "develop", Worktree: ".terminal-worktrees/app/login"},
-			{Name: "Elsewhere", Branch: "x", Worktree: ".terminal-worktrees/other/login"}, // another project's dir
-			{Name: "Nested", Branch: "x", Worktree: ".terminal-worktrees/app/a/b"},        // too deep
-			{Name: "Top", Branch: "x", Worktree: "app"},                                   // the checkout itself
+			{Name: "Login", Branch: "develop", Worktree: ".terminal-worktrees/app/login"}, // real: git knows this checkout
+			{Name: "Elsewhere", Branch: "x", Worktree: ".terminal-worktrees/other/login"}, // another project's dir, never created
+			{Name: "Nested", Branch: "x", Worktree: ".terminal-worktrees/app/a/b"},        // never created
+			{Name: "Top", Branch: "x", Worktree: "app"},                                   // the checkout itself, not a linked worktree
 		}},
 		{Name: "gone-project", Terminals: []state.Terminal{{Name: "x"}}},
 	}}
@@ -449,6 +461,38 @@ func TestTwoTerminalsInOneWorktreeBothSurviveARestart(t *testing.T) {
 	}
 }
 
+// TestTwoIdenticalCommandsInOneWorktreeBothSurviveARestart covers the case
+// TestTwoTerminalsInOneWorktreeBothSurviveARestart does not: the form's own
+// confirmation flow ("Press enter again to start another") lets a user run
+// the very same command twice in one worktree, and both must still be there
+// after a restart, not collapsed into one by a name+command+worktree dedupe.
+func TestTwoIdenticalCommandsInOneWorktreeBothSurviveARestart(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+	for i := 0; i < 2; i++ {
+		if _, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/pair", Base: ws.DefaultBranch(p), Command: "claude"}, 80, 24); err != nil {
+			t.Fatalf("create terminal %d: %v", i, err)
+		}
+	}
+	if err := ws.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	reloaded, _ := gitWorkspaceAt(t, ws.Root)
+	if err := reloaded.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	saved := reloaded.Projects[0].Saved
+	if len(saved) != 2 {
+		t.Fatalf("restored %d definitions, want 2 (both %q survive): %+v", len(saved), "claude", saved)
+	}
+	for _, s := range saved {
+		if s.Command != "claude" {
+			t.Errorf("restored command = %q, want %q", s.Command, "claude")
+		}
+	}
+}
+
 func TestASecondSavedTerminalInOneWorktreeCanBeOpened(t *testing.T) {
 	ws, _ := gitWorkspace(t)
 	p := ws.Projects[0]
@@ -466,24 +510,120 @@ func TestASecondSavedTerminalInOneWorktreeCanBeOpened(t *testing.T) {
 }
 
 func TestATerminalInAForeignWorktreeReopensAfterARestart(t *testing.T) {
-	ws, _ := gitWorkspace(t)
-	p := ws.Projects[0]
+	ws1, _ := gitWorkspace(t)
+	p := ws1.Projects[0]
 
-	// A worktree created outside tm, the way another tool would make one.
-	foreign := filepath.Join(t.TempDir(), "foreign")
+	// A worktree created outside tm, the way another tool would make one:
+	// inside the workspace root (so its path round-trips through the state
+	// file as a relative path) but not under .terminal-worktrees/<project>/,
+	// and not itself a direct child of the root that project.Discover would
+	// pick up as its own project.
+	foreign := filepath.Join(ws1.Root, "external", "foreign")
 	repo, err := git.Open(p.Path)
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	if err := repo.AddWorktreeNewBranch(foreign, "feature/foreign", ws.DefaultBranch(p)); err != nil {
+	if err := repo.AddWorktreeNewBranch(foreign, "feature/foreign", ws1.DefaultBranch(p)); err != nil {
 		t.Fatalf("creating a foreign worktree: %v", err)
 	}
 
 	def := SavedTerminal{Command: "claude", Branch: "feature/foreign", Worktree: foreign}
-	if _, err := ws.OpenSaved(p, def, 80, 24); err != nil {
+	term, err := ws1.OpenSaved(p, def, 80, 24)
+	if err != nil {
 		t.Fatalf("opening a terminal in a worktree tm did not create: %v", err)
 	}
-	if got := p.Terminals[0].Dir(p); got != foreign {
+	if got := term.Dir(p); got != foreign {
 		t.Errorf("terminal runs in %q, want the foreign worktree %q", got, foreign)
+	}
+
+	// The actual restart this test is named for: save, load a fresh
+	// workspace over the same root, and restore. The definition must
+	// survive with its worktree and command intact - the previous version
+	// of this test stopped at OpenSaved and never exercised Save/Restore,
+	// so it did not actually prove a restart works.
+	if err := ws1.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	ws2, _ := gitWorkspaceAt(t, ws1.Root)
+	if err := ws2.Restore(); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	p2 := ws2.projectByName("app")
+	if p2 == nil {
+		t.Fatal("app project missing after restart")
+	}
+	if len(p2.Saved) != 1 {
+		t.Fatalf("restored %d definitions, want 1 surviving the restart: %+v", len(p2.Saved), p2.Saved)
+	}
+	if p2.Saved[0].Command != "claude" || p2.Saved[0].Worktree != foreign {
+		t.Errorf("restored definition = %+v, want command claude at %q", p2.Saved[0], foreign)
+	}
+}
+
+// TestOpeningOneDefinitionInAWorktreeDoesNotForgetTheOther guards against a
+// defect this task introduced: once a worktree can hold several saved
+// definitions, forgetting "whatever is at this path" on success would drop
+// an unrelated definition rather than the one just opened. forget must match
+// the full identity (name, command, worktree) of the definition passed in.
+func TestOpeningOneDefinitionInAWorktreeDoesNotForgetTheOther(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+	first, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/pair", Base: ws.DefaultBranch(p), Command: "claude"}, 80, 24)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	path := first.Worktree.Path
+	_ = first.Session.Close()
+	ws.Remove(first.ID) // closing remembers it: Saved now holds the "claude" definition
+
+	// A second definition for the same worktree, as after a second terminal
+	// there also closed.
+	p.Saved = append(p.Saved, SavedTerminal{Command: "npm run dev", Branch: "feature/pair", Worktree: path})
+	if len(p.Saved) != 2 || p.Saved[0].Command != "claude" || p.Saved[1].Command != "npm run dev" {
+		t.Fatalf("setup: want [claude, npm run dev], got %+v", p.Saved)
+	}
+
+	if _, err := ws.OpenSaved(p, p.Saved[0], 80, 24); err != nil {
+		t.Fatalf("open claude: %v", err)
+	}
+	if len(p.Saved) != 1 || p.Saved[0].Command != "npm run dev" || p.Saved[0].Worktree != path {
+		t.Fatalf("the other definition must stay saved with its own command, got %+v", p.Saved)
+	}
+}
+
+// TestRemovingAWorktreeForgetsEveryDefinitionSharingIt pins the other half
+// of the distinction: RemoveWorktree means "this whole worktree is gone",
+// so every saved definition pointing at it must go, not just one. This is
+// deliberately different from forget's exact-identity match used elsewhere.
+func TestRemovingAWorktreeForgetsEveryDefinitionSharingIt(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	p := ws.Projects[0]
+	first, err := ws.CreateTerminal(p, Options{Worktree: true, Branch: "feature/pair", Base: ws.DefaultBranch(p), Command: "claude"}, 80, 24)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	path := first.Worktree.Path
+	_ = first.Session.Close()
+	ws.Remove(first.ID)
+	p.Saved = append(p.Saved, SavedTerminal{Command: "npm run dev", Branch: "feature/pair", Worktree: path})
+	if len(p.Saved) != 2 {
+		t.Fatalf("setup: want 2 saved definitions sharing the worktree, got %+v", p.Saved)
+	}
+
+	infos, _ := ws.Worktrees(p)
+	var info WorktreeInfo
+	for _, i := range infos {
+		if i.Path == path {
+			info = i
+		}
+	}
+	if info.Path == "" {
+		t.Fatalf("setup: worktree not found among %+v", infos)
+	}
+	if err := ws.RemoveWorktree(p, info, false); err != nil {
+		t.Fatalf("RemoveWorktree: %v", err)
+	}
+	if len(p.Saved) != 0 {
+		t.Errorf("removing the worktree should forget every definition pointing at it, got %+v", p.Saved)
 	}
 }

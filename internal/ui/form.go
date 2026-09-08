@@ -11,32 +11,55 @@ import (
 	"github.com/Vonnue-ShijilCG/tm/internal/workspace"
 )
 
-// newTermForm collects the options for a new terminal: for Git projects an
-// optional dedicated worktree with a branch to check out or create; for
-// other projects there is nothing to choose and Enter simply creates it.
+// newTermForm collects the options for a new terminal. The branch a user
+// types decides where it runs: an existing branch's own worktree, a new
+// worktree for a branch that does not exist yet, or the project checkout
+// when the branch is left empty. For a non-Git project there is nothing to
+// choose and Enter simply creates it.
 type newTermForm struct {
 	project *workspace.Project
 	back    focus // where Esc returns
 
-	branch   textinput.Model
-	base     textinput.Model
-	command  textinput.Model
-	worktree bool
+	branch  textinput.Model
+	base    textinput.Model
+	command textinput.Model
 
 	canWorktree bool     // project is a Git repository
 	branches    []string // existing local branches, for hints
 	current     string   // checked-out branch of the project
 
+	snap workspace.LocationSource // repository state, gathered once when the form opens
+	loc  workspace.Location       // where the terminal will run; refreshed on every branch keystroke
+
 	field int // one of the field* constants
 	err   string
+
+	// confirmDup is the command awaiting confirmation because it already
+	// runs at this location, or "" when nothing is pending. A second Enter
+	// with the same command confirms; any other key clears it, since the
+	// command may have changed underneath it.
+	confirmDup string
 }
 
 const (
 	fieldBranch = iota
 	fieldBase
 	fieldCommand
-	fieldWorktree
 )
+
+// fields returns the navigable fields in display order. A non-Git project has
+// no branch or base to choose, so only the command remains. The base is only
+// asked for when it matters: creating a worktree on a branch that does not
+// exist yet.
+func (f *newTermForm) fields() []int {
+	if !f.canWorktree {
+		return []int{fieldCommand}
+	}
+	if f.loc.NewBranch {
+		return []int{fieldBranch, fieldBase, fieldCommand}
+	}
+	return []int{fieldBranch, fieldCommand}
+}
 
 func newForm(ws *workspace.Workspace, p *workspace.Project, back focus) *newTermForm {
 	f := &newTermForm{
@@ -50,8 +73,12 @@ func newForm(ws *workspace.Workspace, p *workspace.Project, back focus) *newTerm
 	// flags, a long npm/go command), so give this field alone a larger cap;
 	// newInput's default of 80 stays right for branch and base.
 	f.command.CharLimit = 256
+	// Locator gathers repository state once, in one pass, so that Locate can
+	// resolve every keystroke below with no git subprocesses.
+	f.snap = ws.Locator(p)
+	f.loc = f.snap.Locate("")
 	if branches, current, err := ws.Branches(p); err == nil {
-		f.canWorktree, f.branches, f.current, f.worktree = true, branches, current, true
+		f.canWorktree, f.branches, f.current = true, branches, current
 		f.base.SetValue(ws.DefaultBranch(p))
 	}
 	f.setField(f.fields()[0])
@@ -65,36 +92,6 @@ func newInput(placeholder string) textinput.Model {
 	ti.CharLimit = 80
 	ti.Width = 40
 	return ti
-}
-
-// fields returns the navigable fields in display order. A non-Git project has
-// no branch to choose; the worktree row is always present, disabled when it
-// cannot apply, so the form always has something to land on. The base is
-// only asked for when it matters: creating a worktree on a branch that does
-// not exist yet.
-func (f *newTermForm) fields() []int {
-	if !f.canWorktree {
-		return []int{fieldCommand, fieldWorktree}
-	}
-	if f.worktree && f.branchIsNew() {
-		return []int{fieldBranch, fieldBase, fieldCommand, fieldWorktree}
-	}
-	return []int{fieldBranch, fieldCommand, fieldWorktree}
-}
-
-// branchIsNew reports whether the typed branch does not exist yet, which is
-// the only case where a base has to be chosen.
-func (f *newTermForm) branchIsNew() bool {
-	v := strings.TrimSpace(f.branch.Value())
-	if v == "" {
-		return false
-	}
-	for _, br := range f.branches {
-		if br == v {
-			return false
-		}
-	}
-	return true
 }
 
 // moveField steps through fields() by delta, wrapping.
@@ -124,6 +121,9 @@ func (f *newTermForm) normalizeField() {
 // create when the user submits, and whether the form was cancelled.
 func (f *newTermForm) update(msg tea.KeyMsg) (opts *workspace.Options, cancelled bool) {
 	f.normalizeField()
+	if f.confirmDup != "" && !key.Matches(msg, keys.FormSubmit) {
+		f.confirmDup, f.err = "", ""
+	}
 	switch {
 	case key.Matches(msg, keys.FormCancel):
 		return nil, true
@@ -133,12 +133,9 @@ func (f *newTermForm) update(msg tea.KeyMsg) (opts *workspace.Options, cancelled
 		f.moveField(1)
 	case key.Matches(msg, keys.FormPrev):
 		f.moveField(-1)
-	case f.field == fieldWorktree:
-		if key.Matches(msg, keys.FormToggle) && f.canWorktree {
-			f.worktree = !f.worktree
-		}
 	case f.field == fieldBranch && f.canWorktree:
 		f.branch, _ = f.branch.Update(msg)
+		f.loc = f.snap.Locate(strings.TrimSpace(f.branch.Value()))
 	case f.field == fieldBase:
 		f.base, _ = f.base.Update(msg)
 	case f.field == fieldCommand:
@@ -148,6 +145,10 @@ func (f *newTermForm) update(msg tea.KeyMsg) (opts *workspace.Options, cancelled
 }
 
 func (f *newTermForm) submit() (*workspace.Options, bool) {
+	if f.loc.OutOfRoot {
+		f.err = "tm can only manage worktrees inside this workspace; pick a different branch"
+		return nil, false
+	}
 	opts := &workspace.Options{Command: strings.TrimSpace(f.command.Value())}
 	// A single-line textinput sanitises newlines on typing and paste, so this
 	// cannot currently trigger; it guards the invariant if that ever changes.
@@ -156,15 +157,11 @@ func (f *newTermForm) submit() (*workspace.Options, bool) {
 		f.setField(fieldCommand)
 		return nil, false
 	}
-	if f.canWorktree && f.worktree {
+	switch f.loc.Kind {
+	case workspace.LocationWorktree, workspace.LocationNewWorktree:
 		opts.Worktree = true
 		opts.Branch = strings.TrimSpace(f.branch.Value())
-		if opts.Branch == "" {
-			f.err = "a branch is required to create a worktree"
-			f.setField(fieldBranch)
-			return nil, false
-		}
-		if f.branchIsNew() {
+		if f.loc.NewBranch {
 			opts.Base = strings.TrimSpace(f.base.Value())
 			if opts.Base == "" {
 				f.err = "a base is required for a new branch"
@@ -173,6 +170,20 @@ func (f *newTermForm) submit() (*workspace.Options, bool) {
 			}
 		}
 	}
+	// A command already running at this exact location asks for confirmation
+	// before starting a second copy of it; different commands never do. The
+	// user confirms by pressing Enter again with the same command, which is
+	// how this guard is satisfied the second time through.
+	if opts.Command != "" && f.confirmDup != opts.Command {
+		for _, t := range f.loc.Terminals {
+			if t.Command == opts.Command {
+				f.confirmDup = opts.Command
+				f.err = fmt.Sprintf("%s is already running here. Press enter again to start another.", opts.Command)
+				return nil, false
+			}
+		}
+	}
+	f.confirmDup = ""
 	return opts, false
 }
 
@@ -206,19 +217,11 @@ func (f *newTermForm) view(width int) string {
 			}
 		}
 		b.WriteString(f.row(fieldBranch, "Branch", f.branch.View()+branchHint))
-		if f.worktree && f.branchIsNew() {
+		if f.loc.NewBranch {
 			b.WriteString(f.row(fieldBase, "From", f.base.View()))
 		}
 		b.WriteString(f.row(fieldCommand, "Command", f.command.View()))
-
-		wt := "no"
-		if f.worktree {
-			wt = "yes"
-			if path, err := workspace.WorktreePath(".", f.project.Name, strings.TrimSpace(f.branch.Value())); err == nil {
-				wt += hintStyle.Render("  → " + path)
-			}
-		}
-		b.WriteString(f.row(fieldWorktree, "Worktree", wt))
+		b.WriteString(f.row(-1, "Location", f.locationLine()))
 
 		if f.field == fieldBranch {
 			b.WriteString("\n " + hintStyle.Render("branches: "+f.matchingBranches(f.branch.Value(), width-12)) + "\n")
@@ -227,7 +230,7 @@ func (f *newTermForm) view(width int) string {
 		}
 	} else {
 		b.WriteString(f.row(fieldCommand, "Command", f.command.View()))
-		b.WriteString(f.row(fieldWorktree, "Worktree", hintStyle.Render("no (not a git repository)")))
+		b.WriteString(f.row(-1, "Location", f.locationLine()))
 		b.WriteString("\n " + hintStyle.Render("enter opens a shell in the project directory") + "\n")
 	}
 
@@ -235,6 +238,46 @@ func (f *newTermForm) view(width int) string {
 		b.WriteString("\n " + errorStyle.Render(f.err) + "\n")
 	}
 	return b.String()
+}
+
+// locationLine describes where the terminal will run, and what tm already has
+// running there. tm sees only its own terminals, so an empty list is reported
+// as "no tm terminals" rather than as an idle directory.
+func (f *newTermForm) locationLine() string {
+	var head string
+	switch f.loc.Kind {
+	case workspace.LocationPlainDir:
+		head = "project directory " + hintStyle.Render("(not a git repository)")
+	case workspace.LocationCheckout:
+		head = "project checkout"
+		if f.loc.Branch != "" {
+			head += " · on " + f.loc.Branch
+		}
+	case workspace.LocationWorktree:
+		head = "worktree · " + f.loc.Path
+		switch {
+		case f.loc.OutOfRoot:
+			head += hintStyle.Render("  (outside the workspace)")
+		case f.loc.Foreign:
+			head += hintStyle.Render("  (not created by tm)")
+		}
+	case workspace.LocationNewWorktree:
+		return "new worktree · " + f.loc.Path
+	}
+	if f.loc.OutOfRoot {
+		return head + "\n" + strings.Repeat(" ", 14) + hintStyle.Render("tm can only manage worktrees inside this workspace — pick a different branch")
+	}
+	if len(f.loc.Terminals) == 0 {
+		if f.loc.Foreign {
+			return head + "\n" + strings.Repeat(" ", 14) + hintStyle.Render("no tm terminals here — may be in use elsewhere")
+		}
+		return head
+	}
+	var names []string
+	for _, t := range f.loc.Terminals {
+		names = append(names, terminalLabel(t))
+	}
+	return head + "\n" + strings.Repeat(" ", 14) + hintStyle.Render(fmt.Sprintf("%d terminal(s) here: %s", len(names), strings.Join(names, ", ")))
 }
 
 func (f *newTermForm) row(field int, label, value string) string {

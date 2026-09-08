@@ -151,11 +151,10 @@ func TestFormTypesACommandInAGitProjectAndTabsThroughAllFields(t *testing.T) {
 	}
 	m = typeText(m, "npm run dev")
 	m = press(m, "tab")
-	if m.form.field != fieldWorktree {
-		t.Fatalf("tab from Command should reach Worktree, field=%d", m.form.field)
+	if m.form.field != fieldBranch {
+		t.Fatalf("tab from Command should wrap back to Branch (no branch typed, no worktree needed), field=%d", m.form.field)
 	}
-	m = press(m, " ") // worktree defaults on for a git project; turn it off
-	m = press(m, "enter")
+	m = press(m, "enter") // branch still empty: a plain shell in the project checkout
 
 	if m.form != nil {
 		t.Fatalf("the form should have closed: %s", m.notice)
@@ -165,7 +164,7 @@ func TestFormTypesACommandInAGitProjectAndTabsThroughAllFields(t *testing.T) {
 		t.Fatalf("terminal command = %q, want %q", last.Command, "npm run dev")
 	}
 	if last.Worktree != nil {
-		t.Error("worktree should be off, since it was toggled off before submit")
+		t.Error("an empty branch must not create a worktree")
 	}
 	s := (*spawned)[len(*spawned)-1]
 	if len(s.text) == 0 || s.text[len(s.text)-1] != "npm run dev\n" {

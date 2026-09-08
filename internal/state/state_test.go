@@ -107,7 +107,8 @@ func TestLoadIgnoresUnknownFieldsAndInvalidEntries(t *testing.T) {
 	got := f.Projects[0].Terminals
 	want := []Terminal{
 		{Name: "Ok", Worktree: ".terminal-worktrees/app/ok"},
-		{Name: "Dup", Worktree: ".terminal-worktrees/app/dup"}, // an exact duplicate still collapses to one
+		{Name: "Dup", Worktree: ".terminal-worktrees/app/dup"},
+		{Name: "Dup", Worktree: ".terminal-worktrees/app/dup"}, // an exact duplicate is kept: the form lets a user create two terminals with the same name, command and worktree
 		{Name: "Pair", Command: "claude", Worktree: ".terminal-worktrees/app/pair"},
 		{Name: "Pair", Command: "npm run dev", Worktree: ".terminal-worktrees/app/pair"}, // different command: both kept, a worktree may hold several terminals
 		{}, {},

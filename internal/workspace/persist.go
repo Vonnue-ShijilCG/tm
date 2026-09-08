@@ -20,8 +20,17 @@ type SavedTerminal struct {
 }
 
 // Restore loads the state file and attaches saved terminal definitions to
-// the matching projects. Unknown projects and unsafe paths are skipped.
-// A malformed file is reported but leaves the workspace usable.
+// the matching projects. Unknown projects are skipped. A saved worktree
+// path is kept when EITHER git currently reports it as a checkout of this
+// project (covers a worktree another tool made, which tm's own directory
+// obviously does not list), OR it is a path tm itself could only ever have
+// created (ownedName - the same check addWorktree and RemoveWorktree use),
+// which also covers a tm worktree git has since forgotten: that
+// definition must survive so the manager can show it as stale and let the
+// user forget it deliberately, rather than have it silently vanish here.
+// Anything satisfying neither is refused, so a corrupted state file can
+// never point a terminal at an arbitrary directory. A malformed file is
+// reported but leaves the workspace usable.
 func (ws *Workspace) Restore() error {
 	f, err := state.Load(ws.Root)
 	for _, sp := range f.Projects {
@@ -29,13 +38,17 @@ func (ws *Workspace) Restore() error {
 		if p == nil {
 			continue // project no longer exists in this workspace
 		}
+		var worktrees map[string]bool             // resolved lazily, once per project
 		keys := make([]string, len(sp.Terminals)) // "" marks a terminal we refused
 		for i, st := range sp.Terminals {
 			saved := SavedTerminal{Name: st.Name, Command: st.Command, Branch: st.Branch}
 			if st.Worktree != "" {
 				abs := filepath.Join(ws.Root, filepath.FromSlash(st.Worktree))
-				if ws.ownedName(p, abs) == "" {
-					continue // not one of ours
+				if worktrees == nil {
+					worktrees = ws.projectWorktreePaths(p)
+				}
+				if !worktrees[abs] && ws.ownedName(p, abs) == "" {
+					continue // neither a checkout git knows about, nor a path tm could have created
 				}
 				saved.Worktree = abs
 			}
@@ -48,6 +61,48 @@ func (ws *Workspace) Restore() error {
 		}
 	}
 	return err
+}
+
+// projectCheckouts is every checkout git currently reports for p - the
+// main checkout and every worktree, whether or not tm created it - keyed
+// by path. Restore and Rows both need to recognise a real checkout git
+// knows about even when tm did not make it; ws.Worktrees deliberately
+// stays narrower (tm-owned only), since removal and the "unused
+// worktrees" section must never touch, or offer to touch, anything else.
+// A project that is not a usable Git repository yields an empty map.
+func (ws *Workspace) projectCheckouts(p *Project) map[string]git.Worktree {
+	m := map[string]git.Worktree{}
+	repo, err := git.Open(p.Path)
+	if err != nil {
+		return m
+	}
+	list, err := repo.Worktrees()
+	if err != nil {
+		return m
+	}
+	for _, wt := range list {
+		m[wt.Path] = wt
+	}
+	return m
+}
+
+// projectWorktreePaths is the set of linked-worktree checkout paths git
+// currently reports for p, asked for once per project (rather than once
+// per saved definition) since Restore runs at startup and a project may
+// have several saved worktree terminals. The main checkout is deliberately
+// excluded: a terminal there is never recorded with a worktree path (see
+// SavedTerminal), so a saved definition naming it can only be a corrupted
+// or hand-edited entry.
+func (ws *Workspace) projectWorktreePaths(p *Project) map[string]bool {
+	checkouts := ws.projectCheckouts(p)
+	set := make(map[string]bool, len(checkouts))
+	for path, wt := range checkouts {
+		if wt.IsMain {
+			continue
+		}
+		set[path] = true
+	}
+	return set
 }
 
 // Save writes the current configuration: every running terminal plus the
@@ -111,33 +166,44 @@ func (ws *Workspace) projectByName(name string) *Project {
 	return nil
 }
 
-// remember keeps a definition that is not running. A worktree may hold
-// several definitions, distinguished by their full identity (name, command
-// and worktree path, which Key() already expresses) - two shells in a
-// directory are no more a conflict than two in the project checkout. Plain
-// terminals (no worktree) are never deduplicated here: unnamed shells with
-// no command share a key and are matched positionally on restore, so both
+// remember keeps a definition that is not running. A worktree, like the
+// project checkout, may hold several definitions, including more than one
+// with the exact same name, command and worktree path (the form's own
+// confirmation flow exists precisely to let a user create two terminals
+// running the same command in one directory), so nothing here deduplicates.
+// Terminals that share a Key() — most commonly unnamed plain shells with no
+// command — are matched positionally on restore, which is exactly why both
 // must stay in Saved for that matching to have two entries to work with.
 func (p *Project) remember(s SavedTerminal) {
-	if s.Worktree != "" {
-		for _, cur := range p.Saved {
-			if cur.key() == s.key() {
-				return
-			}
-		}
-	}
 	p.Saved = append(p.Saved, s)
 }
 
-// forget drops the saved definition for a worktree path, or the first
-// plain terminal with that name and command when worktree is "".
-func (p *Project) forget(name, command, worktree string) {
-	for i, s := range p.Saved {
-		if s.Worktree == worktree && (worktree != "" || (s.Name == name && s.Command == command)) {
+// forget drops the saved definition matching s's full identity - name,
+// command and worktree path, exactly what Key() expresses. Since a worktree
+// may now hold several definitions, this is the only safe way to remove
+// one: matching on the worktree path alone (as before this task) could drop
+// a different definition that happens to share the path.
+func (p *Project) forget(s SavedTerminal) {
+	for i, cur := range p.Saved {
+		if cur.key() == s.key() {
 			p.Saved = append(p.Saved[:i], p.Saved[i+1:]...)
 			return
 		}
 	}
+}
+
+// forgetPath drops every saved definition at worktree, regardless of name
+// or command. Used only when the whole worktree is gone (removed or
+// pruned), so nothing that pointed there can still be opened; callers that
+// mean one specific definition must use forget instead.
+func (p *Project) forgetPath(worktree string) {
+	kept := p.Saved[:0]
+	for _, cur := range p.Saved {
+		if cur.Worktree != worktree {
+			kept = append(kept, cur)
+		}
+	}
+	p.Saved = kept
 }
 
 // OpenSaved starts exactly one saved terminal definition: a plain shell in
@@ -149,7 +215,7 @@ func (ws *Workspace) OpenSaved(p *Project, s SavedTerminal, cols, rows int) (*Te
 	if s.Worktree == "" {
 		t, err := ws.startTerminal(p, s.Name, s.Command, nil, cols, rows)
 		if err == nil {
-			p.forget(s.Name, s.Command, "")
+			p.forget(s)
 		}
 		return t, err
 	}
@@ -182,7 +248,7 @@ func (ws *Workspace) OpenSaved(p *Project, s SavedTerminal, cols, rows int) (*Te
 	}
 	t, err := ws.startTerminal(p, s.Name, s.Command, &git.Worktree{Path: s.Worktree, Branch: branch}, cols, rows)
 	if err == nil {
-		p.forget("", "", s.Worktree)
+		p.forget(s)
 	}
 	return t, err
 }
@@ -269,11 +335,16 @@ type Row struct {
 // manager's cleanup section; they are never terminals. err reports a git
 // problem listing worktrees (rows are still returned).
 func (ws *Workspace) Rows(p *Project) (rows []Row, unused []WorktreeInfo, err error) {
-	worktrees, err := ws.Worktrees(p)
+	worktrees, err := ws.Worktrees(p) // tm-owned only: the unused section must never touch anything else
 	listed := map[string]WorktreeInfo{}
 	for _, wt := range worktrees {
 		listed[wt.Path] = wt
 	}
+	// Stale must mean what its comment says - git no longer lists the
+	// worktree - not merely "tm did not create it", so a saved definition
+	// in a worktree another tool made is checked against every checkout
+	// git reports, not just tm's own.
+	checkouts := ws.projectCheckouts(p)
 	for _, t := range p.Terminals {
 		rows = append(rows, Row{Terminal: t, Definition: t.saved()})
 	}
@@ -286,6 +357,13 @@ func (ws *Workspace) Rows(p *Project) (rows []Row, unused []WorktreeInfo, err er
 				r.Missing = wt.Missing
 				if wt.Branch != "" {
 					r.Definition.Branch = wt.Branch // git knows what is checked out there now
+				}
+			} else if wt, ok := checkouts[s.Worktree]; ok {
+				if _, err := os.Stat(s.Worktree); err != nil {
+					r.Missing = true
+				}
+				if wt.Branch != "" {
+					r.Definition.Branch = wt.Branch
 				}
 			} else {
 				r.Stale = true

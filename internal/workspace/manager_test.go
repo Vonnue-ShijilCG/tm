@@ -80,6 +80,55 @@ func TestRowsAreTerminalFirstAndListUnusedWorktreesApart(t *testing.T) {
 	}
 }
 
+// TestRowsDoNotFlagAForeignWorktreeAsStaleOrMissing guards against a defect
+// exposed by the Restore fix above: git lists a worktree another tool
+// created perfectly well, so a saved definition pointing at one must not be
+// reported Stale (that means "git no longer lists the worktree", which
+// would be false) or appear as an unused worktree tm might offer to remove.
+func TestRowsDoNotFlagAForeignWorktreeAsStaleOrMissing(t *testing.T) {
+	ws, _ := gitWorkspace(t)
+	app := ws.Projects[0]
+
+	foreign := filepath.Join(t.TempDir(), "foreign")
+	repo, err := git.Open(app.Path)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := repo.AddWorktreeNewBranch(foreign, "feature/foreign", ws.DefaultBranch(app)); err != nil {
+		t.Fatalf("creating a foreign worktree: %v", err)
+	}
+	app.remember(SavedTerminal{Command: "claude", Branch: "feature/foreign", Worktree: foreign})
+
+	rows, unused, err := ws.Rows(app)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var row Row
+	found := false
+	for _, r := range rows {
+		if r.Definition.Worktree == foreign {
+			row, found = r, true
+		}
+	}
+	if !found {
+		t.Fatalf("no row for the foreign worktree: %+v", rows)
+	}
+	if row.Stale {
+		t.Error("a worktree git knows about must not be reported stale")
+	}
+	if row.Missing {
+		t.Error("a worktree whose directory exists must not be reported missing")
+	}
+	if row.Definition.Branch != "feature/foreign" {
+		t.Errorf("branch should come from git, got %+v", row)
+	}
+	for _, u := range unused {
+		if u.Path == foreign {
+			t.Errorf("a foreign worktree must never be offered in the unused/cleanup section: %+v", unused)
+		}
+	}
+}
+
 func TestOpenSavedStartsExactlyOneAndReusesTheWorktree(t *testing.T) {
 	ws, spawned := gitWorkspace(t)
 	app := ws.Projects[0]
@@ -225,7 +274,7 @@ func TestRecordLayoutKeepsSavedLayoutWhileTerminalsArePending(t *testing.T) {
 		t.Error("new terminals do not throw the saved layout away while B can still come back")
 	}
 	// B deleted for good: nothing pending, the live tree becomes the layout.
-	p.forget("B", "", "")
+	p.forget(SavedTerminal{Name: "B"})
 	ws.RecordLayout(p, withD, d.Key())
 	if p.Layout != withD {
 		t.Error("with nothing pending the live tree is recorded")

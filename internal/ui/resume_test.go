@@ -45,11 +45,10 @@ func TestStateIsSavedOnCreateCloseAndQuit(t *testing.T) {
 		t.Fatalf("state after create = %+v, %v", f, err)
 	}
 
-	m = press(m, "alt+n", "enter") // empty branch is rejected and the form moves to the branch field...
-	if m.form == nil {
-		t.Fatal("form should stay open after the branch error")
+	m = press(m, "alt+n", "enter") // empty branch: the project checkout, no error
+	if m.form != nil {
+		t.Fatalf("form should close after a successful create: %s", m.form.err)
 	}
-	m = press(m, "tab", "tab", " ", "enter") // ...so two tabs (skipping Command) reach the worktree toggle; off -> plain terminal
 	f, _ = state.Load(root)
 	if len(f.Projects[0].Terminals) != 2 {
 		t.Fatalf("state after second create = %+v", f.Projects[0].Terminals)

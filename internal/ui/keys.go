@@ -56,7 +56,6 @@ type keyMap struct {
 	// New-terminal form.
 	FormNext   key.Binding
 	FormPrev   key.Binding
-	FormToggle key.Binding
 	FormSubmit key.Binding
 	FormCancel key.Binding
 
@@ -117,7 +116,6 @@ var keys = keyMap{
 
 	FormNext:   key.NewBinding(key.WithKeys("tab", "down"), key.WithHelp("tab / ↓", "next field")),
 	FormPrev:   key.NewBinding(key.WithKeys("shift+tab", "up"), key.WithHelp("shift+tab / ↑", "prev field")),
-	FormToggle: key.NewBinding(key.WithKeys(" ", "left", "right"), key.WithHelp("space", "worktree y/n")),
 	FormSubmit: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "create")),
 	FormCancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 
@@ -151,7 +149,7 @@ func helpSections() []helpSection {
 		{"SIDEBAR", []key.Binding{k.Down, k.Up, k.Top, k.Bottom, k.Select, k.New, k.SplitSide, k.SplitStack, k.Focus, k.Zoom, k.Manage, k.Help, k.Quit}},
 		{"TERMINAL", []key.Binding{k.Sidebar, k.NextTerm, k.PrevTerm, k.NewTerm, k.ManageTerm, k.HideTerm, k.DeleteTerm}},
 		{"PANES", []key.Binding{k.PaneSide, k.PaneStack, k.PaneLeft, k.PaneRight, k.PaneUp, k.PaneDown, k.PaneGrow, k.PaneShrink, k.PaneZoom}},
-		{"NEW TERMINAL", []key.Binding{k.FormNext, k.FormPrev, k.FormToggle, k.FormSubmit, k.FormCancel}},
+		{"NEW TERMINAL", []key.Binding{k.FormNext, k.FormPrev, k.FormSubmit, k.FormCancel}},
 		{"MANAGE TERMINALS", []key.Binding{k.MgDown, k.MgUp, k.MgShow, k.MgHide, k.MgNew, k.MgOpenAll, k.MgDelete, k.MgClose}},
 		{"CONFIRM", []key.Binding{k.Confirm, k.Cancel}},
 		{"MOUSE", []key.Binding{k.Scroll}},
@@ -169,7 +167,7 @@ func (k keyMap) terminalHelp() []key.Binding {
 }
 
 func (k keyMap) formHelp() []key.Binding {
-	return []key.Binding{k.FormSubmit, k.FormNext, k.FormToggle, k.FormCancel}
+	return []key.Binding{k.FormSubmit, k.FormNext, k.FormCancel}
 }
 
 func (k keyMap) managerHelp() []key.Binding {

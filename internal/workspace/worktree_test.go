@@ -294,21 +294,31 @@ func TestWorktreeCreationErrors(t *testing.T) {
 	}
 }
 
-// TestBranchCheckedOutElsewhereReusesThatWorktree replaces the old
-// "branch checked out elsewhere" failure case in TestWorktreeCreationErrors:
+// TestRequestingAWorktreeForTheCheckedOutBranchFails documents a contract
+// change (Fix 4 of the final review): this test used to be named
+// TestBranchCheckedOutElsewhereReusesThatWorktree and asserted that
 // requesting "main" (checked out in the project's own checkout, not a linked
-// worktree) used to be refused with "already"; now the reuse contract means
-// the terminal is simply placed in that existing checkout instead.
-func TestBranchCheckedOutElsewhereReusesThatWorktree(t *testing.T) {
+// worktree) with Worktree: true succeeded and aliased term.Worktree.Path to
+// the project's own path. That was the bug: repo.WorktreeFor also reports
+// the main checkout, so addWorktree treated it as an existing worktree to
+// reuse. addWorktree now excludes IsMain, agreeing with Locate (which
+// already resolves an IsMain match to LocationCheckout, never
+// LocationWorktree). Nothing in the UI ever produces this combination - the
+// form's LocationCheckout case never sets Worktree - so the only remaining
+// question is what a direct, mismatched request does; it must fail rather
+// than silently return the project's own path dressed up as a worktree, and
+// it does, because git itself refuses a second checkout of an
+// already-checked-out branch.
+func TestRequestingAWorktreeForTheCheckedOutBranchFails(t *testing.T) {
 	ws, _ := gitWorkspace(t)
 	app := ws.Projects[0]
 
 	term, err := ws.CreateTerminal(app, Options{Name: "Main2", Branch: "main", Worktree: true}, 80, 24)
-	if err != nil {
-		t.Fatalf("reusing the branch checked out in the project's own checkout should succeed, got: %v", err)
+	if err == nil {
+		t.Fatalf("requesting a worktree for the already-checked-out branch should fail, got terminal %+v", term)
 	}
-	if term.Worktree == nil || term.Worktree.Path != app.Path {
-		t.Errorf("term.Worktree = %+v, want path %q (the project's own checkout)", term.Worktree, app.Path)
+	if term != nil && term.Worktree != nil && term.Worktree.Path == app.Path {
+		t.Fatal("Terminal.Worktree.Path must never alias the project's own checkout")
 	}
 }
 

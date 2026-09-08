@@ -181,10 +181,12 @@ func Save(root string, f File) error {
 
 // sanitized drops entries that could not have been written by tm: project
 // names that are not a single path segment and worktree paths that are
-// absolute or escape the workspace. A worktree may be shared by several
-// terminals, distinguished by name and command; only an exact duplicate
-// (same name, command and worktree) collapses to one. Plain terminals may
-// repeat too (a project can have several shells).
+// absolute or escape the workspace. Terminals are never deduplicated here —
+// a worktree, like the project checkout, may hold any number of terminals,
+// including several with the exact same name, command and worktree (the
+// form's own confirmation flow exists precisely to let a user create two
+// such terminals). layoutToState's used map already disambiguates duplicate
+// keys when building the layout, so a duplicate entry here loses nothing.
 func (f File) sanitized() File {
 	out := File{Version: f.Version, Projects: []Project{}}
 	for _, p := range f.Projects {
@@ -192,7 +194,6 @@ func (f File) sanitized() File {
 			continue
 		}
 		var terms []Terminal
-		seen := map[string]bool{}
 		remap := map[int]int{} // original index -> index after filtering
 		for i, t := range p.Terminals {
 			t.Command = stripNewlines(t.Command)
@@ -202,13 +203,6 @@ func (f File) sanitized() File {
 			}
 			if t.Worktree != "" && !ValidRelPath(t.Worktree) {
 				continue
-			}
-			if t.Worktree != "" {
-				key := t.Name + "\x00" + t.Command + "\x00" + t.Worktree
-				if seen[key] {
-					continue
-				}
-				seen[key] = true
 			}
 			remap[i] = len(terms)
 			terms = append(terms, t)

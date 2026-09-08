@@ -287,7 +287,7 @@ func (ws *Workspace) DeleteTerminal(p *Project, def SavedTerminal, t *Terminal) 
 	if t != nil {
 		ws.detach(t.ID)
 	} else {
-		p.forget(def.Name, def.Command, def.Worktree)
+		p.forget(def)
 	}
 	if def.Worktree == "" {
 		return ""
@@ -299,6 +299,13 @@ func (ws *Workspace) DeleteTerminal(p *Project, def SavedTerminal, t *Terminal) 
 		if s.Worktree == def.Worktree {
 			return "worktree kept: another saved terminal uses it"
 		}
+	}
+	if ws.ownedName(p, def.Worktree) == "" {
+		// A worktree git knows about (or once did) that tm did not create -
+		// e.g. one another tool made. tm never removes those; see
+		// RemoveWorktree's ownedName guard. Say so instead of advising the
+		// user to delete a directory that may still be in active use.
+		return "worktree kept: not created by tm, so tm will not remove it"
 	}
 	if _, listed := ws.WorktreeStatus(p, def.Worktree); !listed { // git has forgotten it already
 		if _, err := os.Stat(def.Worktree); err != nil {
@@ -313,19 +320,31 @@ func (ws *Workspace) DeleteTerminal(p *Project, def SavedTerminal, t *Terminal) 
 }
 
 // WorktreeStatus reports what git knows about the worktree at path: its
-// branch, whether it is dirty or its directory missing. ok is false when git
-// does not list it (or cannot be asked).
+// branch, whether it is dirty or its directory missing, and whether tm owns
+// it. ok is false only when git has no record of the checkout at all -
+// never merely because tm did not create it. A worktree another tool made
+// (or one under .terminal-worktrees git has since forgotten) still needs an
+// accurate report, not one that says git has never heard of it; see Rows,
+// which consults projectCheckouts for the identical reason.
 func (ws *Workspace) WorktreeStatus(p *Project, path string) (info WorktreeInfo, ok bool) {
-	worktrees, err := ws.Worktrees(p)
-	if err != nil {
-		return WorktreeInfo{}, false
-	}
-	for _, wt := range worktrees {
-		if wt.Path == path {
-			return wt, true
+	if worktrees, err := ws.Worktrees(p); err == nil { // tm-owned: carries Name too
+		for _, wt := range worktrees {
+			if wt.Path == path {
+				return wt, true
+			}
 		}
 	}
-	return WorktreeInfo{}, false
+	wt, known := ws.projectCheckouts(p)[path]
+	if !known {
+		return WorktreeInfo{}, false
+	}
+	info = WorktreeInfo{Path: path, Branch: wt.Branch, Foreign: true, Terminal: p.terminalUsing(path)}
+	if _, err := os.Stat(path); err != nil {
+		info.Missing = true
+	} else if dirty, err := git.IsDirty(path); err == nil {
+		info.Dirty = dirty
+	}
+	return info, true
 }
 
 // Definition is the terminal's persistent form: name, branch and worktree

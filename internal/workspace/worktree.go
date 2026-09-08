@@ -82,11 +82,15 @@ func (ws *Workspace) addWorktree(p *Project, opts Options) (*git.Worktree, error
 		return nil, err
 	}
 
-	if wt, ok := repo.WorktreeFor(opts.Branch); ok {
+	if wt, ok := repo.WorktreeFor(opts.Branch); ok && !wt.IsMain {
 		// Git allows a branch in only one checkout, so the answer is never to
 		// create a second: the terminal belongs in the one that exists. This
 		// includes worktrees tm did not create; removal is still restricted to
-		// tm's own directory by RemoveWorktree.
+		// tm's own directory by RemoveWorktree. IsMain is excluded: the
+		// project's own checkout is never a worktree (Locate agrees - it
+		// resolves an IsMain match to LocationCheckout, not LocationWorktree),
+		// so opts.Branch being checked out in the main checkout falls through
+		// to create a genuine worktree instead of handing back the project path.
 		return &git.Worktree{Path: wt.Path, Branch: opts.Branch}, nil
 	}
 
@@ -136,14 +140,17 @@ func (ws *Workspace) DefaultBranch(p *Project) string {
 	return repo.DefaultBranch()
 }
 
-// WorktreeInfo describes one worktree tm owns for a project, as listed by
-// git plus what tm knows about it.
+// WorktreeInfo describes one worktree of a project, as listed by git plus
+// what tm knows about it. Name is set only for a worktree tm owns (under
+// <root>/.terminal-worktrees/<project>/); Foreign marks one git knows about
+// that tm did not create and will never remove.
 type WorktreeInfo struct {
-	Name     string    // directory name under <root>/.terminal-worktrees/<project>/
+	Name     string    // directory name under <root>/.terminal-worktrees/<project>/, "" when Foreign
 	Path     string    // absolute path
 	Branch   string    // checked-out branch, "" when detached
 	Dirty    bool      // uncommitted or untracked changes
 	Missing  bool      // registered in git but the directory is gone
+	Foreign  bool      // exists and git knows it, but tm did not create it
 	Terminal *Terminal // running terminal using it, or nil
 }
 
@@ -219,7 +226,7 @@ func (ws *Workspace) RemoveWorktree(p *Project, wt WorktreeInfo, force bool) err
 		if err := repo.Prune(); err != nil {
 			return err
 		}
-		p.forget("", "", wt.Path)
+		p.forgetPath(wt.Path)
 		return nil
 	}
 	if !force {
@@ -234,6 +241,6 @@ func (ws *Workspace) RemoveWorktree(p *Project, wt WorktreeInfo, force bool) err
 	if err := repo.RemoveWorktree(wt.Path, force); err != nil {
 		return err
 	}
-	p.forget("", "", wt.Path)
+	p.forgetPath(wt.Path)
 	return nil
 }

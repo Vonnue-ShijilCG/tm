@@ -176,6 +176,48 @@ func TestDeletingKeepsAWorktreeAnotherDefinitionUses(t *testing.T) {
 	}
 }
 
+// TestDeletingATerminalInAForeignWorktreeGetsAccurateAdvice covers a
+// terminal in a worktree tm did not create (say, one Claude Code or a person
+// added by hand outside .terminal-worktrees). Deleting the terminal must
+// never claim git has forgotten a worktree it still lists, and must never
+// tell the user to remove by hand a directory another tool may be actively
+// using; it may only say tm will leave the worktree as is.
+func TestDeletingATerminalInAForeignWorktreeGetsAccurateAdvice(t *testing.T) {
+	m, _, _ := gitModel(t)
+	p := m.ws.Projects[0]
+
+	foreign := filepath.Join(m.root, "external", "manual-checkout") // deliberately outside .terminal-worktrees
+	if out, err := exec.Command("git", "-C", p.Path, "worktree", "add", "-q", "-b", "feature/manual", foreign).CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add: %v\n%s", err, out)
+	}
+
+	m = press(m, "n")
+	m = typeText(m, "feature/manual")
+	m = press(m, "enter")
+	if m.form != nil {
+		t.Fatalf("submitting an existing foreign branch should create the terminal: %s", m.form.err)
+	}
+
+	m = press(m, "alt+delete")
+	if strings.Contains(m.deletePrompt, "no longer known to git") {
+		t.Errorf("prompt wrongly claims git has forgotten a worktree it still lists:\n%s", m.deletePrompt)
+	}
+	if !strings.Contains(m.deletePrompt, "not created by tm") {
+		t.Errorf("prompt should say tm did not create this worktree:\n%s", m.deletePrompt)
+	}
+
+	m = press(m, "y")
+	if strings.Contains(m.notice, "remove the directory by hand") {
+		t.Errorf("notice must never advise deleting a directory another tool may be using:\n%s", m.notice)
+	}
+	if !strings.Contains(m.notice, "not created by tm") {
+		t.Errorf("notice = %q", m.notice)
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Error("tm must never remove a worktree it did not create")
+	}
+}
+
 func TestManagerRowsKeepIdentityAndBranchReadable(t *testing.T) {
 	m, spawned, _ := gitModel(t)
 	m = makeTerminal(t, m, "n", "", "feature/payment-gateway")
