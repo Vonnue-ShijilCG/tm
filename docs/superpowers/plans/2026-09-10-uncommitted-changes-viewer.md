@@ -4,7 +4,7 @@
 
 **Goal:** A full-screen view, one keystroke away, showing the uncommitted changes in the directory you are looking at — files on the left, the selected file rendered twice in full and aligned line for line, red for removals and green for additions.
 
-Task 1 is separate work that comes first because it is what you can see immediately: every pane gets its own black ground and a border weighted to read against it.
+Tasks 1 and 3-5 are separate appearance work that comes first because it is what you can see immediately: every pane gets its own ground, its own rounded card, a status dot, and a sidebar and status bar to match. Task 2 is an unrelated one-line key rebind. The viewer itself is Tasks 6-11.
 
 **Architecture:** Task 1 stands alone. Panes are drawn by handing the emulated screen to `Draw` on a reused `uv.Buffer` instead of calling `Render` on the emulator, because `Render` emits nothing for a cell the program left at its default background and so shows the host terminal's colour through the pane.
 
@@ -27,7 +27,7 @@ For the viewer: `git diff HEAD -U0` emits hunk headers that carry the complete a
 
 ---
 
-### Task 1: Give every pane a black ground and a border that reads against it
+### Task 1: Give every pane its own ground and a border that reads against it
 
 **Files:**
 - Modify: `internal/terminal/session.go` (imports, `Session` struct, `Start`, `Render`, `RenderScrolled`)
@@ -418,7 +418,503 @@ git commit -m "Let Esc reach the running program"
 
 ---
 
-### Task 3: Ask git what changed
+### Task 3: Give every terminal its own rounded card
+
+**Files:**
+- Modify: `internal/ui/styles.go` (border style, a card style)
+- Modify: `internal/ui/model.go` (`renderLeaf`, `renderPane`, `applyLayout`, the divider constants)
+- Test: `internal/ui/panes_test.go`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: `cardStyle`; `renderLeaf` renders a bordered card. Task 4 removes the outer frame around these cards; Task 5 restyles what is inside their header.
+
+**The fact that makes this safe.** `(*pane).rects` in `layout.go` and `renderPane` in `model.go` already reserve **one cell** between two split children (`r.x + wa + 1`, `max(r.w-wa-1, 0)`) — today that cell holds a divider glyph. If the divider becomes a blank gap and each leaf grows its own one-cell border inward, every rect stays byte-for-byte the same. Do **not** change `rects()`, `mainArea()`, or `screenRect()` in this task. If you find yourself editing pane arithmetic, stop and report — something has been misunderstood.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `internal/ui/panes_test.go`:
+
+```go
+func TestEachTerminalIsItsOwnCard(t *testing.T) {
+	m, spawned := newTestModel(t)
+	m = press(m, "j", "enter")
+	makeTerminal(t, &m, "alt+v", "", "") // split beside the first
+
+	view := m.View()
+
+	// Two cards means two card tops on the same screen row, separated by a gap.
+	if n := strings.Count(view, "╭"); n < 2 {
+		t.Errorf("want a rounded top-left per terminal, found %d:\n%s", n, view)
+	}
+	// The heavy dividers are gone: cards are separated by space, not by a rule.
+	if strings.Contains(view, "┃") || strings.Contains(view, "━") {
+		t.Errorf("dividers should be replaced by gaps between cards:\n%s", view)
+	}
+
+	// A card spends one cell per side on its border, so the session inside it
+	// is narrower than the pane rect by exactly that much.
+	rects := m.paneRects(m.selectedProject())
+	for term, r := range rects {
+		var s *fakeSession
+		for _, f := range *spawned {
+			if f == term.Session {
+				s = f
+			}
+		}
+		if s == nil {
+			t.Fatal("no session for terminal")
+		}
+		wantCols := r.w - cardStyle.GetHorizontalBorderSize()
+		wantRows := r.h - cardStyle.GetVerticalBorderSize() - paneHeaderHeight
+		if s.cols != wantCols || s.rows != wantRows {
+			t.Errorf("session sized %dx%d, want %dx%d (pane %dx%d minus its own border and header)",
+				s.cols, s.rows, wantCols, wantRows, r.w, r.h)
+		}
+	}
+}
+```
+
+Check the helper names against the file before running: `makeTerminal`'s signature and `fakeSession`'s size fields (`cols`, `rows`) are in `internal/ui/terminal_test.go`. If a helper differs, adapt the test to the real one rather than adding a new helper.
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/ui -run TestEachTerminalIsItsOwnCard -v`
+Expected: FAIL — no `╭` at all (borders are thick and only around the whole area), and the dividers are still present.
+
+- [ ] **Step 3: Thin, rounded borders and a card style**
+
+In `internal/ui/styles.go`, change the frame back to a thin rounded border and add the per-pane card:
+
+```go
+	// Thin and rounded: with every pane on its own ground and its own frame,
+	// separation comes from the card edges and the gaps between them, not
+	// from the weight of a line.
+	mainStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(edge).Background(ground)
+	sidebarStyle = mainStyle.Padding(0, 1)
+
+	// cardStyle is one terminal's box. It has no padding so the emulated
+	// screen meets its border exactly.
+	cardStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(edge).Background(ground)
+```
+
+- [ ] **Step 4: Render each leaf inside a card, and gaps between them**
+
+In `internal/ui/model.go`, `renderLeaf` currently fills `r.w x r.h` itself. Make the card do it, and size the content to the card's interior:
+
+```go
+// renderLeaf draws one terminal as its own card, filling exactly r.w x r.h
+// cells including the card's border.
+func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, focused bool) string {
+	title, screen := m.paneTitle(p, t), t.Session.Render(focused)
+	if off := m.scroll[t]; off > 0 {
+		title += fmt.Sprintf(" %s %d", scrollMark, off)
+		screen = t.Session.RenderScrolled(off)
+	}
+	innerW := max(r.w-cardStyle.GetHorizontalBorderSize(), 1)
+	innerH := max(r.h-cardStyle.GetVerticalBorderSize(), 1)
+
+	lines := []string{paneHeader(title, innerW, focused)}
+	for i, line := range strings.Split(screen, "\n") {
+		if i >= innerH-paneHeaderHeight {
+			break
+		}
+		lines = append(lines, ansi.Truncate(line, innerW, ""))
+	}
+	return framed(cardStyle, focused, r.w, r.h).Render(strings.Join(lines, "\n"))
+}
+```
+
+In `renderPane`, replace both dividers with blank gaps of the same size, so the reserved cell becomes space:
+
+```go
+	if n.dir == splitSide {
+		wa := splitSize(r.w, n.ratio, minPaneCols)
+		left := m.renderPane(p, n.a, rect{r.x, r.y, wa, r.h}, active)
+		right := m.renderPane(p, n.b, rect{r.x + wa + 1, r.y, r.w - wa - 1, r.h}, active)
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, gap(1, r.h), right)
+	}
+	ha := splitSize(r.h, n.ratio, minPaneRows)
+	top := m.renderPane(p, n.a, rect{r.x, r.y, r.w, ha}, active)
+	bottom := m.renderPane(p, n.b, rect{r.x, r.y + ha + 1, r.w, r.h - ha - 1}, active)
+	return lipgloss.JoinVertical(lipgloss.Left, top, gap(r.w, 1), bottom)
+```
+
+```go
+// gap is the empty space between two cards, painted so the ground shows
+// through rather than the host terminal's own background.
+func gap(w, h int) string {
+	return lipgloss.NewStyle().Background(ground).Width(w).Height(h).Render("")
+}
+```
+
+Delete the now-unused `verticalDivider` / `horizontalDivider` constants **and** the test from Task 1 that asserted the frame and the dividers share a weight — that invariant existed because the dividers were heavy, and there are no dividers any more. Say so in your report; do not leave a test asserting a rule the design has dropped.
+
+`dividerStyle` may now be unused; if so remove it, and `rule` with it if nothing else uses it.
+
+- [ ] **Step 5: Resize sessions to the card's interior**
+
+In `applyLayout`, both the zoom branch and the loop must subtract the card border as well as the header:
+
+```go
+	if t := p.ActiveTerminal(); m.zoom && t != nil && p == m.selectedProject() {
+		area := m.mainArea()
+		t.Session.Resize(sessionCols(area), sessionRows(area))
+		return
+	}
+	for t, r := range m.paneRects(p) {
+		t.Session.Resize(sessionCols(r), sessionRows(r))
+	}
+```
+
+```go
+// sessionCols and sessionRows are the cells a terminal actually gets: its
+// pane, minus the card border it is drawn inside and the header row.
+func sessionCols(r rect) int {
+	return max(r.w-cardStyle.GetHorizontalBorderSize(), 1)
+}
+
+func sessionRows(r rect) int {
+	return max(r.h-cardStyle.GetVerticalBorderSize()-paneHeaderHeight, 1)
+}
+```
+
+- [ ] **Step 6: Run the tests**
+
+Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/ui -v` then `go test ./...`
+Expected: PASS. Several existing tests assert session sizes or count rendered rows and will need their expected numbers changed — that is this task's contract changing, so update them, and **list every one in your report with its old and new expectation**. A test you cannot make pass by adjusting an expected size is telling you the arithmetic is wrong: report it rather than deleting the test.
+
+- [ ] **Step 7: Commit**
+
+```bash
+export PATH=$HOME/.local/go/bin:$PATH && gofmt -w internal/ui
+git add internal/ui
+git commit -m "Draw each terminal as its own rounded card"
+```
+
+---
+
+### Task 4: Let the cards float, with no frame around them
+
+**Files:**
+- Modify: `internal/ui/styles.go` (a borderless style for the pane area)
+- Modify: `internal/ui/model.go` (`mainArea`, `View`, `viewMain`, the two size helpers around line 970)
+- Modify: `internal/ui/scroll.go` (`screenRect`)
+- Test: `internal/ui/scroll_test.go`
+
+**Interfaces:**
+- Consumes: `cardStyle` (Task 3).
+- Produces: `mainAreaStyle`. Nothing later depends on it.
+
+With every terminal in its own card, the frame around the whole area is a second border wrapping a set of borders — busy, and not what the design calls for. Remove it, so the cards sit directly on the ground. `mainStyle` stays exactly as it is: the help screen, the form and the Terminal Manager still want a frame around their content.
+
+**The risk this task carries** is that the main area's origin moves. `screenRect` translates pane rects into screen coordinates for mouse hit-testing by adding the main frame's border offsets; with no border those offsets become zero. Get this wrong and the mouse wheel scrolls the wrong pane, silently. `internal/ui/scroll_test.go` is what catches it.
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `internal/ui/scroll_test.go`:
+
+```go
+func TestWheelStillFindsThePaneUnderThePointerWithoutAnOuterFrame(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = press(m, "j", "enter")
+	makeTerminal(t, &m, "alt+v", "", "")
+
+	rects := m.paneScreenRects(m.selectedProject())
+	if len(rects) != 2 {
+		t.Fatalf("want two panes, got %d", len(rects))
+	}
+	for term, r := range rects {
+		// The pointer at a pane's own top-left cell must find that pane.
+		got := m.paneAt(r.x, r.y)
+		if got != term {
+			t.Errorf("pointer at (%d,%d) found %v, want the pane whose rect starts there", r.x, r.y, got)
+		}
+	}
+	// The leftmost pane starts immediately right of the sidebar: with no frame
+	// around the pane area there is no border cell to skip.
+	minX := 1 << 30
+	for _, r := range rects {
+		minX = min(minX, r.x)
+	}
+	if minX != sidebarWidth {
+		t.Errorf("leftmost pane starts at x=%d, want %d (sidebar width, no outer border)", minX, sidebarWidth)
+	}
+}
+```
+
+Check `paneAt`'s real signature and return type in `internal/ui/scroll.go` and adapt the call if it differs.
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/ui -run TestWheelStillFindsThePane -v`
+Expected: FAIL on the `minX` assertion — panes currently start one cell further right because of the outer border.
+
+- [ ] **Step 3: Add a borderless style for the pane area**
+
+In `internal/ui/styles.go`:
+
+```go
+	// mainAreaStyle is the ground the terminal cards float on. It has no
+	// border: each card carries its own, and a frame around a set of frames
+	// reads as clutter. mainStyle keeps its border for the help screen, the
+	// form and the Terminal Manager, whose content has no frame of its own.
+	mainAreaStyle = lipgloss.NewStyle().Background(ground)
+```
+
+- [ ] **Step 4: Use it wherever the pane area is measured or drawn**
+
+Replace `mainStyle` with `mainAreaStyle` at exactly these four places, and nowhere else:
+
+- `model.go`, `mainArea()` — both the width and the height expression.
+- `model.go` around line 970 — the `cols` / `rows` pair.
+- `model.go`, `View()` — the `mainPane := framed(...)` line.
+- `scroll.go`, `screenRect()` — both offsets.
+
+`viewMain`'s `innerWidth` (around line 1026) also uses `mainStyle`, but it sizes the **form and the Terminal Manager**, which still render inside a frame. Leave it, and give those two their own frame in `View()` so they do not lose their box when the pane area stops providing one:
+
+```go
+	mainPane := framed(mainAreaStyle, false, m.width-sidebarWidth, paneHeight).Render(m.viewMain())
+	if m.panel != nil || m.form != nil {
+		mainPane = framed(mainStyle, m.focus == focusMain, m.width-sidebarWidth, paneHeight).Render(m.viewMain())
+	}
+```
+
+Note the `false`: with no border there is nothing for `framed`'s focus colour to paint, so focus is shown by the focused **card**, which is the only place it should be shown now.
+
+- [ ] **Step 5: Run the tests**
+
+Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/ui -v` then `go test ./...`
+Expected: PASS, with size expectations in existing tests shifting by the two cells the outer border used to take. List every test you adjusted, with old and new values.
+
+- [ ] **Step 6: Commit**
+
+```bash
+export PATH=$HOME/.local/go/bin:$PATH && gofmt -w internal/ui
+git add internal/ui
+git commit -m "Let the terminal cards sit on the ground with no frame around them"
+```
+
+---
+
+### Task 5: A status dot in each header, and a sidebar and status bar to match
+
+**Files:**
+- Modify: `internal/ui/styles.go` (dot colours, sidebar row style)
+- Modify: `internal/ui/model.go` (`paneHeader`, `headerStyle`, `viewSidebar`, `viewStatus`)
+- Test: `internal/ui/panes_test.go`, `internal/ui/sidebar_test.go` (create if absent)
+
+**Interfaces:**
+- Consumes: `cardStyle` (Task 3), `mainAreaStyle` (Task 4).
+- Produces: nothing later depends on it.
+
+Three changes, all cosmetic, all in service of the same design:
+
+1. **The header stops being a filled bar.** It was filled because it was the pane's only top edge; the card now provides that edge. It becomes a status dot, the terminal's label, a `•`, and the branch — the dot and label bright, the branch dim.
+2. **The sidebar's selected row fills the sidebar's width**, so it reads as a bar rather than a smudge around the text, and a project name too long for the sidebar wraps and indents instead of being cut.
+3. **The status bar splits**: what you are looking at on the left, the key hints pushed to the right.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `internal/ui/panes_test.go`:
+
+```go
+func TestPaneHeaderShowsAStatusDotAndTheBranch(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = press(m, "j", "enter")
+
+	view := m.View()
+
+	if !strings.Contains(view, statusDot) {
+		t.Errorf("each header should carry a status dot:\n%s", view)
+	}
+	if !strings.Contains(view, "Terminal 1") {
+		t.Errorf("the header should still name the terminal:\n%s", view)
+	}
+}
+```
+
+Create `internal/ui/sidebar_test.go`:
+
+```go
+package ui
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/charmbracelet/x/ansi"
+)
+
+func TestTheSelectedProjectRowFillsTheSidebar(t *testing.T) {
+	m, _ := newTestModel(t)
+
+	rows := strings.Split(m.viewSidebar(), "\n")
+	found := false
+	for _, row := range rows {
+		if !strings.Contains(row, m.ws.Projects[m.cursor].Name) {
+			continue
+		}
+		found = true
+		if w := ansi.StringWidth(row); w != sidebarWidth-sidebarStyle.GetHorizontalFrameSize() {
+			t.Errorf("selected row is %d cells wide, want the sidebar's full inner width %d",
+				w, sidebarWidth-sidebarStyle.GetHorizontalFrameSize())
+		}
+	}
+	if !found {
+		t.Fatal("the cursor's project was not rendered at all")
+	}
+}
+
+func TestALongProjectNameWrapsRatherThanRunningOff(t *testing.T) {
+	m, _ := newTestModel(t)
+	long := "WEB-HB-Component-Library-With-A-Very-Long-Name"
+	m.ws.Projects[0].Name = long
+
+	out := m.viewSidebar()
+
+	for _, row := range strings.Split(out, "\n") {
+		if w := ansi.StringWidth(row); w > sidebarWidth-sidebarStyle.GetHorizontalFrameSize() {
+			t.Errorf("row %q is %d cells, wider than the sidebar", row, w)
+		}
+	}
+	// The name survives the wrap, even though it is split across rows.
+	if !strings.Contains(strings.ReplaceAll(ansi.Strip(out), "\n", ""), "WEB-HB-Component-Library") {
+		t.Errorf("a wrapped name should still be readable:\n%s", out)
+	}
+}
+```
+
+- [ ] **Step 2: Run them to verify they fail**
+
+Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/ui -run 'StatusDot|SelectedProjectRow|LongProjectName' -v`
+Expected: FAIL — `statusDot` undefined; the selected row is only as wide as its text; a long name is not wrapped.
+
+- [ ] **Step 3: The header**
+
+In `internal/ui/styles.go`:
+
+```go
+	// A pane's status dot: blue while it has focus, green while its process
+	// runs, dim once it has exited.
+	dotFocused = lipgloss.NewStyle().Foreground(accent)
+	dotRunning = lipgloss.NewStyle().Foreground(added)
+	dotExited  = lipgloss.NewStyle().Foreground(dim)
+```
+
+If `added` does not exist yet (it arrives with the diff viewer), add it here beside the other colours: `added = lipgloss.Color("108")`.
+
+In `internal/ui/model.go`:
+
+```go
+const statusDot = "●"
+
+// paneHeader is a pane's title row: a status dot, the terminal's label, and
+// the branch it is on. It is no longer a filled bar — the card's border is
+// the pane's edge now, so the header only has to be readable.
+func paneHeader(title string, width int, focused bool, running bool) string {
+	dot := dotExited
+	switch {
+	case focused:
+		dot = dotFocused
+	case running:
+		dot = dotRunning
+	}
+	label := titleStyle.Render(title)
+	if !focused {
+		label = hintStyle.Render(title)
+	}
+	line := " " + dot.Render(statusDot) + " " + label
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).Background(ground).
+		Render(ansi.Truncate(line, width, "…"))
+}
+```
+
+Update `renderLeaf`'s call to pass whether the session is still running. `workspace.Terminal` exposes its session; check for the method that reports liveness (`Session.Done()` returning a closed channel, or an `Exited`/`Running` helper) and use it — if there is no non-blocking way to ask, pass `true` and note it in your report rather than inventing an API.
+
+Delete `headerStyle`, and `paneBarStyle` with it if nothing else uses it.
+
+- [ ] **Step 4: The sidebar**
+
+Rewrite the row loop in `viewSidebar` so the row is built at full width before it is styled:
+
+```go
+	inner := sidebarWidth - sidebarStyle.GetHorizontalFrameSize()
+	for i, p := range m.ws.Projects {
+		// ● running workspace, ○ workspace that Enter will restore, else blank.
+		marker := "  "
+		switch {
+		case len(p.Terminals) > 0:
+			marker = "● "
+		case len(p.Saved) > 0:
+			marker = "○ "
+		}
+		// Wrap rather than truncate: a project's name is how it is recognised,
+		// and the sidebar is narrow enough that real names do not fit.
+		wrapped := strings.Split(ansi.Wrap(p.Name, max(inner-2, 1), ""), "\n")
+		for j, part := range wrapped {
+			prefix := marker
+			if j > 0 {
+				prefix = "  " // continuation lines line up under the name
+			}
+			row := lipgloss.NewStyle().Width(inner).MaxWidth(inner).Render(prefix + part)
+			switch {
+			case i == m.cursor && m.focus == focusSidebar:
+				row = cursorStyle.Width(inner).Render(prefix + part)
+			case i == m.selected:
+				row = selectedStyle.Width(inner).Render(prefix + part)
+			}
+			b.WriteString(row)
+			b.WriteByte('\n')
+		}
+	}
+```
+
+Confirm `ansi.Wrap`'s signature in the pinned `github.com/charmbracelet/x/ansi` before using it; if it differs, use whatever that package provides for wrapping to a width.
+
+- [ ] **Step 5: The status bar**
+
+In `viewStatus`, keep building `parts` and `hints` as they are, then lay them out with the hints pushed right instead of joining everything with `•`:
+
+```go
+	left := strings.Join(parts, "  •  ")
+	right := strings.Join(hints, hintStyle.Render(" │ "))
+	space := width - ansi.StringWidth(left) - ansi.StringWidth(right)
+	if space < 1 { // too narrow for both: the hints matter more than the label
+		left = ansi.Truncate(left, max(width-ansi.StringWidth(right)-1, 0), "…")
+		space = 1
+	}
+	line := left + strings.Repeat(" ", space) + right
+	return statusStyle.Width(m.width).Render(line)
+```
+
+where `parts` no longer has the hints appended to it — remove the `parts = append(parts, hints...)` line.
+
+- [ ] **Step 6: Run the tests**
+
+Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/ui -v` then `go test ./...`
+Expected: PASS. Tests asserting the old status-bar joining or the filled header will need updating; list each in your report.
+
+- [ ] **Step 7: Build it and look**
+
+```bash
+export PATH=$HOME/.local/go/bin:$PATH
+go build -o bin/tm ./cmd/tm
+```
+
+Report that the binary built. Do not install it over `~/.local/bin/tm` — the controller does that, because a tm may be running.
+
+- [ ] **Step 8: Commit**
+
+```bash
+export PATH=$HOME/.local/go/bin:$PATH && gofmt -w internal/ui
+git add internal/ui
+git commit -m "Restyle the pane header, sidebar and status bar"
+```
+
+---
+
+### Task 6: Ask git what changed
 
 **Files:**
 - Create: `internal/git/changes.go`
@@ -739,7 +1235,7 @@ git commit -m "Report the files that differ from HEAD, untracked ones included"
 
 ---
 
-### Task 4: Align two versions of a file
+### Task 7: Align two versions of a file
 
 **Files:**
 - Create: `internal/diff/diff.go`
@@ -1003,7 +1499,7 @@ git commit -m "Align a file's committed and working versions"
 
 ---
 
-### Task 5: Open the viewer and list the changed files
+### Task 8: Open the viewer and list the changed files
 
 **Files:**
 - Create: `internal/ui/diffview.go`
@@ -1011,7 +1507,7 @@ git commit -m "Align a file's committed and working versions"
 - Test: `internal/ui/diffview_test.go`
 
 **Interfaces:**
-- Consumes: `git.Changes(dir)`, `git.FileChange` (Task 3); `(*Terminal).Dir(p)` and `workspace.Project`.
+- Consumes: `git.Changes(dir)`, `git.FileChange` (Task 6); `(*Terminal).Dir(p)` and `workspace.Project`.
 - Produces:
 
 ```go
@@ -1029,7 +1525,7 @@ func (d *diffView) view(width, height int) string
 
 plus `Model.diff *diffView`, `keys.Diff` (`d`), `keys.DiffTerm` (`alt+d`), `keys.DiffClose` (`esc`), `keys.DiffDown`/`DiffUp` (`j`/`k` and the arrows).
 
-This task delivers the modal and the file list only. The two code columns are Task 6.
+This task delivers the modal and the file list only. The two code columns are Task 9.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1319,14 +1815,14 @@ git commit -m "Open a view of a directory's uncommitted changes"
 
 ---
 
-### Task 6: Show the selected file, committed beside current
+### Task 9: Show the selected file, committed beside current
 
 **Files:**
 - Modify: `internal/ui/diffview.go`
 - Test: `internal/ui/diffview_test.go`
 
 **Interfaces:**
-- Consumes: `git.ShowHEAD`, `git.DiffHEAD` (Task 3); `diff.ParseHunks`, `diff.Align`, `diff.Row` (Task 4).
+- Consumes: `git.ShowHEAD`, `git.DiffHEAD` (Task 6); `diff.ParseHunks`, `diff.Align`, `diff.Row` (Task 7).
 - Produces: `diffView.rows []diff.Row`, `diffView.load()`, and the two-column rendering.
 
 - [ ] **Step 1: Write the failing test**
@@ -1544,14 +2040,14 @@ git commit -m "Show a file's committed and current versions side by side"
 
 ---
 
-### Task 7: Scroll, switch focus, and jump between changes
+### Task 10: Scroll, switch focus, and jump between changes
 
 **Files:**
 - Modify: `internal/ui/diffview.go`, `internal/ui/keys.go`, `internal/ui/model.go`
 - Test: `internal/ui/diffview_test.go`
 
 **Interfaces:**
-- Consumes: `diffView.rows` (Task 6).
+- Consumes: `diffView.rows` (Task 9).
 - Produces: `diffView.top`, `diffView.left`, `diffView.listFocus bool`; `keys.DiffTab`, `DiffLeft`, `DiffRight`, `DiffNextChange`, `DiffPrevChange`, `DiffRefresh`.
 
 **Why `Tab` rather than splitting j/k from the arrows:** everywhere else in tm `j`/`k` and the arrow keys are synonyms — the Terminal Manager binds both to "move a row". Making them diverge here would be the only place in the application where they mean different things. `Tab` moves between the file list and the diff, exactly as it moves between the sidebar and the main pane, and `j`/`k`/arrows then move within whichever has focus.
@@ -1759,7 +2255,7 @@ git commit -m "Scroll the changes view and jump between changes"
 
 ---
 
-### Task 8: Document it
+### Task 11: Document it
 
 **Files:**
 - Modify: `README.md`, `CLAUDE.md`
