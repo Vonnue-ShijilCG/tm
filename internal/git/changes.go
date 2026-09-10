@@ -78,9 +78,10 @@ func Changes(dir string) ([]FileChange, error) {
 			c.Kind = Added
 		}
 		changes = append(changes, c)
-		if src != "" && src != c.OldPath && !d.sources[src] {
+		if strings.ContainsRune(rec[:2], 'R') && src != c.OldPath && !d.sources[src] {
 			// status's rename source that numstat did not pair with anything
-			// is, as far as the hunks are concerned, a deleted file.
+			// is, as far as the hunks are concerned, a deleted file. A copy's
+			// source is still there and has a record of its own.
 			s := d.change(src)
 			s.Kind = Deleted
 			changes = append(changes, s)

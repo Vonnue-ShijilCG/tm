@@ -236,6 +236,37 @@ func TestChangesJoinsAMoveNumstatPairsEvenWhenStatusDoesNot(t *testing.T) {
 	}
 }
 
+// A copy record carries a source path too, but unlike a rename's source the
+// file is still there and has a record of its own; it must not be emitted a
+// second time as deleted. Copy detection is opt-in.
+func TestChangesDoesNotReportACopySourceAsDeleted(t *testing.T) {
+	r := initRepo(t)
+	if _, err := run(r.Dir, "config", "status.renames", "copies"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, r, "a.txt", "one\ntwo\nthree\n")
+	commitAll(t, r)
+	writeFile(t, r, "b.txt", "one\ntwo\nthree\n")
+	writeFile(t, r, "a.txt", "one\ntwo\nthree\nfour\n")
+	if _, err := run(r.Dir, "add", "-A"); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := run(r.Dir, "status", "--porcelain=v1"); err != nil || !strings.Contains(out, "C  a.txt -> b.txt") {
+		t.Fatalf("status = %q, %v; want git to report b.txt as a copy (the test's premise)", out, err)
+	}
+
+	byPath := changesByPath(t, r)
+	if len(byPath) != 2 {
+		t.Errorf("Changes has %d entries, want a.txt and b.txt: %v", len(byPath), byPath)
+	}
+	if a := byPath["a.txt"]; a.Kind != Modified || a.Added != 1 || a.Deleted != 0 {
+		t.Errorf("a.txt = %+v, want Modified +1 -0", a)
+	}
+	if b := byPath["b.txt"]; b.Kind != Added || b.OldPath != "" || b.Added != 3 {
+		t.Errorf("b.txt = %+v, want Added +3 with no OldPath", b)
+	}
+}
+
 // numstat counts an unterminated last line; the untracked count must agree
 // so a file reports the same number before and after it is staged.
 func TestChangesCountsAnUnterminatedLastLineLikeGit(t *testing.T) {
