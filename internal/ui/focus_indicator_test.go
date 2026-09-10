@@ -37,7 +37,7 @@ func TestPaneHeadersAreTheOnlyTerminalIndicators(t *testing.T) {
 			t.Errorf("pane %d should start at the top of the area, got y=%d", term.Num, r.y)
 		}
 	}
-	if area := m.mainArea(); area.h != m.height-statusHeight-mainStyle.GetVerticalFrameSize() {
+	if area := m.mainArea(); area.h != m.height-statusHeight-mainAreaStyle.GetVerticalFrameSize() {
 		t.Errorf("main area height %d should be the window minus status bar and frame", area.h)
 	}
 }

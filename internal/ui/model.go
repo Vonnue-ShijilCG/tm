@@ -513,8 +513,8 @@ func (m *Model) dropPane(p *workspace.Project, t *workspace.Terminal) {
 
 // mainArea is the region inside the main pane's frame.
 func (m Model) mainArea() rect {
-	return rect{0, 0, max(m.width-sidebarWidth-mainStyle.GetHorizontalFrameSize(), 1),
-		max(m.height-statusHeight-mainStyle.GetVerticalFrameSize(), 1)}
+	return rect{0, 0, max(m.width-sidebarWidth-mainAreaStyle.GetHorizontalFrameSize(), 1),
+		max(m.height-statusHeight-mainAreaStyle.GetVerticalFrameSize(), 1)}
 }
 
 func (m Model) paneRects(p *workspace.Project) map[*workspace.Terminal]rect {
@@ -977,8 +977,8 @@ func exitNotice(err error) string {
 // terminalSize is the screen size of every terminal: the main pane's inner
 // area.
 func (m Model) terminalSize() (cols, rows int) {
-	cols = m.width - sidebarWidth - mainStyle.GetHorizontalFrameSize()
-	rows = m.height - statusHeight - mainStyle.GetVerticalFrameSize()
+	cols = m.width - sidebarWidth - mainAreaStyle.GetHorizontalFrameSize()
+	rows = m.height - statusHeight - mainAreaStyle.GetVerticalFrameSize()
 	return max(cols, 1), max(rows, 1)
 }
 
@@ -995,7 +995,10 @@ func (m Model) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, screen, m.viewStatus())
 	}
 	sidebar := framed(sidebarStyle, m.focus == focusSidebar, sidebarWidth, paneHeight).Render(m.viewSidebar())
-	mainPane := framed(mainStyle, m.focus == focusMain, m.width-sidebarWidth, paneHeight).Render(m.viewMain())
+	mainPane := framed(mainAreaStyle, false, m.width-sidebarWidth, paneHeight).Render(m.viewMain())
+	if m.panel != nil || m.form != nil {
+		mainPane = framed(mainStyle, m.focus == focusMain, m.width-sidebarWidth, paneHeight).Render(m.viewMain())
+	}
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, mainPane)
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.viewStatus())

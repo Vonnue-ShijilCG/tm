@@ -25,6 +25,12 @@ var (
 	mainStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(edge).Background(ground)
 	sidebarStyle = mainStyle.Padding(0, 1)
 
+	// mainAreaStyle is the ground the terminal cards float on. It has no
+	// border: each card carries its own, and a frame around a set of frames
+	// reads as clutter. mainStyle keeps its border for the help screen, the
+	// form and the Terminal Manager, whose content has no frame of its own.
+	mainAreaStyle = lipgloss.NewStyle().Background(ground)
+
 	// cardStyle is one terminal's box. It has no padding so the emulated
 	// screen meets its border exactly.
 	cardStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(edge).Background(ground)

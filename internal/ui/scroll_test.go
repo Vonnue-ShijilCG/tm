@@ -235,3 +235,31 @@ func TestResizeReturnsScrolledPanesToLive(t *testing.T) {
 		t.Errorf("scroll after resize = %d, want 0", got)
 	}
 }
+
+func TestWheelStillFindsThePaneUnderThePointerWithoutAnOuterFrame(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = press(m, "j", "enter")
+	m = makeTerminal(t, m, "alt+v", "", "")
+
+	p := m.selectedProject()
+	rects := m.paneScreenRects(p)
+	if len(rects) != 2 {
+		t.Fatalf("want two panes, got %d", len(rects))
+	}
+	for term, r := range rects {
+		// The pointer at a pane's own top-left cell must find that pane.
+		got, _ := m.paneAt(p, r.x, r.y)
+		if got != term {
+			t.Errorf("pointer at (%d,%d) found the wrong pane", r.x, r.y)
+		}
+	}
+	// The leftmost pane starts immediately right of the sidebar: with no frame
+	// around the pane area there is no border cell to skip.
+	minX := 1 << 30
+	for _, r := range rects {
+		minX = min(minX, r.x)
+	}
+	if minX != sidebarWidth {
+		t.Errorf("leftmost pane starts at x=%d, want %d (sidebar width, no outer border)", minX, sidebarWidth)
+	}
+}
