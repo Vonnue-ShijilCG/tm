@@ -1033,14 +1033,18 @@ func (m Model) viewSidebar() string {
 			if j > 0 {
 				prefix = "  " // continuation lines line up under the name
 			}
-			row := lipgloss.NewStyle().Width(inner).MaxWidth(inner).Render(prefix + part)
+			// Every variant paints a background of its own. A style that sets
+			// only a foreground closes its span with a reset, which drops the
+			// ground the sidebar is painted on, so the padding after a short
+			// name would fall through to the user's own terminal colour.
+			style := lipgloss.NewStyle().Background(ground)
 			switch {
 			case i == m.cursor && m.focus == focusSidebar:
-				row = cursorStyle.Width(inner).Render(prefix + part)
+				style = cursorStyle
 			case i == m.selected:
-				row = selectedStyle.Width(inner).Render(prefix + part)
+				style = selectedStyle.Background(ground)
 			}
-			b.WriteString(row)
+			b.WriteString(style.Width(inner).MaxWidth(inner).Render(prefix + part))
 			b.WriteByte('\n')
 		}
 	}
