@@ -982,3 +982,36 @@ func TestRefreshClampsWhenTheFileShrinks(t *testing.T) {
 		t.Errorf("the re-read file should be on screen, got %q", row)
 	}
 }
+
+// r restores the sideways offset, but the file it re-reads may have lost the
+// long line that offset was looking along. Kept as it was, the offset would
+// sit at or past the new widest line and both columns would come up blank —
+// from the one key whose job is to show what changed. The offset survives
+// while it still shows something and otherwise starts the line over.
+func TestRefreshStartsTheLineOverWhenItsLongestLineShrank(t *testing.T) {
+	m, _, root := gitModel(t)
+	path := filepath.Join(root, "app", "new.txt")
+	long := strings.Repeat("x", 40)
+	if err := os.WriteFile(path, []byte(long+"\nsecond\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = press(m, "d", "tab", "right", "right", "right", "right") // left 32 of 40
+
+	if err := os.WriteFile(path, []byte(long+"\nSECOND\n"), 0o644); err != nil { // the long line is still there
+		t.Fatal(err)
+	}
+	m = press(m, "r")
+	if m.diff.left != 4*diffHScrollStep {
+		t.Errorf("left = %d, want %d: the offset still shows the long line, so it is kept", m.diff.left, 4*diffHScrollStep)
+	}
+
+	// Now the longest line is exactly as wide as the offset: the boundary,
+	// where an offset one too generous shows nothing.
+	if err := os.WriteFile(path, []byte(strings.Repeat("y", 4*diffHScrollStep)+"\nsecond\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = press(m, "r")
+	if row := firstCodeRow(t, m.View()); !strings.Contains(row, "1 yyyy") {
+		t.Errorf("after the long line shrank the re-read file should be shown from its start, got %q", row)
+	}
+}

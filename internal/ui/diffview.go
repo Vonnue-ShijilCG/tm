@@ -76,7 +76,9 @@ func (d *diffView) read() {
 // selection follows its path rather than its index, and its scroll position
 // survives, so re-reading the file being watched does not lose the place in
 // it even when the list above it has grown or shrunk. The caller clamps top,
-// since the file may have got shorter.
+// since the file may have got shorter; the sideways offset is kept only while
+// it still shows something, because a line that shrank past it would leave
+// both columns blank — from the one key whose job is to show what changed.
 func (d *diffView) refresh() {
 	path, top, left := "", d.top, d.left
 	if len(d.files) > 0 {
@@ -92,7 +94,10 @@ func (d *diffView) refresh() {
 	}
 	d.load()
 	if found {
-		d.top, d.left = top, left
+		d.top = top
+		if left < d.widest {
+			d.left = left
+		}
 	}
 }
 
