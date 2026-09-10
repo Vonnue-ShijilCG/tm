@@ -73,7 +73,7 @@ func TestManagerIsOneRowPerTerminalWithBranchAndState(t *testing.T) {
 		t.Fatalf("setup: running=%d saved=%d loginVisible=%v", len(p.Terminals), len(p.Saved), m.layouts[p].contains(login))
 	}
 
-	m = press(m, "alt+esc", "m")
+	m = press(m, "alt+s", "m")
 	view := m.View()
 	rows := 0
 	for _, r := range m.panel.rows {
@@ -111,7 +111,7 @@ func TestManagerIsOneRowPerTerminalWithBranchAndState(t *testing.T) {
 
 func TestUnusedWorktreesListOnlyOrphans(t *testing.T) {
 	m, _, p := repoWithThree(t)
-	m = press(m, "alt+esc", "m")
+	m = press(m, "alt+s", "m")
 	if strings.Contains(m.View(), "Unused worktrees") {
 		t.Fatal("every worktree belongs to a terminal: no unused section")
 	}

@@ -127,7 +127,7 @@ func TestADuplicateCommandInTheSameDirectoryAsksFirst(t *testing.T) {
 		t.Fatalf("the first terminal should have been created: %s", m.notice)
 	}
 
-	m = press(m, "alt+esc", "n")
+	m = press(m, "alt+s", "n")
 	m = press(m, "tab")
 	m = typeText(m, "claude")
 	m = press(m, "enter")
@@ -152,7 +152,7 @@ func TestADifferentCommandInTheSameDirectoryDoesNotAsk(t *testing.T) {
 	m = typeText(m, "claude")
 	m = press(m, "enter")
 
-	m = press(m, "alt+esc", "n")
+	m = press(m, "alt+s", "n")
 	m = press(m, "tab")
 	m = typeText(m, "npm run dev")
 	m = press(m, "enter")

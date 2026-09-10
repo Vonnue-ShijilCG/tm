@@ -111,7 +111,7 @@ func TestAltDeleteAsksThenForgetsForGood(t *testing.T) {
 	if len(*spawned) != 2 || app.Terminals[0].Name != "" {
 		t.Errorf("deleted terminal must not return; got %+v", app.Terminals)
 	}
-	m = press(m, "alt+esc", "m")
+	m = press(m, "alt+s", "m")
 	if v := m.View(); strings.Contains(v, "Login") || strings.Contains(v, "Unused worktrees") { // neither the terminal nor an orphan remains
 		t.Errorf("manager should list neither a Login terminal nor an unused worktree:\n%s", v)
 	}

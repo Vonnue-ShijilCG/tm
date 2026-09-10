@@ -48,12 +48,10 @@ func press(m Model, keys ...string) Model {
 			msg = tea.KeyMsg{Type: tea.KeyCtrlC}
 		case "esc":
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
-		case "alt+j", "alt+k", "alt+n", "alt+x":
+		case "alt+j", "alt+k", "alt+n", "alt+s", "alt+x":
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k[4:]), Alt: true}
 		case "alt+delete":
 			msg = tea.KeyMsg{Type: tea.KeyDelete, Alt: true}
-		case "alt+esc":
-			msg = tea.KeyMsg{Type: tea.KeyEsc, Alt: true}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
@@ -118,12 +116,12 @@ func TestFocusFollowsSessions(t *testing.T) {
 	if m.focus != focusSidebar {
 		t.Fatal("tab/l must not focus an empty main pane")
 	}
-	m = press(m, "enter", "alt+esc")
+	m = press(m, "enter", "alt+s")
 	m = press(m, "tab")
 	if m.focus != focusMain {
 		t.Fatal("tab should focus the terminal once a shell is running")
 	}
-	m = press(m, "alt+esc", "l")
+	m = press(m, "alt+s", "l")
 	if m.focus != focusMain {
 		t.Fatal("l should focus the terminal too")
 	}

@@ -110,11 +110,11 @@ func TestZoomFollowsFocus(t *testing.T) {
 
 func TestSidebarZKeyZoomsActiveTerminal(t *testing.T) {
 	m, _, _ := twoPanes(t)
-	m = press(m, "alt+esc", "z")
+	m = press(m, "alt+s", "z")
 	if !m.zoom || m.focus != focusMain {
 		t.Errorf("z in the sidebar should zoom the project's active terminal and focus it: zoom=%v focus=%v", m.zoom, m.focus)
 	}
-	m = press(m, "alt+esc", "z")
+	m = press(m, "alt+s", "z")
 	if m.zoom {
 		t.Error("z again should unzoom")
 	}

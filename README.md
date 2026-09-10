@@ -52,7 +52,7 @@ tm
   project or in a worktree any tool created — opens a terminal there; a branch
   checked out nowhere gets a worktree, and a new branch also asks what it starts
   from. Leave the branch empty for a shell in the project itself.
-- `alt+esc` returns to the sidebar, `s` shows every shortcut, `q` quits. Plain
+- `alt+s` returns to the sidebar, `s` shows every shortcut, `q` quits. Plain
   `Esc` goes to the program, so it interrupts Claude Code and leaves Vim's
   insert mode as usual.
 - Inside a terminal everything you type reaches the program. Only a few

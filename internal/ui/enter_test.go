@@ -73,7 +73,7 @@ func TestEnterRestoresEveryTerminalAndKeepsTheLayout(t *testing.T) {
 
 func TestEnterOnRunningProjectFocusesAndCreatesNothing(t *testing.T) {
 	m, spawned, p := twoPanes(t)
-	m = press(m, "alt+esc", "enter")
+	m = press(m, "alt+s", "enter")
 	if len(*spawned) != 2 || len(p.Terminals) != 2 || m.focus != focusMain || p.ActiveTerminal() != p.Terminals[1] {
 		t.Errorf("enter on a running project must just focus it: spawned=%d focus=%v", len(*spawned), m.focus)
 	}
@@ -82,7 +82,7 @@ func TestEnterOnRunningProjectFocusesAndCreatesNothing(t *testing.T) {
 	m = next.(Model)
 	m = press(m, "alt+n", "enter") // third terminal takes over a pane; one is hidden
 	m = press(m, "alt+j")          // cycle to the hidden one, then leave and come back
-	m = press(m, "alt+esc", "enter")
+	m = press(m, "alt+s", "enter")
 	if len(*spawned) != 3 || !m.layouts[p].contains(p.ActiveTerminal()) {
 		t.Errorf("enter should reveal the active terminal without spawning: spawned=%d", len(*spawned))
 	}
@@ -141,7 +141,7 @@ func TestEnterFallsBackWhenTheSavedFocusIsUnavailable(t *testing.T) {
 func TestEnterWhenNothingIsRestorableOpensFreshShell(t *testing.T) {
 	m, _, root := gitModel(t)
 	m = makeTerminal(t, m, "n", "Gone", "develop")
-	m = press(m, "alt+esc")
+	m = press(m, "alt+s")
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "develop")); err != nil { // Gone lives on develop
 		t.Fatal(err)
@@ -162,17 +162,17 @@ func TestEnterWhenNothingIsRestorableOpensFreshShell(t *testing.T) {
 
 func TestEnterKeepsProjectsSeparate(t *testing.T) {
 	m, spawned := newTestModel(t)
-	m = press(m, "enter", "alt+v", "enter", "alt+esc") // backend: 2 panes
-	m = press(m, "j", "enter", "alt+esc")              // ecommerce: 1
+	m = press(m, "enter", "alt+v", "enter", "alt+s") // backend: 2 panes
+	m = press(m, "j", "enter", "alt+s")              // ecommerce: 1
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if len(*spawned) != 3 {
 		t.Fatalf("setup spawned %d", len(*spawned))
 	}
 	m2, spawned2 := restartModel(t, m)
 	backend, ecommerce := m2.ws.Projects[0], m2.ws.Projects[1]
-	m2 = press(m2, "enter")                 // backend: both of its saved shells come back
-	m2 = press(m2, "alt+esc", "j", "enter") // ecommerce
-	m2 = press(m2, "alt+esc", "k", "enter") // back to backend: running, so nothing new
+	m2 = press(m2, "enter")               // backend: both of its saved shells come back
+	m2 = press(m2, "alt+s", "j", "enter") // ecommerce
+	m2 = press(m2, "alt+s", "k", "enter") // back to backend: running, so nothing new
 	if len(*spawned2) != 3 {
 		t.Fatalf("spawned %d, want 3 (backend's two plus ecommerce's one, no duplicates on re-enter)", len(*spawned2))
 	}

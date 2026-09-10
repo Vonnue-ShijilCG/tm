@@ -39,7 +39,7 @@ func TestEveryCreationKeyRespectsTheLimit(t *testing.T) {
 	}
 	attempts := [][]string{
 		{"alt+n"}, {"alt+v"}, {"alt+h"}, // terminal focused
-		{"alt+esc", "n"}, {"alt+esc", "v"}, {"alt+esc", "h"}, // sidebar
+		{"alt+s", "n"}, {"alt+s", "v"}, {"alt+s", "h"}, // sidebar
 	}
 	for _, keys := range attempts {
 		m = press(m, keys...)
@@ -72,7 +72,7 @@ func TestEveryCreationKeyRespectsTheLimit(t *testing.T) {
 	m = press(m, "alt+x")
 	m = exit(m, p.Terminals[1].ID) // one running, one saved
 	write("max_terminals = 1\n")
-	m = press(m, "alt+esc", "m", "j", "enter") // second row: the saved definition
+	m = press(m, "alt+s", "m", "j", "enter") // second row: the saved definition
 	if m.panel == nil || !strings.Contains(m.panel.notice, "maximum terminals reached (1)") {
 		t.Errorf("panel open at the limit should be refused: %+v", m.panel)
 	}
@@ -211,7 +211,7 @@ func TestEnterRestoresOnlyUpToTheLimitAndKeepsTheRestSaved(t *testing.T) {
 		t.Errorf("four restored terminals should all be visible, got %d", len(m2.layouts[p].leaves()))
 	}
 	checkTiling(t, m2, p)
-	m2 = press(m2, "alt+esc", "m", "a") // open all cannot go past the limit either
+	m2 = press(m2, "alt+s", "m", "a") // open all cannot go past the limit either
 	if len(*spawned) != 4 || m2.panel == nil || !strings.Contains(m2.panel.notice, "2 not opened: max_terminals (4) reached") {
 		t.Errorf("open all at the limit: spawned=%d panel=%+v", len(*spawned), m2.panel)
 	}

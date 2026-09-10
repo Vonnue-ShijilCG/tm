@@ -64,12 +64,12 @@ func TestAltHCreatesStackedPanes(t *testing.T) {
 
 func TestSidebarVHOpenFormWithSplitDirection(t *testing.T) {
 	m, _ := newTestModel(t)
-	m = press(m, "enter", "alt+esc", "v", "enter")
+	m = press(m, "enter", "alt+s", "v", "enter")
 	p := m.ws.Projects[0]
 	if root := m.layouts[p]; root == nil || root.dir != splitSide {
 		t.Fatalf("v in the sidebar should split beside, got %+v", root)
 	}
-	m = press(m, "alt+esc", "h", "enter")
+	m = press(m, "alt+s", "h", "enter")
 	rs := m.paneRects(p)
 	if len(rs) != 3 {
 		t.Fatalf("expected three panes, got %d", len(rs))
@@ -282,7 +282,7 @@ func TestAltJKCycleVisibleTerminalsOnly(t *testing.T) {
 		t.Errorf("focused visible terminal should be rendered:\n%s", m.View())
 	}
 	// The manager is the explicit way back.
-	m = press(m, "alt+esc", "m", "j", "enter")
+	m = press(m, "alt+s", "m", "j", "enter")
 	if p.ActiveTerminal() != p.Terminals[1] || !m.layouts[p].contains(p.Terminals[1]) || len(*spawned) != 3 {
 		t.Errorf("manager enter should show terminal 2: active=%d visible=%v", p.ActiveTerminal().Num, m.layouts[p].leaves())
 	}
@@ -326,7 +326,7 @@ func TestFramesFillTheWindowExactly(t *testing.T) {
 	for _, size := range [][2]int{{80, 24}, {120, 30}} {
 		next, _ := m.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
 		m = next.(Model)
-		for _, view := range []string{m.View(), press(m, "alt+esc", "s").View()} {
+		for _, view := range []string{m.View(), press(m, "alt+s", "s").View()} {
 			lines := strings.Split(view, "\n")
 			if len(lines) != size[1] {
 				t.Errorf("%dx%d: %d lines", size[0], size[1], len(lines))

@@ -25,7 +25,7 @@ func TestDeletingACheckoutTerminalNeverTouchesTheCheckout(t *testing.T) {
 	m, spawned, _ := gitModel(t)
 	m = press(m, "enter") // plain shell in the project checkout
 	p := m.ws.Projects[0]
-	m = press(m, "alt+esc", "m", "d")
+	m = press(m, "alt+s", "m", "d")
 	if !strings.Contains(m.View(), "Delete Terminal 1?") || !strings.Contains(m.View(), "project checkout is untouched") {
 		t.Fatalf("prompt:\n%s", m.View())
 	}
@@ -57,7 +57,7 @@ func TestAltDeleteAndManagerDShareDeletionSemantics(t *testing.T) {
 	m = press(m, "y")
 	altNotice := m.notice
 
-	m = press(m, "alt+esc", "m", "j", "d") // manager d on Payment (rows: shell, Payment)
+	m = press(m, "alt+s", "m", "j", "d") // manager d on Payment (rows: shell, Payment)
 	mgPrompt := m.panel.prompt
 	m = press(m, "y")
 	mgNotice := m.panel.notice
@@ -115,7 +115,7 @@ func TestDirtyWorktreeRequiresConfirmationAndCancelKeepsEverything(t *testing.T)
 		t.Fatal("cancel must keep the dirty worktree and its data")
 	}
 	// From the manager: same warning, cancel keeps everything, y removes.
-	m = press(m, "alt+esc", "m", "j", "d")
+	m = press(m, "alt+s", "m", "j", "d")
 	if !strings.Contains(m.panel.prompt, "UNCOMMITTED CHANGES") {
 		t.Fatalf("manager prompt = %q", m.panel.prompt)
 	}
@@ -164,7 +164,7 @@ func TestDeletingKeepsAWorktreeAnotherDefinitionUses(t *testing.T) {
 	m, _, p := repoWithThree(t)
 	login := p.Terminals[1]
 	p.Saved = append(p.Saved, workspace.SavedTerminal{Name: "Twin", Branch: "develop", Worktree: login.Worktree.Path})
-	m = press(m, "alt+esc", "m", "j", "j", "j", "d", "y") // rows: shell, Login, Payment, Twin(saved)
+	m = press(m, "alt+s", "m", "j", "j", "j", "d", "y") // rows: shell, Login, Payment, Twin(saved)
 	if len(p.Saved) != 0 {
 		t.Errorf("the twin definition goes: %+v", p.Saved)
 	}
@@ -222,7 +222,7 @@ func TestManagerRowsKeepIdentityAndBranchReadable(t *testing.T) {
 	m, spawned, _ := gitModel(t)
 	m = makeTerminal(t, m, "n", "", "feature/payment-gateway")
 	(*spawned)[0].title = "node --inspect=0.0.0.0:9229 ./node_modules/.bin/vite --host 0.0.0.0 --port 5173 --strictPort"
-	m = press(m, "alt+esc") // terminal -> sidebar, once; each loop's esc below only closes the manager
+	m = press(m, "alt+s") // terminal -> sidebar, once; each loop's esc below only closes the manager
 	// Wide enough: the identity line carries number, mark and full branch;
 	// the second line the program and the state, and only the program is cut.
 	for _, width := range []int{120, 80} {

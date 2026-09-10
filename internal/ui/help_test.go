@@ -84,7 +84,7 @@ func TestEveryBindingIsInHelp(t *testing.T) {
 
 func TestStatusBarFitsOneLine(t *testing.T) {
 	m, _ := newTestModel(t)
-	for _, step := range [][]string{{"enter"}, {"alt+esc", "n"}, {"esc", "m"}, {"esc", "s"}} {
+	for _, step := range [][]string{{"enter"}, {"alt+s", "n"}, {"esc", "m"}, {"esc", "s"}} {
 		m = press(m, step...)
 		status := m.viewStatus()
 		if strings.Contains(status, "\n") {

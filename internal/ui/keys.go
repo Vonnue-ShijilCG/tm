@@ -93,7 +93,7 @@ var keys = keyMap{
 	Help:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "help")),
 	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "quit")),
 
-	Sidebar:    key.NewBinding(key.WithKeys("alt+esc"), key.WithHelp("alt+esc", "to sidebar")),
+	Sidebar:    key.NewBinding(key.WithKeys("alt+s"), key.WithHelp("alt+s", "to sidebar")),
 	NextTerm:   key.NewBinding(key.WithKeys("alt+j"), key.WithHelp("alt+j", "next terminal")),
 	PrevTerm:   key.NewBinding(key.WithKeys("alt+k"), key.WithHelp("alt+k", "prev terminal")),
 	NewTerm:    key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("alt+n", "new terminal")),

@@ -24,7 +24,7 @@ func TestAltMOpensManagerForTheFocusedTerminalsProject(t *testing.T) {
 
 func TestAltMUsesTheFocusedProjectNotTheSidebarCursor(t *testing.T) {
 	m, _ := newTestModel(t)
-	m = press(m, "enter", "alt+esc", "j", "tab") // backend running and focused; sidebar cursor on ecommerce
+	m = press(m, "enter", "alt+s", "j", "tab") // backend running and focused; sidebar cursor on ecommerce
 	backend, ecommerce := m.ws.Projects[0], m.ws.Projects[1]
 	if m.cursor != 1 || m.selected != 0 || m.focus != focusMain {
 		t.Fatalf("setup: cursor=%d selected=%d focus=%v", m.cursor, m.selected, m.focus)
@@ -34,8 +34,8 @@ func TestAltMUsesTheFocusedProjectNotTheSidebarCursor(t *testing.T) {
 		t.Errorf("alt+m must use the focused terminal's project (backend), got %v", m.panel)
 	}
 	// m from the sidebar still follows the cursor: esc closes the manager
-	// (opened by alt+m, back to the terminal), alt+esc then leaves it.
-	m = press(m, "esc", "alt+esc", "m")
+	// (opened by alt+m, back to the terminal), alt+s then leaves it.
+	m = press(m, "esc", "alt+s", "m")
 	if m.panel == nil || m.panel.project != ecommerce {
 		t.Errorf("sidebar m should open the manager for the highlighted project (ecommerce), got %v", m.panel)
 	}
@@ -64,9 +64,9 @@ func TestEscFromManagerReturnsToThePreviousTerminalContext(t *testing.T) {
 	if got := (*spawned)[0].text; len(got) != 1 || got[0] != "x" {
 		t.Errorf("input should reach terminal 1 again, got %v", got)
 	}
-	// alt+esc leaves the terminal for the sidebar, and esc from the
+	// alt+s leaves the terminal for the sidebar, and esc from the
 	// sidebar-opened manager returns to the sidebar too.
-	m = press(m, "alt+esc", "m", "esc")
+	m = press(m, "alt+s", "m", "esc")
 	if m.panel != nil || m.focus != focusSidebar {
 		t.Error("esc from a sidebar-opened manager returns to the sidebar")
 	}

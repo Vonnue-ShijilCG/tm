@@ -13,10 +13,16 @@ const sidebarWidth = 28
 const paneGutter = 1
 
 var (
-	accent = lipgloss.Color("69")  // focused border / cursor: brighter than before, to carry against the black pane ground
-	dim    = lipgloss.Color("240") // hints and the status bar
-	edge   = lipgloss.Color("245") // unfocused border: lifted off dim so an inactive pane keeps a visible edge
-	added  = lipgloss.Color("108") // a running terminal's status dot
+	// Every colour here is an exact hex value, never an ANSI-256 index. An
+	// index is only a slot number: the user's terminal theme decides what it
+	// actually paints, so a palette built from indices comes out in whatever
+	// colours that theme happens to hold — which is how tm's borders and hints
+	// arrived on screen as maroon while the ground, being a hex value, was
+	// exactly right. Colours chosen against ground; keep them contrasting with it.
+	accent = lipgloss.Color("#3b82f6") // focused border, cursor, selected row
+	dim    = lipgloss.Color("#8b98b0") // hints and the status bar
+	edge   = lipgloss.Color("#2f4066") // unfocused border: present, but quieter than accent
+	added  = lipgloss.Color("#4ade80") // a running terminal's status dot
 
 	// tm's own chrome sits on the same ground the panes are drawn on, taken
 	// from the same constant, so the sidebar, the gaps between splits and a
@@ -42,7 +48,7 @@ var (
 	titleStyle = lipgloss.NewStyle().Bold(true)
 
 	cursorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("230")).
+			Foreground(lipgloss.Color("#f0f6fc")).
 			Background(accent).
 			Bold(true)
 
@@ -56,7 +62,7 @@ var (
 	dotRunning = lipgloss.NewStyle().Foreground(added)
 	dotExited  = lipgloss.NewStyle().Foreground(dim)
 
-	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171"))
 
 	statusStyle = lipgloss.NewStyle().Foreground(dim).Padding(0, 1)
 )
