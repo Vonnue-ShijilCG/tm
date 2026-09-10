@@ -249,7 +249,7 @@ func TestDiffHEADHasNoContextLines(t *testing.T) {
 	commitAll(t, r)
 	writeFile(t, r, "f.txt", "one\nTWO\nthree\n")
 
-	diff, err := DiffHEAD(r.Dir, "f.txt")
+	diff, err := DiffHEAD(r.Dir, "f.txt", "")
 	if err != nil {
 		t.Fatalf("DiffHEAD: %v", err)
 	}
@@ -260,5 +260,33 @@ func TestDiffHEADHasNoContextLines(t *testing.T) {
 		if strings.HasPrefix(line, " ") {
 			t.Errorf("DiffHEAD includes context line %q:\n%s", line, diff)
 		}
+	}
+}
+
+// git pairs the two sides of a rename only when both are in the pathspec.
+// With the destination alone the diff claims the whole file is new, which
+// would misalign every renamed file against the original content ShowHEAD
+// returns for it.
+func TestDiffHEADDescribesTheEditInAMovedFile(t *testing.T) {
+	r := initRepo(t)
+	writeFile(t, r, "old.txt", "one\ntwo\nthree\n")
+	commitAll(t, r)
+	if _, err := run(r.Dir, "mv", "old.txt", "new.txt"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, r, "new.txt", "one\nTWO\nthree\n")
+	if _, err := run(r.Dir, "add", "new.txt"); err != nil {
+		t.Fatal(err)
+	}
+
+	diff, err := DiffHEAD(r.Dir, "new.txt", "old.txt")
+	if err != nil {
+		t.Fatalf("DiffHEAD: %v", err)
+	}
+	if strings.Contains(diff, "@@ -0,0 +1,3 @@") {
+		t.Errorf("DiffHEAD reports the moved file as a whole-file addition:\n%s", diff)
+	}
+	if !strings.Contains(diff, "@@ -2 +2 @@") {
+		t.Errorf("DiffHEAD lacks the hunk for the one edited line:\n%s", diff)
 	}
 }

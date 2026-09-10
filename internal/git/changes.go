@@ -155,6 +155,15 @@ func ShowHEAD(dir, path string) (string, bool, error) {
 // DiffHEAD returns the unified diff of one path against HEAD with no context
 // lines. With -U0 the @@ headers alone carry the whole alignment, so the body
 // never has to be parsed.
-func DiffHEAD(dir, path string) (string, error) {
-	return output(dir, "diff", "HEAD", "-U0", "--", path)
+//
+// oldPath is the source of a rename (FileChange.OldPath) and empty otherwise.
+// git pairs the two sides of a rename only when both are inside the pathspec;
+// given the destination alone it reports a whole-file addition, which would
+// contradict the original content ShowHEAD returns for the same file.
+func DiffHEAD(dir, path, oldPath string) (string, error) {
+	args := []string{"diff", "HEAD", "-U0", "--"}
+	if oldPath != "" {
+		args = append(args, oldPath)
+	}
+	return output(dir, append(args, path)...)
 }
