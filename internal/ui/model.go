@@ -1235,9 +1235,11 @@ const statusDot = "●"
 // the pane's edge now, so the header only has to be readable. The dot and
 // the label are bright; the branch is dim — focus is carried by the dot's
 // colour alone, so the label stays bright whether or not the pane has focus.
+// The space after the dot is grounded like every other run: it follows the
+// dot's own styled run, whose reset dropped the ground.
 func paneHeader(label, branch string, width int, focused bool, running bool) string {
 	dot := dotStyle(focused, running)
-	line := " " + dot.Render(statusDot) + " " + titleStyle.Render(label) + hintStyle.Render(branch)
+	line := " " + dot.Render(statusDot) + textStyle.Render(" ") + titleStyle.Render(label) + hintStyle.Render(branch)
 	return lipgloss.NewStyle().Width(width).MaxWidth(width).Background(ground).
 		Render(ansi.Truncate(line, width, "…"))
 }
@@ -1361,7 +1363,7 @@ func (m Model) viewStatus() string {
 	hints := make([]string, 0, len(bindings))
 	for _, b := range bindings {
 		h := b.Help()
-		hints = append(hints, fmt.Sprintf("%s %s", h.Key, hintStyle.Render(h.Desc)))
+		hints = append(hints, textStyle.Render(h.Key+" ")+hintStyle.Render(h.Desc))
 	}
 	width := max(m.width-statusStyle.GetHorizontalPadding(), 1)
 	if prompt != "" { // a question must never push its own answer keys off the line
@@ -1378,14 +1380,14 @@ func (m Model) viewStatus() string {
 	if info != "" {
 		parts = append(parts, hintStyle.Render(info))
 	}
-	left := strings.Join(parts, "  •  ")
+	left := strings.Join(parts, textStyle.Render("  •  "))
 	right := strings.Join(hints, hintStyle.Render(" │ "))
 	space := width - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if space < 1 { // too narrow for both: the hints matter more than the label
 		left = ansi.Truncate(left, max(width-ansi.StringWidth(right)-1, 0), "…")
 		space = 1
 	}
-	line := left + strings.Repeat(" ", space) + right
+	line := left + textStyle.Render(strings.Repeat(" ", space)) + right
 	// Backstop: if the hints alone are wider than the window, left was
 	// already sacrificed down to nothing above but right is never shortened,
 	// so the assembled line could still overflow width.

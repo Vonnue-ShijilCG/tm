@@ -91,7 +91,22 @@ func newInput(placeholder string) textinput.Model {
 	ti.Placeholder = placeholder
 	ti.CharLimit = 80
 	ti.Width = 40
+	// The field paints its own cells like everything else tm draws. Bubbles'
+	// defaults set no background, and colour the placeholder with an
+	// ANSI-256 index (see styles.go for why an index is wrong here).
+	ti.TextStyle = textStyle
+	ti.PlaceholderStyle = hintStyle
+	ti.CompletionStyle = hintStyle
+	ti.Cursor.Style = inputCursorStyle
+	ti.Cursor.TextStyle = textStyle
 	return ti
+}
+
+// input renders a text field. Its styles (newInput) paint every cell it
+// draws, except the spaces textinput appends after a placeholder to fill
+// Width, which are bare; they are cut and laid again on tm's ground.
+func input(ti textinput.Model) string {
+	return pad(strings.TrimRight(ti.View(), " "), ti.Width)
 }
 
 // moveField steps through fields() by delta, wrapping.
@@ -216,11 +231,11 @@ func (f *newTermForm) view(width int) string {
 				}
 			}
 		}
-		b.WriteString(f.row(fieldBranch, "Branch", f.branch.View()+branchHint))
+		b.WriteString(f.row(fieldBranch, "Branch", input(f.branch)+branchHint))
 		if f.loc.NewBranch {
-			b.WriteString(f.row(fieldBase, "From", f.base.View()))
+			b.WriteString(f.row(fieldBase, "From", input(f.base)))
 		}
-		b.WriteString(f.row(fieldCommand, "Command", f.command.View()))
+		b.WriteString(f.row(fieldCommand, "Command", input(f.command)))
 		b.WriteString(f.row(-1, "Location", f.locationLine()))
 
 		if f.field == fieldBranch {
@@ -229,7 +244,7 @@ func (f *newTermForm) view(width int) string {
 			b.WriteString("\n " + hintStyle.Render("branches: "+f.matchingBranches(f.base.Value(), width-12)) + "\n")
 		}
 	} else {
-		b.WriteString(f.row(fieldCommand, "Command", f.command.View()))
+		b.WriteString(f.row(fieldCommand, "Command", input(f.command)))
 		b.WriteString(f.row(-1, "Location", f.locationLine()))
 		b.WriteString("\n " + hintStyle.Render("enter opens a shell in the project directory") + "\n")
 	}
@@ -280,13 +295,17 @@ func (f *newTermForm) locationLine() string {
 	return head + "\n" + strings.Repeat(" ", 14) + hintStyle.Render(fmt.Sprintf("%d terminal(s) here: %s", len(names), strings.Join(names, ", ")))
 }
 
+// row is one labelled line of the form. The label is padded by cell width,
+// not %-10s, which would count a styled label's escape bytes as width; the
+// padding and the value are grounded because they follow the label's styled
+// run, whose reset dropped the ground.
 func (f *newTermForm) row(field int, label, value string) string {
 	marker := "  "
 	if f.field == field {
 		marker = selectedStyle.Render("› ")
 		label = selectedStyle.Render(label)
 	}
-	return fmt.Sprintf(" %s%-10s %s\n", marker, label, value)
+	return " " + marker + pad(label, 10) + textStyle.Render(" "+value) + "\n"
 }
 
 // matchingBranches lists existing branches containing the typed text.

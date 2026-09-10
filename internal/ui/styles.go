@@ -26,6 +26,7 @@ var (
 	// removed is deleted lines in the changes view: softer than errorStyle's
 	// red so a diff full of deletions does not read as a page of errors.
 	removed = lipgloss.Color("#f28b82")
+	bright  = lipgloss.Color("#f0f6fc") // text on the cursor's accent block
 
 	// tm's own chrome sits on the same ground the panes are drawn on, taken
 	// from the same constant, so the sidebar, the gaps between splits and a
@@ -71,9 +72,16 @@ var (
 	textStyle = mainAreaStyle
 
 	cursorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#f0f6fc")).
+			Foreground(bright).
 			Background(accent).
 			Bold(true)
+
+	// inputCursorStyle is the text cursor in the form's fields. Bubbles draws
+	// the cursor block by reversing this style, so its colours are
+	// cursorStyle's swapped: on screen it is the same light-on-accent cell as
+	// the sidebar's cursor row, and a cell tm has painted rather than the
+	// terminal's reversed defaults.
+	inputCursorStyle = lipgloss.NewStyle().Foreground(accent).Background(bright)
 
 	selectedStyle = lipgloss.NewStyle().Foreground(accent).Bold(true).Background(ground)
 

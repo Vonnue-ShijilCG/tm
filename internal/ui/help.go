@@ -15,15 +15,23 @@ func viewHelp(width, height int) string {
 	sections := helpSections()
 	bodyHeight := max(height-2, 1) // title + blank line
 	columns := distribute(sections, bodyHeight)
-	gap := 2
-	colWidth := max((width-gap*(len(columns)-1))/len(columns), 16)
+	gapWidth := 2
+	colWidth := max((width-gapWidth*(len(columns)-1))/len(columns), 16)
 
+	// Every column and every gap is a grounded block of the same height.
+	// JoinHorizontal pads a shorter block with bare spaces, which would leave
+	// the cells under a short column, and under a one-line gap, in the
+	// terminal's own colour.
+	tallest := 0
+	for _, col := range columns {
+		tallest = max(tallest, columnRows(col))
+	}
 	rendered := make([]string, 0, 2*len(columns))
 	for i, col := range columns {
 		if i > 0 {
-			rendered = append(rendered, strings.Repeat(" ", gap))
+			rendered = append(rendered, gap(gapWidth, tallest))
 		}
-		rendered = append(rendered, renderSections(col, colWidth))
+		rendered = append(rendered, renderSections(col, colWidth, tallest))
 	}
 	body := lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 
@@ -39,7 +47,7 @@ func viewHelp(width, height int) string {
 // whose tallest column fits height, keeping section order. A section costs
 // its title plus its bindings, and one blank line separates sections.
 func distribute(sections []helpSection, height int) [][]helpSection {
-	rows := func(s helpSection) int { return len(s.Bindings) + 1 } // title + bindings
+	rows := sectionRows
 	for cols := 2; ; cols++ {
 		var out [][]helpSection
 		var cur []helpSection
@@ -70,10 +78,27 @@ func distribute(sections []helpSection, height int) [][]helpSection {
 	}
 }
 
+// sectionRows is the lines a section takes: its title plus its bindings.
+func sectionRows(s helpSection) int { return len(s.Bindings) + 1 }
+
+// columnRows is the lines a column takes as renderSections lays it out: its
+// sections, with one blank line between each pair.
+func columnRows(sections []helpSection) int {
+	rows := 0
+	for _, s := range sections {
+		rows += sectionRows(s)
+	}
+	return rows + max(len(sections)-1, 0)
+}
+
 // helpKeyWidth is the key column width, sized for the longest label.
 const helpKeyWidth = 13
 
-func renderSections(sections []helpSection, width int) string {
+// renderSections lays one column out as a width x height block on tm's
+// ground: the padding after each line and below the last section is drawn
+// by a style that carries the ground, so it does not fall through to the
+// terminal's colour after a styled run's reset.
+func renderSections(sections []helpSection, width, height int) string {
 	var b strings.Builder
 	for i, s := range sections {
 		if i > 0 {
@@ -85,5 +110,5 @@ func renderSections(sections []helpSection, width int) string {
 			b.WriteString(ansi.Truncate(fmt.Sprintf("%-*s %s", helpKeyWidth, h.Key, hintStyle.Render(h.Desc)), width, "…") + "\n")
 		}
 	}
-	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(strings.TrimRight(b.String(), "\n"))
+	return textStyle.Width(width).MaxWidth(width).Height(height).Render(strings.TrimRight(b.String(), "\n"))
 }

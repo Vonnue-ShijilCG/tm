@@ -23,6 +23,7 @@ type fakeSession struct {
 	mouse      bool // the fake program has enabled mouse tracking
 	wheels     []wheelCall
 	closed     bool
+	grounded   bool // Render paints its ground the way a real Session does, for tests that read every cell
 	output     chan struct{}
 	done       chan struct{}
 	err        error
@@ -35,7 +36,13 @@ func newFakeSession(dir string, cols, rows int) *fakeSession {
 func (f *fakeSession) SendKey(k uv.KeyPressEvent) { f.keys = append(f.keys, k) }
 func (f *fakeSession) SendText(t string)          { f.text = append(f.text, t) }
 func (f *fakeSession) Resize(c, r int)            { f.cols, f.rows = c, r }
-func (f *fakeSession) Render(bool) string         { return "SCREEN:" + f.dir + ":" + f.title }
+func (f *fakeSession) Render(bool) string {
+	screen := "SCREEN:" + f.dir + ":" + f.title
+	if f.grounded {
+		return textStyle.Render(screen)
+	}
+	return screen
+}
 func (f *fakeSession) RenderScrolled(off int) string {
 	return fmt.Sprintf("SCROLLED:%d:%s", off, f.dir)
 }
