@@ -512,7 +512,11 @@ func TestTheRightColumnStartsAtTheSameCellOnEveryRow(t *testing.T) {
 	view := m.View()
 	start := func(marker string) int {
 		row := plainLine(view, marker)
-		return lipgloss.Width(row[:strings.Index(row, marker)])
+		idx := strings.Index(row, marker)
+		if idx < 0 {
+			t.Fatalf("no row shows %q:\n%s", marker, ansi.Strip(view))
+		}
+		return lipgloss.Width(row[:idx])
 	}
 	if a, b := start("R1"), start("R2"); a != b {
 		t.Errorf("right column starts at cell %d on one row and %d on the next:\n%s", a, b, ansi.Strip(view))
@@ -534,5 +538,50 @@ func TestAModifiedFileMissingFromHEADIsReportedNotShownAsNew(t *testing.T) {
 
 	if d.loadErr == "" || d.rows != nil {
 		t.Errorf("loadErr %q, rows %+v; want an error and no rows", d.loadErr, d.rows)
+	}
+}
+
+// A file staged as new and then removed from the working tree is a deletion
+// as far as status is concerned, but HEAD never had it either. Nothing is
+// wrong; there is just nothing on either side to show, and saying so beats
+// both an error and an empty pane that reads as an empty file.
+func TestAFileStagedThenRemovedIsInNeitherVersion(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := filepath.Join(root, "app")
+	if err := os.WriteFile(filepath.Join(app, "brief.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, app, "add", "brief.txt")
+	if err := os.Remove(filepath.Join(app, "brief.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+
+	if d := m.diff; !strings.Contains(d.loadErr, "neither HEAD nor the working tree") {
+		t.Errorf("loadErr = %q, want a note that the file is in neither version", d.loadErr)
+	}
+}
+
+// Paths come from git and a read error from the OS; both can carry text tm
+// did not write. The same rule as for code lines: nothing file-derived may
+// drive the terminal.
+func TestControlCharactersInPathsAndLoadErrorsAreNotDrawn(t *testing.T) {
+	osc := "\x1b]0;title\x07"
+	d := &diffView{
+		title:   "app",
+		files:   []git.FileChange{{Path: "dir" + osc + "/new" + osc + ".txt", OldPath: "old" + osc + ".txt", Kind: git.Modified}},
+		loadErr: "open " + osc + ": permission denied",
+	}
+
+	out := d.view(100, 12)
+
+	if strings.Contains(out, "\x1b]") {
+		t.Errorf("an OSC sequence from a path or error reached the screen:\n%q", out)
+	}
+	for _, want := range []string{"new", "dir", "from old", "permission denied"} {
+		if !strings.Contains(ansi.Strip(out), want) {
+			t.Errorf("stripping should keep the text %q:\n%s", want, ansi.Strip(out))
+		}
 	}
 }

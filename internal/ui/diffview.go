@@ -93,7 +93,15 @@ func (d *diffView) load() {
 	// allowed that answer: for any other, aligning against an empty left side
 	// would draw a plausible whole-file addition where a failure belongs.
 	if !found && f.Kind != git.Added {
-		d.loadErr = fmt.Sprintf("cannot read %s from HEAD", from)
+		if f.Kind == git.Deleted {
+			// Staged as new, then removed without git rm: status calls it a
+			// deletion, but HEAD never had it. Nothing failed; there is
+			// simply nothing on either side, and an empty pane under the
+			// two labels would read as an empty file.
+			d.loadErr = "in neither HEAD nor the working tree: staged as new, then removed"
+		} else {
+			d.loadErr = fmt.Sprintf("cannot read %s from HEAD", from)
+		}
 		return
 	}
 	fresh := ""
@@ -179,7 +187,9 @@ func (d *diffView) body(width, height int) []string {
 // show the same rows, so a line always faces its counterpart.
 func (d *diffView) panes(width, height int) []string {
 	if d.loadErr != "" {
-		return []string{hintStyle.Render(ansi.Truncate(d.loadErr, max(width, 1), "…"))}
+		// The error can embed a path the OS echoed back, so it is file-derived
+		// text like everything else on this side of the divider.
+		return []string{hintStyle.Render(ansi.Truncate(stripControlChars(d.loadErr), max(width, 1), "…"))}
 	}
 	half := (width - 1) / 2
 	labels := pad(delStyle.Render("HEAD")+hintStyle.Render("  committed"), half) + textStyle.Render(" ") +
@@ -278,18 +288,21 @@ func (d *diffView) list(width, height int) []string {
 
 // entry is one file: basename first with the directory beneath, so a long
 // path is never truncated mid-word, then where a rename came from and the
-// line counts.
+// line counts. Paths are stripped of control characters like every other
+// file-derived text in the view; git quotes them by default, but the view
+// should not depend on a setting it does not control.
 func (d *diffView) entry(f git.FileChange, selected bool, width int) []string {
 	marker, style := "  ", textStyle
 	if selected {
 		marker, style = "› ", selectedStyle
 	}
-	lines := []string{marker + style.Render(ansi.Truncate(filepath.Base(f.Path), width-3, "…"))}
-	if dir := filepath.Dir(f.Path); dir != "." {
+	path := stripControlChars(f.Path)
+	lines := []string{marker + style.Render(ansi.Truncate(filepath.Base(path), width-3, "…"))}
+	if dir := filepath.Dir(path); dir != "." {
 		lines = append(lines, "    "+hintStyle.Render(ansi.Truncate(dir, width-5, "…")))
 	}
 	if f.OldPath != "" {
-		lines = append(lines, "    "+hintStyle.Render(ansi.Truncate("from "+f.OldPath, width-5, "…")))
+		lines = append(lines, "    "+hintStyle.Render(ansi.Truncate("from "+stripControlChars(f.OldPath), width-5, "…")))
 	}
 	return append(lines, "    "+d.counts(f))
 }
