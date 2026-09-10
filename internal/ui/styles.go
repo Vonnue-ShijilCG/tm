@@ -22,7 +22,10 @@ var (
 	accent = lipgloss.Color("#3b82f6") // focused border, cursor, selected row
 	dim    = lipgloss.Color("#8b98b0") // hints and the status bar
 	edge   = lipgloss.Color("#2f4066") // unfocused border: present, but quieter than accent
-	added  = lipgloss.Color("#4ade80") // a running terminal's status dot
+	added  = lipgloss.Color("#4ade80") // a running terminal's status dot, and added lines in the changes view
+	// removed is deleted lines in the changes view: softer than errorStyle's
+	// red so a diff full of deletions does not read as a page of errors.
+	removed = lipgloss.Color("#f28b82")
 
 	// tm's own chrome sits on the same ground the panes are drawn on, taken
 	// from the same constant, so the sidebar, the gaps between splits and a
@@ -55,6 +58,11 @@ var (
 
 	titleStyle = lipgloss.NewStyle().Bold(true).Background(ground)
 
+	// textStyle is for plain text that follows a styled run on the same line:
+	// that run's closing reset has dropped the ground, so unstyled text after
+	// it would show the user's own terminal colour.
+	textStyle = lipgloss.NewStyle().Background(ground)
+
 	cursorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#f0f6fc")).
 			Background(accent).
@@ -71,6 +79,10 @@ var (
 	dotExited  = lipgloss.NewStyle().Foreground(dim).Background(ground)
 
 	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).Background(ground)
+
+	// Line counts and, later, the lines themselves in the changes view.
+	addStyle = lipgloss.NewStyle().Foreground(added).Background(ground)
+	delStyle = lipgloss.NewStyle().Foreground(removed).Background(ground)
 
 	statusStyle = lipgloss.NewStyle().Foreground(dim).Background(ground).Padding(0, 1)
 )

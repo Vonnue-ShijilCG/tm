@@ -71,6 +71,14 @@ type keyMap struct {
 	Confirm key.Binding
 	Cancel  key.Binding
 
+	// Uncommitted changes view. Diff opens it from the sidebar, DiffTerm from
+	// a terminal (an Alt chord, like every other terminal-mode key).
+	Diff      key.Binding
+	DiffTerm  key.Binding
+	DiffDown  key.Binding
+	DiffUp    key.Binding
+	DiffClose key.Binding
+
 	// Help screen.
 	HelpClose key.Binding
 
@@ -129,6 +137,12 @@ var keys = keyMap{
 	Confirm: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "confirm")),
 	Cancel:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc/other", "cancel")),
 
+	Diff:      key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "open from sidebar")),
+	DiffTerm:  key.NewBinding(key.WithKeys("alt+d"), key.WithHelp("alt+d", "open from terminal")),
+	DiffDown:  key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j / ↓", "next file")),
+	DiffUp:    key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k / ↑", "prev file")),
+	DiffClose: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
+
 	HelpClose: key.NewBinding(key.WithKeys("esc", "s", "q"), key.WithHelp("esc / q", "close help")),
 
 	Scroll: key.NewBinding(key.WithHelp("wheel", "scroll history")),
@@ -148,6 +162,7 @@ func helpSections() []helpSection {
 		{"TERMINAL", []key.Binding{k.Sidebar, k.NextTerm, k.PrevTerm, k.NewTerm, k.ManageTerm, k.HideTerm, k.DeleteTerm}},
 		{"PANES", []key.Binding{k.PaneSide, k.PaneStack, k.PaneLeft, k.PaneRight, k.PaneUp, k.PaneDown, k.PaneGrow, k.PaneShrink, k.PaneZoom}},
 		{"NEW TERMINAL", []key.Binding{k.FormNext, k.FormPrev, k.FormSubmit, k.FormCancel}},
+		{"CHANGES", []key.Binding{k.Diff, k.DiffTerm, k.DiffDown, k.DiffUp, k.DiffClose}},
 		{"MANAGE TERMINALS", []key.Binding{k.MgDown, k.MgUp, k.MgShow, k.MgHide, k.MgNew, k.MgOpenAll, k.MgDelete, k.MgClose}},
 		{"CONFIRM", []key.Binding{k.Confirm, k.Cancel}},
 		{"MOUSE", []key.Binding{k.Scroll}},

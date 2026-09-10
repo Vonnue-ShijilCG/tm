@@ -48,7 +48,7 @@ func press(m Model, keys ...string) Model {
 			msg = tea.KeyMsg{Type: tea.KeyCtrlC}
 		case "esc":
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
-		case "alt+j", "alt+k", "alt+n", "alt+s", "alt+x":
+		case "alt+d", "alt+j", "alt+k", "alt+n", "alt+s", "alt+x":
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k[4:]), Alt: true}
 		case "alt+delete":
 			msg = tea.KeyMsg{Type: tea.KeyDelete, Alt: true}

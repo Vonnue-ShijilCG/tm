@@ -57,6 +57,7 @@ type Model struct {
 	focus    focus
 	form     *newTermForm // open "new terminal" dialog, nil otherwise
 	panel    *manager     // open terminal manager, nil otherwise
+	diff     *diffView    // open uncommitted-changes view, nil otherwise
 	help     bool         // help screen shown over everything
 	notice   string       // one-line message in the status bar (state file problems)
 	quitting bool         // set once quit began; later exit messages must not rewrite state
@@ -147,6 +148,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		if m.diff != nil {
+			return m.updateDiff(msg)
+		}
 		if m.panel != nil {
 			return m.updateManager(msg)
 		}
@@ -205,6 +209,8 @@ func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace
 		m.openForm(p, 0, focusMain)
 	case key.Matches(msg, keys.ManageTerm):
 		m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get) // p is the focused terminal's project; focus is kept for esc
+	case key.Matches(msg, keys.DiffTerm):
+		m.openDiff(p, t)
 	case key.Matches(msg, keys.PaneSide):
 		m.openForm(p, splitSide, focusMain)
 	case key.Matches(msg, keys.PaneStack):
@@ -555,6 +561,33 @@ func sessionRows(r rect) int {
 	return max(r.h-cardStyle.GetVerticalBorderSize()-paneHeaderHeight, 1)
 }
 
+// updateDiff handles a key while the changes view is open. Like the help
+// screen it consumes every key, so nothing reaches a terminal underneath.
+func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch {
+	case key.Matches(msg, keys.DiffClose):
+		m.diff = nil
+	case key.Matches(msg, keys.DiffDown):
+		m.diff.move(1)
+	case key.Matches(msg, keys.DiffUp):
+		m.diff.move(-1)
+	}
+	return m, nil
+}
+
+// openDiff shows the uncommitted changes of wherever the user's attention is:
+// the focused terminal's directory when t is set, else p's own checkout.
+func (m *Model) openDiff(p *workspace.Project, t *workspace.Terminal) {
+	dir, title := p.Path, p.Name
+	if t != nil {
+		dir = t.Dir(p)
+	}
+	if branch := m.branches.get(dir); branch != "" {
+		title += "  " + worktreeMark + branch
+	}
+	m.diff = newDiffView(dir, title)
+}
+
 // updateSidebar handles navigation and program-level keys.
 func (m Model) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	last := len(m.ws.Projects) - 1
@@ -599,6 +632,10 @@ func (m Model) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if last >= 0 {
 			p := m.ws.Projects[m.cursor]
 			m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get)
+		}
+	case key.Matches(msg, keys.Diff):
+		if last >= 0 {
+			m.openDiff(m.ws.Projects[m.cursor], nil)
 		}
 	case key.Matches(msg, keys.Help):
 		m.help = true
@@ -994,6 +1031,12 @@ func (m Model) View() string {
 			viewHelp(m.width-style.GetHorizontalFrameSize(), paneHeight-style.GetVerticalFrameSize()))
 		return lipgloss.JoinVertical(lipgloss.Left, screen, m.viewStatus())
 	}
+	if m.diff != nil {
+		style := mainStyle.Padding(0, 1)
+		screen := framed(style, true, m.width, paneHeight).Render(
+			m.diff.view(m.width-style.GetHorizontalFrameSize(), paneHeight-style.GetVerticalFrameSize()))
+		return lipgloss.JoinVertical(lipgloss.Left, screen, m.viewStatus())
+	}
 	sidebar := framed(sidebarStyle, m.focus == focusSidebar, sidebarWidth, paneHeight).Render(m.viewSidebar())
 	style, focused := mainAreaStyle, false
 	if m.panel != nil || m.form != nil {
@@ -1263,6 +1306,8 @@ func (m Model) viewStatus() string {
 	switch {
 	case m.help:
 		bindings = []key.Binding{keys.HelpClose}
+	case m.diff != nil:
+		bindings = []key.Binding{keys.DiffDown, keys.DiffUp, keys.DiffClose}
 	case m.panel != nil:
 		bindings = keys.managerHelp()
 	case m.form != nil:

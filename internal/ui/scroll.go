@@ -25,7 +25,7 @@ const scrollMark = "↑"
 // handleMouse routes wheel events to the pane under the pointer. Every
 // other mouse event is ignored.
 func (m *Model) handleMouse(msg tea.MouseMsg) {
-	if msg.Action != tea.MouseActionPress || m.help || m.form != nil || m.panel != nil {
+	if msg.Action != tea.MouseActionPress || m.help || m.form != nil || m.panel != nil || m.diff != nil {
 		return
 	}
 	var up bool
