@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -583,5 +584,315 @@ func TestControlCharactersInPathsAndLoadErrorsAreNotDrawn(t *testing.T) {
 		if !strings.Contains(ansi.Strip(out), want) {
 			t.Errorf("stripping should keep the text %q:\n%s", want, ansi.Strip(out))
 		}
+	}
+}
+
+// bigFile commits 200 numbered lines to big.txt and then changes the given
+// rows, so a change can sit well below the first screen.
+func bigFile(t *testing.T, root string, changed ...int) {
+	t.Helper()
+	lines := make([]string, 200)
+	for i := range lines {
+		lines[i] = fmt.Sprintf("line %d", i+1)
+	}
+	app := commitFile(t, root, "big.txt", strings.Join(lines, "\n")+"\n")
+	for _, i := range changed {
+		lines[i] += " CHANGED"
+	}
+	if err := os.WriteFile(filepath.Join(app, "big.txt"), []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// firstCodeRow is the view line under the column labels, colours stripped.
+func firstCodeRow(t *testing.T, view string) string {
+	t.Helper()
+	lines := strings.Split(ansi.Strip(view), "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "WORKING TREE") && i+1 < len(lines) {
+			return lines[i+1]
+		}
+	}
+	t.Fatalf("no column labels in:\n%s", ansi.Strip(view))
+	return ""
+}
+
+func TestTabMovesFocusAndScrollingIsLockedAcrossColumns(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 150)
+
+	m = press(m, "d")
+	if !m.diff.listFocus {
+		t.Fatal("the file list should have focus when the view opens")
+	}
+
+	m = press(m, "tab")
+	if m.diff.listFocus {
+		t.Fatal("tab should move focus to the diff")
+	}
+
+	m = press(m, "down", "down", "down")
+	if m.diff.top != 3 {
+		t.Errorf("top = %d, want 3 after three downs", m.diff.top)
+	}
+	// Both columns start at the same row, so the fourth line faces itself.
+	if row := firstCodeRow(t, m.View()); strings.Count(row, "4 line 4") != 2 {
+		t.Errorf("after scrolling three rows the first row should show line 4 on both sides, got %q", row)
+	}
+
+	m = press(m, "right", "right")
+	if m.diff.left != 2*diffHScrollStep {
+		t.Errorf("left = %d, want %d; both columns share one horizontal offset",
+			m.diff.left, 2*diffHScrollStep)
+	}
+}
+
+// One offset for both sides: after a scroll right the same cells of the same
+// line are gone from each column, so the columns still read as a pair.
+func TestHorizontalScrollCutsBothColumnsTogether(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := commitFile(t, root, "f.txt", "abcdefgh12345678\nx\n")
+	if err := os.WriteFile(filepath.Join(app, "f.txt"), []byte("abcdefgh12345678\ny\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d", "tab", "right")
+
+	row := plainLine(m.View(), "12345678")
+	if strings.Count(row, "1 12345678") != 2 || strings.Contains(row, "abcdefgh") {
+		t.Errorf("one step right should cut %d cells from both sides, got %q", diffHScrollStep, row)
+	}
+	m = press(m, "left", "left") // clamps at the start
+	if m.diff.left != 0 {
+		t.Errorf("left = %d, want 0 after scrolling back past the start", m.diff.left)
+	}
+}
+
+func TestNextChangeJumpsPastUnchangedLines(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 150)
+
+	m = press(m, "d", "tab", "n")
+
+	if want := 150 - diffJumpContext; m.diff.top != want {
+		t.Errorf("top = %d, want %d; n should jump to the change at row 150 with %d rows of context above it, not scroll one line",
+			m.diff.top, want, diffJumpContext)
+	}
+}
+
+// A jump lands with context above the change, so the next search must start
+// past that context or n finds the same change again and never moves on. N
+// must be able to return all the way to a change on the very first row.
+func TestChangeJumpsVisitEachRunOnceAndReturnToTheFirst(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 0, 50, 150)
+
+	m = press(m, "d", "tab")
+	for i, step := range []struct {
+		key  string
+		want int
+	}{
+		{"n", 50 - diffJumpContext},
+		{"n", 150 - diffJumpContext},
+		{"N", 50 - diffJumpContext},
+		{"N", 0},
+		{"N", 0}, // nothing before the first change
+	} {
+		m = press(m, step.key)
+		if m.diff.top != step.want {
+			t.Errorf("step %d (%s): top = %d, want %d", i, step.key, m.diff.top, step.want)
+		}
+	}
+}
+
+func TestRefreshReReadsTheFileAndKeepsThePlace(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := filepath.Join(root, "app")
+	var sb strings.Builder
+	for i := 1; i <= 40; i++ {
+		fmt.Fprintf(&sb, "b%d\n", i)
+	}
+	for name, content := range map[string]string{"a.txt": "alpha\n", "b.txt": sb.String()} {
+		if err := os.WriteFile(filepath.Join(app, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m = press(m, "d", "j", "tab", "down", "down")
+	if err := os.WriteFile(filepath.Join(app, "b.txt"), []byte(strings.Replace(sb.String(), "b5\n", "b5 REWRITTEN\n", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(m.View(), "REWRITTEN") {
+		t.Fatal("the view must not follow the file live; only r re-reads it")
+	}
+
+	m = press(m, "r")
+
+	if !strings.Contains(m.View(), "REWRITTEN") {
+		t.Errorf("r should re-read the selected file:\n%s", ansi.Strip(m.View()))
+	}
+	if m.diff.cursor != 1 {
+		t.Errorf("cursor = %d, want 1: the selection should stay on b.txt", m.diff.cursor)
+	}
+	if m.diff.listFocus {
+		t.Error("r should leave focus where it was, on the diff")
+	}
+	if m.diff.top != 2 {
+		t.Errorf("top = %d, want 2: a re-read of the same file keeps the scroll position", m.diff.top)
+	}
+}
+
+// Focus is shown by the heading of the half that has it: FILES over the list,
+// the column labels over the code. Lip Gloss emits no colour under go test,
+// so the style choice is asserted against the style values, as the pane dot's
+// is, and the heading's placement against the text.
+func TestTheFocusedHalfIsMarkedInItsHeading(t *testing.T) {
+	m, _, root := gitModel(t)
+	if err := os.WriteFile(filepath.Join(root, "app", "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+	if files, head, work := m.diff.headingStyles(); !reflect.DeepEqual(files, selectedStyle) ||
+		!reflect.DeepEqual(head, delStyle) || !reflect.DeepEqual(work, addStyle) {
+		t.Error("with the list focused FILES takes the focus colour and the labels keep their own")
+	}
+	// The heading shares the row with the column labels, so the first file
+	// lines up with the first code row.
+	if row := plainLine(m.View(), "WORKING TREE"); !strings.Contains(row, "FILES") {
+		t.Errorf("FILES should head the list on the labels' row, got %q", row)
+	}
+
+	m = press(m, "tab")
+	if files, head, work := m.diff.headingStyles(); !reflect.DeepEqual(files, hintStyle) ||
+		!reflect.DeepEqual(head, selectedStyle) || !reflect.DeepEqual(work, selectedStyle) {
+		t.Error("with the diff focused both labels take the focus colour and FILES is dimmed")
+	}
+}
+
+// j/k mean different things on each side of tab, so the status bar says what
+// they do for the half that has focus.
+func TestTheStatusBarFollowsTheFocusedHalf(t *testing.T) {
+	m, _, _ := gitModel(t)
+
+	m = press(m, "d", "tab")
+
+	status := m.viewStatus()
+	if strings.Contains(status, "next file") || !strings.Contains(status, "next change") {
+		t.Errorf("with the diff focused the status bar should offer the diff's keys, not the list's:\n%s", status)
+	}
+	if strings.Contains(status, "\n") {
+		t.Errorf("status bar wraps:\n%s", status)
+	}
+}
+
+// The heading costs the list a row. Forget that and the list emits one row
+// too many, which body cuts off: the selected entry keeps its name but loses
+// its counts line. The body must have an even number of rows: with an odd
+// one a spare row absorbs the heading and the defect hides.
+func TestTheSelectedEntryIsShownWhole(t *testing.T) {
+	m, _, root := gitModel(t)
+	for i := 0; i < 20; i++ {
+		if err := os.WriteFile(filepath.Join(root, "app", fmt.Sprintf("f%02d.txt", i)), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 13}) // body of 8 rows: heading + 3 entries, and no room for a fourth
+	m = next.(Model)
+
+	m = press(m, "d")
+	for i := 0; i < 19; i++ {
+		m = press(m, "j")
+	}
+
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "› f19.txt") {
+			if i+1 >= len(lines) || !strings.Contains(lines[i+1], "new file") {
+				t.Errorf("the selected entry's counts line should follow its name, got %q", lines[min(i+1, len(lines)-1)])
+			}
+			return
+		}
+	}
+	t.Errorf("the selected file is not on screen:\n%s", ansi.Strip(m.View()))
+}
+
+// codeRows is how many code rows the changes view shows in m's window: the
+// window less the status bar, the modal's frame and the rows above the code.
+func codeRows(m Model) int {
+	return m.height - statusHeight - modalStyle.GetVerticalFrameSize() - diffChromeRows
+}
+
+func TestScrollingStopsAtTheEndOfTheFile(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 150)
+
+	m = press(m, "d", "tab")
+	for i := 0; i < 300; i++ {
+		m = press(m, "down")
+	}
+
+	if want := 200 - codeRows(m); m.diff.top != want {
+		t.Errorf("top = %d, want %d: the last row of the file sits on the last row of the view", m.diff.top, want)
+	}
+	// The bottom code row is the last line of the file: no blank rows are
+	// scrolled into view and the file is not cut short.
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if bottom := lines[len(lines)-3]; !strings.Contains(bottom, "200 line 200") { // above the frame's bottom border and the status bar
+		t.Errorf("the bottom code row should be line 200, got %q", bottom)
+	}
+}
+
+// A change in the last screenful of the file is shown by scrolling to the
+// end, never past it: the jump clamps as scrolling does.
+func TestAJumpNearTheEndStopsAtTheEndOfTheFile(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 199)
+
+	m = press(m, "d", "tab", "n")
+
+	if want := 200 - codeRows(m); m.diff.top != want {
+		t.Errorf("top = %d, want %d: the change on the last line is shown with the file's end on the last row", m.diff.top, want)
+	}
+}
+
+func TestSelectingAnotherFileStartsAtItsTop(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 150)
+	if err := os.WriteFile(filepath.Join(root, "app", "z.txt"), []byte("z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d", "tab", "down", "down", "right", "tab", "j")
+
+	if m.diff.top != 0 || m.diff.left != 0 {
+		t.Errorf("top, left = %d, %d; another file should open at its start", m.diff.top, m.diff.left)
+	}
+}
+
+// A re-read can find the diff shorter than the scroll position; the view must
+// clamp rather than show rows that no longer exist. The file is untracked so
+// the diff has no committed side to keep its row count up.
+func TestRefreshClampsWhenTheFileShrinks(t *testing.T) {
+	m, _, root := gitModel(t)
+	path := filepath.Join(root, "app", "new.txt")
+	if err := os.WriteFile(path, []byte(strings.Repeat("line\n", 200)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d", "tab")
+	for i := 0; i < 100; i++ {
+		m = press(m, "down")
+	}
+	if err := os.WriteFile(path, []byte("line 1 SHORT\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = press(m, "r")
+
+	if m.diff.top != 0 {
+		t.Errorf("top = %d, want 0 for a one-line file", m.diff.top)
+	}
+	if row := firstCodeRow(t, m.View()); !strings.Contains(row, "1 line 1 SHORT") {
+		t.Errorf("the re-read file should be on screen, got %q", row)
 	}
 }

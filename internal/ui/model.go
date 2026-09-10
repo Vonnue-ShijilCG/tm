@@ -563,14 +563,40 @@ func sessionRows(r rect) int {
 
 // updateDiff handles a key while the changes view is open. Like the help
 // screen it consumes every key, so nothing reaches a terminal underneath.
+// Up and down go to whichever half has focus; the rest act on the diff.
 func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// The code rows on screen: the window less the status bar, the modal's
+	// frame and the rows above the code, so scrolling can clamp at the end.
+	height := max(m.height-statusHeight-modalStyle.GetVerticalFrameSize()-diffChromeRows, 1)
+	d := m.diff
 	switch {
 	case key.Matches(msg, keys.DiffClose):
 		m.diff = nil
+	case key.Matches(msg, keys.DiffTab):
+		d.listFocus = !d.listFocus
+	case key.Matches(msg, keys.DiffRefresh):
+		d.refresh()
+		d.scroll(0, height) // the file may have got shorter
+	case key.Matches(msg, keys.DiffNextChange):
+		d.jumpChange(1, height)
+	case key.Matches(msg, keys.DiffPrevChange):
+		d.jumpChange(-1, height)
+	case key.Matches(msg, keys.DiffLeft):
+		d.scrollX(-diffHScrollStep)
+	case key.Matches(msg, keys.DiffRight):
+		d.scrollX(diffHScrollStep)
 	case key.Matches(msg, keys.DiffDown):
-		m.diff.move(1)
+		if d.listFocus {
+			d.move(1)
+		} else {
+			d.scroll(1, height)
+		}
 	case key.Matches(msg, keys.DiffUp):
-		m.diff.move(-1)
+		if d.listFocus {
+			d.move(-1)
+		} else {
+			d.scroll(-1, height)
+		}
 	}
 	return m, nil
 }
@@ -1026,15 +1052,13 @@ func (m Model) View() string {
 
 	paneHeight := m.height - statusHeight
 	if m.help {
-		style := mainStyle.Padding(0, 1)
-		screen := framed(style, true, m.width, paneHeight).Render(
-			viewHelp(m.width-style.GetHorizontalFrameSize(), paneHeight-style.GetVerticalFrameSize()))
+		screen := framed(modalStyle, true, m.width, paneHeight).Render(
+			viewHelp(m.width-modalStyle.GetHorizontalFrameSize(), paneHeight-modalStyle.GetVerticalFrameSize()))
 		return lipgloss.JoinVertical(lipgloss.Left, screen, m.viewStatus())
 	}
 	if m.diff != nil {
-		style := mainStyle.Padding(0, 1)
-		screen := framed(style, true, m.width, paneHeight).Render(
-			m.diff.view(m.width-style.GetHorizontalFrameSize(), paneHeight-style.GetVerticalFrameSize()))
+		screen := framed(modalStyle, true, m.width, paneHeight).Render(
+			m.diff.view(m.width-modalStyle.GetHorizontalFrameSize(), paneHeight-modalStyle.GetVerticalFrameSize()))
 		return lipgloss.JoinVertical(lipgloss.Left, screen, m.viewStatus())
 	}
 	sidebar := framed(sidebarStyle, m.focus == focusSidebar, sidebarWidth, paneHeight).Render(m.viewSidebar())
@@ -1307,7 +1331,7 @@ func (m Model) viewStatus() string {
 	case m.help:
 		bindings = []key.Binding{keys.HelpClose}
 	case m.diff != nil:
-		bindings = []key.Binding{keys.DiffDown, keys.DiffUp, keys.DiffClose}
+		bindings = keys.diffHelp(m.diff.listFocus)
 	case m.panel != nil:
 		bindings = keys.managerHelp()
 	case m.form != nil:

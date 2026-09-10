@@ -45,6 +45,12 @@ var (
 			BorderForeground(edge).BorderBackground(ground).Background(ground)
 	sidebarStyle = mainStyle.Padding(0, 1)
 
+	// modalStyle frames the help screen and the changes view, which take the
+	// whole window: mainStyle with a cell of side padding so text stands
+	// clear of the border. Named so the key handler that clamps the changes
+	// view's scrolling measures the same frame View draws.
+	modalStyle = sidebarStyle
+
 	// mainAreaStyle is the ground the terminal cards float on. It has no
 	// border: each card carries its own, and a frame around a set of frames
 	// reads as clutter. mainStyle keeps its border for the help screen, the

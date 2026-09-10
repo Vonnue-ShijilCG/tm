@@ -72,12 +72,21 @@ type keyMap struct {
 	Cancel  key.Binding
 
 	// Uncommitted changes view. Diff opens it from the sidebar, DiffTerm from
-	// a terminal (an Alt chord, like every other terminal-mode key).
-	Diff      key.Binding
-	DiffTerm  key.Binding
-	DiffDown  key.Binding
-	DiffUp    key.Binding
-	DiffClose key.Binding
+	// a terminal (an Alt chord, like every other terminal-mode key). Inside
+	// the view DiffTab moves focus between the file list and the diff, and
+	// DiffDown/DiffUp act on whichever has it: j/k and the arrows stay
+	// synonyms here as everywhere else in tm.
+	Diff           key.Binding
+	DiffTerm       key.Binding
+	DiffTab        key.Binding
+	DiffDown       key.Binding
+	DiffUp         key.Binding
+	DiffLeft       key.Binding
+	DiffRight      key.Binding
+	DiffNextChange key.Binding
+	DiffPrevChange key.Binding
+	DiffRefresh    key.Binding
+	DiffClose      key.Binding
 
 	// Help screen.
 	HelpClose key.Binding
@@ -137,11 +146,17 @@ var keys = keyMap{
 	Confirm: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "confirm")),
 	Cancel:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc/other", "cancel")),
 
-	Diff:      key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "open from sidebar")),
-	DiffTerm:  key.NewBinding(key.WithKeys("alt+d"), key.WithHelp("alt+d", "open from terminal")),
-	DiffDown:  key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j / ↓", "next file")),
-	DiffUp:    key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k / ↑", "prev file")),
-	DiffClose: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
+	Diff:           key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "open from sidebar")),
+	DiffTerm:       key.NewBinding(key.WithKeys("alt+d"), key.WithHelp("alt+d", "open from terminal")),
+	DiffTab:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "list / diff")),
+	DiffDown:       key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j / ↓", "next file")),
+	DiffUp:         key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k / ↑", "prev file")),
+	DiffLeft:       key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "scroll left")),
+	DiffRight:      key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "scroll right")),
+	DiffNextChange: key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "next change")),
+	DiffPrevChange: key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev change")),
+	DiffRefresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "re-read")),
+	DiffClose:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
 
 	HelpClose: key.NewBinding(key.WithKeys("esc", "s", "q"), key.WithHelp("esc / q", "close help")),
 
@@ -155,14 +170,18 @@ type helpSection struct {
 }
 
 // helpSections lists every binding for the help screen, grouped by context.
+// The order also decides how viewHelp packs them into columns, and the screen
+// is exactly full at 80x24 and 100x30: CHANGES sits between PANES and NEW
+// TERMINAL because that is where its twelve rows fit without a column being
+// added at either size.
 func helpSections() []helpSection {
 	k := keys
 	return []helpSection{
 		{"SIDEBAR", []key.Binding{k.Down, k.Up, k.Top, k.Bottom, k.Select, k.New, k.SplitSide, k.SplitStack, k.Focus, k.Zoom, k.Manage, k.Help, k.Quit}},
 		{"TERMINAL", []key.Binding{k.Sidebar, k.NextTerm, k.PrevTerm, k.NewTerm, k.ManageTerm, k.HideTerm, k.DeleteTerm}},
 		{"PANES", []key.Binding{k.PaneSide, k.PaneStack, k.PaneLeft, k.PaneRight, k.PaneUp, k.PaneDown, k.PaneGrow, k.PaneShrink, k.PaneZoom}},
+		{"CHANGES", []key.Binding{k.Diff, k.DiffTerm, k.DiffTab, k.DiffDown, k.DiffUp, k.DiffLeft, k.DiffRight, k.DiffNextChange, k.DiffPrevChange, k.DiffRefresh, k.DiffClose}},
 		{"NEW TERMINAL", []key.Binding{k.FormNext, k.FormPrev, k.FormSubmit, k.FormCancel}},
-		{"CHANGES", []key.Binding{k.Diff, k.DiffTerm, k.DiffDown, k.DiffUp, k.DiffClose}},
 		{"MANAGE TERMINALS", []key.Binding{k.MgDown, k.MgUp, k.MgShow, k.MgHide, k.MgNew, k.MgOpenAll, k.MgDelete, k.MgClose}},
 		{"CONFIRM", []key.Binding{k.Confirm, k.Cancel}},
 		{"MOUSE", []key.Binding{k.Scroll}},
@@ -185,4 +204,13 @@ func (k keyMap) formHelp() []key.Binding {
 
 func (k keyMap) managerHelp() []key.Binding {
 	return []key.Binding{k.MgShow, k.MgHide, k.MgNew, k.MgOpenAll, k.MgDelete, k.MgClose}
+}
+
+// diffHelp depends on which half has focus: j/k move the list on one side of
+// tab and scroll the diff on the other, so "next file" would be wrong there.
+func (k keyMap) diffHelp(listFocus bool) []key.Binding {
+	if listFocus {
+		return []key.Binding{k.DiffDown, k.DiffUp, k.DiffTab, k.DiffNextChange, k.DiffClose}
+	}
+	return []key.Binding{k.DiffTab, k.DiffNextChange, k.DiffPrevChange, k.DiffRefresh, k.DiffClose}
 }

@@ -26,6 +26,10 @@ type diffView struct {
 	err     string     // git problem, e.g. not a repository
 	rows    []diff.Row // the selected file, aligned; nil until loaded
 	loadErr string     // problem reading the selected file
+
+	top       int  // first visible row of the diff
+	left      int  // horizontal offset, shared by both columns
+	listFocus bool // true when j/k move the file list rather than the diff
 }
 
 const (
@@ -33,21 +37,89 @@ const (
 	verticalDivider = "│"
 	// gutterWidth is the line-number column and the space after it.
 	gutterWidth = 5
+	// diffChromeRows are the rows above the code: the header, a blank line
+	// and the headings. The key handler subtracts them from the window to
+	// learn how many code rows are on screen, so scrolling can clamp.
+	diffChromeRows = 3
+	// diffHScrollStep is how far one left/right press moves. Whole words
+	// rather than single columns, because a line of code is scanned in words.
+	diffHScrollStep = 8
+	// diffJumpContext is how many rows a jump leaves above the change it
+	// lands on, so the change is read with what precedes it.
+	diffJumpContext = 2
 )
 
 // newDiffView reads the changes in dir. A directory that is not a git
 // repository, or a git that fails, is reported in the view rather than
 // preventing it from opening.
 func newDiffView(dir, title string) *diffView {
-	d := &diffView{dir: dir, title: title}
-	files, err := git.Changes(dir)
-	if err != nil {
-		d.err = err.Error()
-		return d
-	}
-	d.files = files
+	d := &diffView{dir: dir, title: title, listFocus: true}
+	d.read()
 	d.load()
 	return d
+}
+
+// read lists the directory's changes from scratch, selecting the first.
+func (d *diffView) read() {
+	d.files, d.err, d.cursor = nil, "", 0
+	if files, err := git.Changes(d.dir); err != nil {
+		d.err = err.Error()
+	} else {
+		d.files = files
+	}
+}
+
+// refresh re-reads the directory: tm does not follow an agent's edits live,
+// so this is how the user asks for what has been written since. The
+// selection follows its path rather than its index, and its scroll position
+// survives, so re-reading the file being watched does not lose the place in
+// it even when the list above it has grown or shrunk. The caller clamps top,
+// since the file may have got shorter.
+func (d *diffView) refresh() {
+	path, top, left := "", d.top, d.left
+	if len(d.files) > 0 {
+		path = d.files[d.cursor].Path
+	}
+	d.read()
+	found := false
+	for i, f := range d.files {
+		if f.Path == path {
+			d.cursor, found = i, true
+			break
+		}
+	}
+	d.load()
+	if found {
+		d.top, d.left = top, left
+	}
+}
+
+// scroll moves the diff vertically, clamping so the view cannot run past
+// either end of the file; height is the number of code rows on screen.
+func (d *diffView) scroll(delta, height int) {
+	d.top = min(max(d.top+delta, 0), max(len(d.rows)-height, 0))
+}
+
+// scrollX moves both columns sideways together; there is one offset, so they
+// stay showing the same columns of the same lines.
+func (d *diffView) scrollX(delta int) {
+	d.left = max(d.left+delta, 0)
+}
+
+// jumpChange moves to the next (dir 1) or previous (dir -1) run of changed
+// rows. Without it a single edit in a long file would have to be found by
+// scrolling, which is what makes a full-file view practical. A jump leaves
+// diffJumpContext rows above the change, so the change the view is at sits
+// that far below top: the search starts from there, not from top, or the
+// next jump would find the same change again and never move on.
+func (d *diffView) jumpChange(dir, height int) {
+	at := d.top + diffJumpContext
+	for i := at + dir; i >= 0 && i < len(d.rows); i += dir {
+		if d.rows[i].Changed && (i == 0 || !d.rows[i-1].Changed) {
+			d.top = min(max(i-diffJumpContext, 0), max(len(d.rows)-height, 0))
+			return
+		}
+	}
 }
 
 // move changes the selected file, clamping at both ends, and loads the file
@@ -65,10 +137,11 @@ func (d *diffView) move(delta int) {
 }
 
 // load reads the selected file's committed and working versions and aligns
-// them. A file with no committed version — one just created — aligns against
-// an empty left side, which renders as all additions.
+// them, starting at the top of the file. A file with no committed version —
+// one just created — aligns against an empty left side, which renders as all
+// additions.
 func (d *diffView) load() {
-	d.rows, d.loadErr = nil, ""
+	d.rows, d.loadErr, d.top, d.left = nil, "", 0, 0
 	if len(d.files) == 0 {
 		return
 	}
@@ -183,8 +256,10 @@ func (d *diffView) body(width, height int) []string {
 }
 
 // panes renders the committed and current versions side by side, one string
-// per row and at most height of them. Both columns are the same width and
-// show the same rows, so a line always faces its counterpart.
+// per row and at most height of them, starting at row top. Both columns are
+// the same width and show the same rows, so a line always faces its
+// counterpart. The column labels take the focus colour when the diff has
+// focus, as the list heading does when the list has it.
 func (d *diffView) panes(width, height int) []string {
 	if d.loadErr != "" {
 		// The error can embed a path the OS echoed back, so it is file-derived
@@ -192,24 +267,24 @@ func (d *diffView) panes(width, height int) []string {
 		return []string{hintStyle.Render(ansi.Truncate(stripControlChars(d.loadErr), max(width, 1), "…"))}
 	}
 	half := (width - 1) / 2
-	labels := pad(delStyle.Render("HEAD")+hintStyle.Render("  committed"), half) + textStyle.Render(" ") +
-		addStyle.Render("WORKING TREE") + hintStyle.Render("  yours now")
+	_, headStyle, workStyle := d.headingStyles()
+	labels := pad(headStyle.Render("HEAD")+hintStyle.Render("  committed"), half) + textStyle.Render(" ") +
+		workStyle.Render("WORKING TREE") + hintStyle.Render("  yours now")
 	lines := []string{ansi.Truncate(labels, max(width, 1), "")}
-	for _, r := range d.rows {
-		if len(lines) >= height {
-			break
-		}
-		lines = append(lines, side(r.OldNum, r.OldText, r.Changed, delStyle, half)+textStyle.Render(" ")+
-			side(r.NewNum, r.NewText, r.Changed, addStyle, half))
+	for i := d.top; i < len(d.rows) && len(lines) < height; i++ {
+		r := d.rows[i]
+		lines = append(lines, side(r.OldNum, r.OldText, r.Changed, delStyle, half, d.left)+textStyle.Render(" ")+
+			side(r.NewNum, r.NewText, r.Changed, addStyle, half, d.left))
 	}
 	return lines
 }
 
-// side renders one column of one row: a line number gutter, then the text,
-// coloured when the line is part of a change and blank when it is padding.
-// A long line is cut, never wrapped: wrapped, it would take two rows on one
-// side and one on the other, and the columns would drift apart from there.
-func side(num int, text string, changed bool, style lipgloss.Style, width int) string {
+// side renders one column of one row: a line number gutter, then the text
+// from cell left onwards, coloured when the line is part of a change and
+// blank when it is padding. A long line is cut, never wrapped: wrapped, it
+// would take two rows on one side and one on the other, and the columns
+// would drift apart from there.
+func side(num int, text string, changed bool, style lipgloss.Style, width, left int) string {
 	gutter := strings.Repeat(" ", gutterWidth-1)
 	if num > 0 {
 		gutter = fmt.Sprintf("%*d", gutterWidth-1, num)
@@ -226,8 +301,19 @@ func side(num int, text string, changed bool, style lipgloss.Style, width int) s
 	// 0 and the right column lands on the file list; an escape sequence in a
 	// file would be executed by the terminal rather than shown.
 	text = stripControlChars(strings.ReplaceAll(text, "\t", "    "))
-	body := ansi.Truncate(text, max(width-gutterWidth, 0), "")
+	body := ansi.Truncate(ansi.TruncateLeft(text, left, ""), max(width-gutterWidth, 0), "")
 	return pad(hintStyle.Render(gutter)+style.Render(" "+body), width)
+}
+
+// headingStyles is what the list heading and the two column labels are drawn
+// in. The half that has focus takes the focus colour; the other keeps its own,
+// so the labels only lose their added/removed colours while the list is the
+// one being moved.
+func (d *diffView) headingStyles() (files, head, work lipgloss.Style) {
+	if d.listFocus {
+		return selectedStyle, delStyle, addStyle
+	}
+	return hintStyle, selectedStyle, selectedStyle
 }
 
 // pad fills s to width cells with grounded spaces, so a short line leaves no
@@ -259,10 +345,14 @@ func (d *diffView) header(width int) string {
 	return " " + left + textStyle.Render(strings.Repeat(" ", gap)) + right
 }
 
-// list renders the changed files in at most height lines. Entries are dropped
-// from the top only when the selected one would otherwise not fit, so the
-// selection is always on screen.
+// list renders a heading and the changed files in at most height lines.
+// Entries are dropped from the top only when the selected one would otherwise
+// not fit, so the selection is always on screen. The heading takes the focus
+// colour when the list has focus; it shares a row with the column labels, so
+// the first file and the first code row line up.
 func (d *diffView) list(width, height int) []string {
+	heading, _, _ := d.headingStyles()
+	height-- // the heading's row
 	entries := make([][]string, len(d.files))
 	used := 0 // lines from the first entry through the selected one
 	for i, f := range d.files {
@@ -283,7 +373,7 @@ func (d *diffView) list(width, height int) []string {
 		}
 		lines = append(lines, e...)
 	}
-	return lines
+	return append([]string{"  " + heading.Render("FILES")}, lines...)
 }
 
 // entry is one file: basename first with the directory beneath, so a long
