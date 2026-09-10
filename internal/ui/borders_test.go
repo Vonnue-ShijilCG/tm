@@ -16,7 +16,7 @@ import (
 func TestPaneHeaderFitsTheGivenWidth(t *testing.T) {
 	for _, focused := range []bool{true, false} {
 		for _, run := range []bool{true, false} {
-			if w := lipgloss.Width(paneHeader("Terminal 1", 24, focused, run)); w != 24 {
+			if w := lipgloss.Width(paneHeader("Terminal 1", " · main", 24, focused, run)); w != 24 {
 				t.Errorf("focused=%v running=%v: header is %d cells wide, want the full pane width 24", focused, run, w)
 			}
 		}
@@ -24,7 +24,7 @@ func TestPaneHeaderFitsTheGivenWidth(t *testing.T) {
 }
 
 func TestLongTitlesStillFitTheHeaderBar(t *testing.T) {
-	if w := lipgloss.Width(paneHeader(strings.Repeat("npm run dev ", 8), 20, true, true)); w != 20 {
+	if w := lipgloss.Width(paneHeader(strings.Repeat("npm run dev ", 8), " · main", 20, true, true)); w != 20 {
 		t.Errorf("an over-long title made the header %d cells wide, want 20", w)
 	}
 }

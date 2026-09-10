@@ -1025,28 +1025,22 @@ func (m Model) viewSidebar() string {
 		case len(p.Saved) > 0:
 			marker = "○ "
 		}
-		style := lipgloss.NewStyle()
-		switch {
-		case i == m.cursor && m.focus == focusSidebar:
-			style = cursorStyle
-		case i == m.selected:
-			style = selectedStyle
-		}
 		// Wrap rather than truncate: a project's name is how it is recognised,
-		// and the sidebar is narrow enough that real names do not fit. The
-		// marker is wrapped together with the name, so a continuation line
-		// starts flush at the margin instead of through an indent that would
-		// otherwise sit between two lines that split mid-word.
-		wrapped := strings.Split(ansi.Wrap(marker+p.Name, max(inner, 1), ""), "\n")
+		// and the sidebar is narrow enough that real names do not fit.
+		wrapped := strings.Split(ansi.Wrap(p.Name, max(inner-2, 1), ""), "\n")
 		for j, part := range wrapped {
-			row := style
-			if j == len(wrapped)-1 { // only the row's last line fills the sidebar; an
-				// earlier line filled the same way would pad in a gap exactly where
-				// the wrap broke the name, so a wrapped name would no longer read
-				// back as one word once its line breaks are stripped.
-				row = row.Width(inner).MaxWidth(inner)
+			prefix := marker
+			if j > 0 {
+				prefix = "  " // continuation lines line up under the name
 			}
-			b.WriteString(row.Render(part))
+			row := lipgloss.NewStyle().Width(inner).MaxWidth(inner).Render(prefix + part)
+			switch {
+			case i == m.cursor && m.focus == focusSidebar:
+				row = cursorStyle.Width(inner).Render(prefix + part)
+			case i == m.selected:
+				row = selectedStyle.Width(inner).Render(prefix + part)
+			}
+			b.WriteString(row)
 			b.WriteByte('\n')
 		}
 	}
@@ -1123,15 +1117,16 @@ func gap(w, h int) string {
 // renderLeaf draws one terminal as its own card, filling exactly r.w x r.h
 // cells including the card's border.
 func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, focused bool) string {
-	title, screen := m.paneTitle(p, t), t.Session.Render(focused)
+	label, branch := m.paneHeaderParts(p, t)
+	screen := t.Session.Render(focused)
 	if off := m.scroll[t]; off > 0 {
-		title += fmt.Sprintf(" %s %d", scrollMark, off)
+		branch += fmt.Sprintf(" %s %d", scrollMark, off) // meta like the branch, not the label
 		screen = t.Session.RenderScrolled(off)
 	}
 	innerW := max(r.w-cardStyle.GetHorizontalBorderSize(), 1)
 	innerH := max(r.h-cardStyle.GetVerticalBorderSize(), 1)
 
-	lines := []string{paneHeader(title, innerW, focused, running(t))}
+	lines := []string{paneHeader(label, branch, innerW, focused, running(t))}
 	for i, line := range strings.Split(screen, "\n") {
 		if i >= innerH-paneHeaderHeight {
 			break
@@ -1158,14 +1153,12 @@ const statusDot = "●"
 
 // paneHeader is a pane's title row: a status dot, the terminal's label, and
 // the branch it is on. It is no longer a filled bar — the card's border is
-// the pane's edge now, so the header only has to be readable.
-func paneHeader(title string, width int, focused bool, running bool) string {
+// the pane's edge now, so the header only has to be readable. The dot and
+// the label are bright; the branch is dim — focus is carried by the dot's
+// colour alone, so the label stays bright whether or not the pane has focus.
+func paneHeader(label, branch string, width int, focused bool, running bool) string {
 	dot := dotStyle(focused, running)
-	label := titleStyle.Render(title)
-	if !focused {
-		label = hintStyle.Render(title)
-	}
-	line := " " + dot.Render(statusDot) + " " + label
+	line := " " + dot.Render(statusDot) + " " + titleStyle.Render(label) + hintStyle.Render(branch)
 	return lipgloss.NewStyle().Width(width).MaxWidth(width).Background(ground).
 		Render(ansi.Truncate(line, width, "…"))
 }
@@ -1191,6 +1184,13 @@ func dotStyle(focused, running bool) lipgloss.Style {
 // names are not part of the identity.
 func (m Model) paneTitle(p *workspace.Project, t *workspace.Terminal) string {
 	return identity(terminalLabel(t), m.branches.get(t.Dir(p)), t.Worktree != nil)
+}
+
+// paneHeaderParts is paneTitle's label and branch suffix kept apart, so the
+// header can render the label bright and the branch dim instead of joining
+// them into one uniformly-styled string.
+func (m Model) paneHeaderParts(p *workspace.Project, t *workspace.Terminal) (label, branch string) {
+	return identityParts(terminalLabel(t), m.branches.get(t.Dir(p)), t.Worktree != nil)
 }
 
 // terminalLabel is a running terminal's display name wherever one is
@@ -1222,13 +1222,22 @@ func stripControlChars(s string) string {
 // identity joins a terminal's label and its Git context: `label · ⎇ branch`,
 // `label · branch`, or just label when there is no Git context.
 func identity(label, branch string, worktree bool) string {
+	l, b := identityParts(label, branch, worktree)
+	return l + b
+}
+
+// identityParts is identity's label and Git-context suffix kept apart,
+// for a caller that styles them differently — the pane header shows the
+// label bright and the branch dim. The suffix carries its own leading
+// " · " so a caller that has no branch can just concatenate the two.
+func identityParts(label, branch string, worktree bool) (string, string) {
 	if branch == "" {
-		return label
+		return label, ""
 	}
 	if worktree {
-		return label + " · " + worktreeMark + branch
+		return label, " · " + worktreeMark + branch
 	}
-	return label + " · " + branch
+	return label, " · " + branch
 }
 
 // worktreeMark is the one visible sign that a terminal has a dedicated
@@ -1296,5 +1305,9 @@ func (m Model) viewStatus() string {
 		space = 1
 	}
 	line := left + strings.Repeat(" ", space) + right
+	// Backstop: if the hints alone are wider than the window, left was
+	// already sacrificed down to nothing above but right is never shortened,
+	// so the assembled line could still overflow width.
+	line = ansi.Truncate(line, width, "…")
 	return statusStyle.Width(m.width).Render(line)
 }

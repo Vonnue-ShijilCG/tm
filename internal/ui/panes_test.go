@@ -464,8 +464,8 @@ func TestMinimumSizePaneStillShowsABodyRow(t *testing.T) {
 }
 
 func TestPaneHeaderShowsAStatusDotAndTheBranch(t *testing.T) {
-	m, _ := newTestModel(t)
-	m = press(m, "j", "enter")
+	m, _, _ := gitModel(t)
+	m = press(m, "enter")
 
 	view := m.View()
 
@@ -474,5 +474,8 @@ func TestPaneHeaderShowsAStatusDotAndTheBranch(t *testing.T) {
 	}
 	if !strings.Contains(view, "Terminal 1") {
 		t.Errorf("the header should still name the terminal:\n%s", view)
+	}
+	if !strings.Contains(view, "main") {
+		t.Errorf("the header should show the branch:\n%s", view)
 	}
 }
