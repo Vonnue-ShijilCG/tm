@@ -3,6 +3,7 @@ package git
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -181,6 +182,57 @@ func TestChangesReportsBothPathsOfARename(t *testing.T) {
 	// The record after the rename must still parse as its own file.
 	if other := byPath["other.txt"]; other.Added != 1 || other.Deleted != 0 || other.OldPath != "" {
 		t.Errorf("other.txt = %+v, want +1 -0 and no OldPath", other)
+	}
+}
+
+// status reports a rename from the index: git mv records one whatever the
+// content, so an edit made after the move but not yet staged leaves status
+// saying "RM". numstat compares HEAD with the working tree and pairs the two
+// paths only when they are similar enough. Here they are not, so the hunks
+// DiffHEAD would produce describe a new file, and the change must be reported
+// as git sees it: one file added, one deleted, both with their own counts.
+func TestChangesSplitsAMoveNumstatDoesNotPair(t *testing.T) {
+	r := initRepo(t)
+	writeFile(t, r, "old.txt", "x\ny\n")
+	commitAll(t, r)
+	if _, err := run(r.Dir, "mv", "old.txt", "new.txt"); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, r, "new.txt", "x\nz\nw\n") // unstaged: the index still has the old bytes
+
+	byPath := changesByPath(t, r)
+	if len(byPath) != 2 {
+		t.Errorf("Changes has %d entries, want new.txt and old.txt: %v", len(byPath), byPath)
+	}
+	if fresh := byPath["new.txt"]; fresh.Kind != Added || fresh.OldPath != "" || fresh.Added != 3 || fresh.Deleted != 0 {
+		t.Errorf("new.txt = %+v, want Added +3 -0 with no OldPath", fresh)
+	}
+	if gone := byPath["old.txt"]; gone.Kind != Deleted || gone.Added != 0 || gone.Deleted != 2 {
+		t.Errorf("old.txt = %+v, want Deleted +0 -2", gone)
+	}
+}
+
+// The reverse disagreement: with only the new path staged, status shows an
+// addition and an unstaged deletion, but numstat pairs the identical content
+// as a rename. numstat decides, so this is one moved file, not two changes.
+func TestChangesJoinsAMoveNumstatPairsEvenWhenStatusDoesNot(t *testing.T) {
+	r := initRepo(t)
+	writeFile(t, r, "old.txt", "one\ntwo\n")
+	commitAll(t, r)
+	if err := os.Rename(filepath.Join(r.Dir, "old.txt"), filepath.Join(r.Dir, "new.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := run(r.Dir, "add", "new.txt"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := Changes(r.Dir)
+	if err != nil {
+		t.Fatalf("Changes: %v", err)
+	}
+	want := []FileChange{{Path: "new.txt", OldPath: "old.txt", Kind: Modified}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Changes = %+v, want %+v", got, want)
 	}
 }
 

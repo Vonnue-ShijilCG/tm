@@ -37,12 +37,19 @@ type FileChange struct {
 // created would otherwise not appear at all. --untracked-files=all is what
 // makes files inside a new directory appear individually; without it status
 // collapses the directory to a single "dir/" entry.
+//
+// numstat, not status, decides whether a rename exists. status reports one
+// from the index — git mv records a rename whatever the content — while
+// numstat pairs two paths only when they are similar enough, and the hunks
+// DiffHEAD produces follow numstat's pairing. A move status calls a rename
+// but numstat did not pair is therefore reported as an addition and a
+// deletion, which is what the viewer will be able to show.
 func Changes(dir string) ([]FileChange, error) {
 	out, err := output(dir, "status", "--porcelain=v1", "-z", "--untracked-files=all")
 	if err != nil {
 		return nil, err
 	}
-	counts, binary := diffCounts(dir)
+	d := diffHEAD(dir)
 
 	var changes []FileChange
 	fields := strings.Split(out, "\x00")
@@ -52,40 +59,62 @@ func Changes(dir string) ([]FileChange, error) {
 			continue
 		}
 		x, y, path := rec[0], rec[1], rec[3:]
-		var oldPath string
+		var src string
 		if strings.ContainsAny(rec[:2], "RC") && i+1 < len(fields) {
 			i++ // a rename or copy is followed by its source path
-			oldPath = fields[i]
+			src = fields[i]
 		}
-		c := FileChange{Path: path, OldPath: oldPath, Kind: Modified}
+		if d.sources[path] {
+			continue // numstat paired it as a rename's source: described at the destination
+		}
+		c := d.change(path)
 		switch {
 		case x == '?' && y == '?':
 			c.Kind = Added
 			c.Added, c.Binary = untrackedLines(filepath.Join(dir, path))
 		case x == 'D' || y == 'D':
 			c.Kind = Deleted
-		case x == 'A':
+		case (x == 'A' || src != "") && c.OldPath == "":
 			c.Kind = Added
 		}
-		if n, ok := counts[path]; ok {
-			c.Added, c.Deleted = n[0], n[1]
-		}
-		if binary[path] {
-			c.Binary, c.Added, c.Deleted = true, 0, 0
-		}
 		changes = append(changes, c)
+		if src != "" && src != c.OldPath && !d.sources[src] {
+			// status's rename source that numstat did not pair with anything
+			// is, as far as the hunks are concerned, a deleted file.
+			s := d.change(src)
+			s.Kind = Deleted
+			changes = append(changes, s)
+		}
 	}
 	return changes, nil
 }
 
-// diffCounts reads per-path line counts from numstat. A binary file is
-// reported by git as "-\t-", which is recorded separately rather than as zero
-// counts, so a binary file is distinguishable from an unchanged one.
-func diffCounts(dir string) (map[string][2]int, map[string]bool) {
-	counts, binary := map[string][2]int{}, map[string]bool{}
+// headDiff is what numstat says about the tracked changes: per-path line
+// counts, which paths are binary, and which pairs of paths git pairs as a
+// rename. A binary file is reported by git as "-\t-", recorded separately
+// rather than as zero counts so it is distinguishable from an unchanged one.
+type headDiff struct {
+	counts  map[string][2]int
+	binary  map[string]bool
+	renames map[string]string // destination → source
+	sources map[string]bool   // the sources in renames
+}
+
+// change is the FileChange numstat alone can fill in for path: everything
+// but Kind, which needs status.
+func (d headDiff) change(path string) FileChange {
+	c := FileChange{Path: path, OldPath: d.renames[path], Binary: d.binary[path]}
+	if n, ok := d.counts[path]; ok {
+		c.Added, c.Deleted = n[0], n[1]
+	}
+	return c
+}
+
+func diffHEAD(dir string) headDiff {
+	d := headDiff{map[string][2]int{}, map[string]bool{}, map[string]string{}, map[string]bool{}}
 	out, err := output(dir, "diff", "HEAD", "--numstat", "-z")
 	if err != nil {
-		return counts, binary // no HEAD yet: nothing is tracked
+		return d // no HEAD yet: nothing is tracked
 	}
 	fields := strings.Split(out, "\x00")
 	for i := 0; i < len(fields); i++ {
@@ -98,20 +127,22 @@ func diffCounts(dir string) (map[string][2]int, map[string]bool) {
 			// -z prints a rename as "add\tdel\t" with the source and
 			// destination paths in the two following fields. status lists
 			// the destination, so that is the key.
+			src := fields[i+1]
 			path = fields[i+2]
+			d.renames[path], d.sources[src] = src, true
 			i += 2
 		}
 		if add == "-" || del == "-" {
-			binary[path] = true
+			d.binary[path] = true
 			continue
 		}
 		// numstat prints only digits or "-" here, and "-" was handled above,
 		// so a parse failure cannot happen and is not worth a code path.
 		a, _ := strconv.Atoi(add)
-		d, _ := strconv.Atoi(del)
-		counts[path] = [2]int{a, d}
+		dl, _ := strconv.Atoi(del)
+		d.counts[path] = [2]int{a, dl}
 	}
-	return counts, binary
+	return d
 }
 
 // untrackedLines counts the lines of a file git does not track yet, and
