@@ -247,9 +247,11 @@ func (d *diffView) view(width, height int) string {
 	switch {
 	case d.err != "":
 		// Some git failures are several lines ("dubious ownership … To add an
-		// exception …"); only the first fits the one row budgeted for it.
+		// exception …"); only the first fits the one row budgeted for it. It
+		// is git's stderr, which echoes repository paths, so it is stripped
+		// like every other repository-derived string here.
 		first, _, _ := strings.Cut(d.err, "\n")
-		lines = append(lines, " "+errorStyle.Render(ansi.Truncate(first, width-1, "…")))
+		lines = append(lines, " "+errorStyle.Render(ansi.Truncate(stripControlChars(first), width-1, "…")))
 	case len(d.files) == 0:
 		lines = append(lines, " "+hintStyle.Render(ansi.Truncate("No uncommitted changes in "+d.dir, width-1, "…")))
 	default:

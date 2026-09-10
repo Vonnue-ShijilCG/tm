@@ -587,6 +587,22 @@ func TestControlCharactersInPathsAndLoadErrorsAreNotDrawn(t *testing.T) {
 	}
 }
 
+// The git error is git's own stderr, which echoes repository paths, so it is
+// on the same side of the stripping boundary as the paths themselves.
+func TestControlCharactersInAGitErrorAreNotDrawn(t *testing.T) {
+	osc := "\x1b]0;title\x07"
+	d := &diffView{title: "app", err: "warning: could not open directory '" + osc + "x/'"}
+
+	out := d.view(100, 12)
+
+	if strings.Contains(out, "\x1b]") {
+		t.Errorf("an OSC sequence from git's stderr reached the screen:\n%q", out)
+	}
+	if !strings.Contains(ansi.Strip(out), "could not open directory") {
+		t.Errorf("stripping should keep the message:\n%s", ansi.Strip(out))
+	}
+}
+
 // bigFile commits 200 numbered lines to big.txt and then changes the given
 // rows, so a change can sit well below the first screen.
 func bigFile(t *testing.T, root string, changed ...int) {

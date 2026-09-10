@@ -124,7 +124,8 @@ full-screen modal framed like the help screen (`modalStyle`, sized to
 focused terminal's directory, or the selected project's checkout when opened
 from the sidebar, and like the help screen it consumes every key. `tab` moves
 focus between the file list and the diff; `j`/`k` and the arrows act on
-whichever half has focus; `←`/`→` move both columns by one shared offset;
+whichever half has focus; `←`/`→` move both columns together, `diffHScrollStep`
+(8) cells at a time along one shared offset;
 `n`/`N` jump between runs of changed rows; `r` re-reads; `esc` closes.
 Nothing is read on a timer: the list on open and on `r`, a file when it is
 selected, so content cannot shift while it is being read. `diffRows` and
@@ -188,7 +189,7 @@ name where tm runs, not what is inside the repository.
 
 ## Testing conventions
 
-- Each package's `TestMain` sets `XDG_CONFIG_HOME` to an empty temp dir so the developer's own `config.toml` cannot affect the default limit.
+- The `workspace` and `ui` packages have a `TestMain` that sets `XDG_CONFIG_HOME` to an empty temp dir so the developer's own `config.toml` cannot affect the default limit; the packages that never read config have none.
 - UI tests drive the real `Model.Update` with helpers in `ui/*_test.go`: `newTestModel(t)` (fake spawner, 100x30 window, real temp root so saves work), `press(m, "j", "enter", "alt+x", ...)`, `typeText`, and `makeTerminal(t, m, key, name, branch)` which goes through the form exactly as a user would. Add new `alt+` keys to the `press` switch when you introduce them.
 - `fakeSession` implementations exist in both `workspace` and `ui` tests; `Render` returns `"SCREEN:<dir>:<title>"` so views can be asserted with string matching.
 - Git-touching tests build throwaway repos with `initRepo(t)` (`git/git_test.go`) or `gitWorkspace(t)` (`workspace/worktree_test.go`); never point tests at a real repository.
