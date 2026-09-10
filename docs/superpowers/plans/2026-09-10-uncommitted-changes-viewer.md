@@ -4,7 +4,11 @@
 
 **Goal:** A full-screen view, one keystroke away, showing the uncommitted changes in the directory you are looking at — files on the left, the selected file rendered twice in full and aligned line for line, red for removals and green for additions.
 
-**Architecture:** `git diff HEAD -U0` emits hunk headers that carry the complete alignment, so no diff-body parser is needed — only the `@@` lines. A new `internal/diff` package turns those headers plus both complete file contents into a slice of aligned rows, as pure functions with no git and no UI. The UI renders those rows as a modal in the same shape as the help screen, which takes the full terminal width rather than the narrower main pane.
+Task 1 is separate work that comes first because it is what you can see immediately: every pane gets its own black ground and a border weighted to read against it.
+
+**Architecture:** Task 1 stands alone. Panes are drawn by handing the emulated screen to `Draw` on a reused `uv.Buffer` instead of calling `Render` on the emulator, because `Render` emits nothing for a cell the program left at its default background and so shows the host terminal's colour through the pane.
+
+For the viewer: `git diff HEAD -U0` emits hunk headers that carry the complete alignment, so no diff-body parser is needed — only the `@@` lines. A new `internal/diff` package turns those headers plus both complete file contents into a slice of aligned rows, as pure functions with no git and no UI. The UI renders those rows as a modal in the same shape as the help screen, which takes the full terminal width rather than the narrower main pane.
 
 **Tech Stack:** Go (version in `go.mod`), Bubble Tea, Lip Gloss, the `git` CLI.
 
@@ -18,12 +22,321 @@
 - Tests require `git` on `PATH`. Never point a test at a real repository; build temp repos with `initRepo(t)` (`internal/git/git_test.go`) or `gitWorkspace(t)` (`internal/workspace/worktree_test.go`).
 - Each package's `TestMain` sets `XDG_CONFIG_HOME` to an empty temp dir. Do not remove it.
 - `internal/ui/keys.go` is the single source of truth for shortcuts: input matching, the help screen and the status bar all read from it.
-- In terminal focus tm reserves only `Alt` chords after Task 1. Never add a plain-letter or `Ctrl` shortcut that applies while a terminal has focus.
+- In terminal focus tm reserves only `Alt` chords after Task 2. Never add a plain-letter or `Ctrl` shortcut that applies while a terminal has focus.
 - Tests that need a git identity must pass `-c user.name=t -c user.email=t@example.com`; the machine has no guaranteed global identity.
 
 ---
 
-### Task 1: Let Esc reach the running program
+### Task 1: Give every pane a black ground and a border that reads against it
+
+**Files:**
+- Modify: `internal/terminal/session.go` (imports, `Session` struct, `Start`, `Render`, `RenderScrolled`)
+- Modify: `internal/ui/styles.go` (the palette and `mainStyle`)
+- Test: `internal/terminal/session_test.go`, `internal/ui/layout_test.go`
+
+**Interfaces:**
+- Consumes: nothing.
+- Produces: nothing later tasks depend on. It is first because it is the change you can see, and it is independent of everything else in this plan.
+
+**Read this before writing code — the obvious approach does not work.** The
+emulator's `Render()` ignores its background colour completely. Setting it
+three different ways produces byte-identical output:
+
+```
+default:               "plain \x1b[31mred\x1b[m done"
+SetBackgroundColor:    "plain \x1b[31mred\x1b[m done"
+SetDefaultBackground:  "plain \x1b[31mred\x1b[m done"
+```
+
+A cell the program left at its default background emits *nothing*, so it shows
+the host terminal's colour. Wrapping the pane in a Lip Gloss `Background()`
+fails for the same reason from the other side: the emulator's own `\x1b[m`
+resets wipe it line by line.
+
+The emulator's `Draw` method does what is needed. It fills the target area with
+the background colour first, then copies cells over it:
+
+```
+"\x1b[48;2;0;0;0mplain \x1b[31mred\x1b[39m       \x1b[m"
+"\x1b[48;2;0;0;0m                \x1b[m"
+```
+
+Black on every cell, the program's own colours preserved, and every line padded
+to the exact pane width. That padding is worth as much as the colour: today a
+short line simply stops, so panes have ragged right edges, which is a large part
+of why the split boundaries are hard to see.
+
+Two facts confirmed by experiment, both of which the code below relies on:
+
+- `Draw` re-fills the whole area on every call and `Touched()` is not
+  damage-since-last-render, so a pane with no new output redraws identically
+  rather than blanking.
+- `Buffer.SetCell` outside the buffer's bounds is a no-op, not a panic.
+
+- [ ] **Step 1: Write the failing tests**
+
+Append to `internal/terminal/session_test.go`:
+
+```go
+func TestPanesRenderOnTheirOwnBackground(t *testing.T) {
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "printf 'hi\\n'; sleep 30"}, Dir: t.TempDir(), Cols: 12, Rows: 3})
+	waitFor(t, s, "hi")
+
+	lines := strings.Split(s.Render(false), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("Render gave %d lines, want one per row: %q", len(lines), lines)
+	}
+	for i, line := range lines {
+		if !strings.Contains(line, "\x1b[48;2;0;0;0m") {
+			t.Errorf("row %d carries no pane background: %q", i, line)
+		}
+		// The pane is a rectangle: a blank row is as wide as a full one, so
+		// nothing behind the pane shows through at a short line's end.
+		if w := ansi.StringWidth(line); w != 12 {
+			t.Errorf("row %d is %d cells wide, want 12: %q", i, w, line)
+		}
+	}
+}
+
+func TestScrolledHistoryIsOnTheSameBackground(t *testing.T) {
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "i=1; while [ $i -le 30 ]; do printf 'line-%s\\n' $i; i=$((i+1)); done; sleep 30"}, Dir: t.TempDir(), Cols: 20, Rows: 5})
+	waitFor(t, s, "line-30")
+
+	lines := strings.Split(s.RenderScrolled(3), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("RenderScrolled gave %d lines, want 5", len(lines))
+	}
+	for i, line := range lines {
+		if !strings.Contains(line, "\x1b[48;2;0;0;0m") {
+			t.Errorf("scrolled row %d carries no pane background: %q", i, line)
+		}
+	}
+	if !strings.Contains(lines[0], "line-24") {
+		t.Errorf("scrolling still has to show the right history: %q", lines[0])
+	}
+}
+
+func TestTheProgramIsToldTheBackgroundIsDark(t *testing.T) {
+	// A program that asks with OSC 11 must be answered black, or it will pick
+	// a light theme and fight the ground tm draws it on.
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "printf '\\033]11;?\\033\\\\'; read answer; printf 'got:%s\\n' \"$answer\"; sleep 30"}, Dir: t.TempDir(), Cols: 60, Rows: 4})
+
+	waitFor(t, s, "got:")
+	if screen := s.Render(false); !strings.Contains(screen, "rgb:0000/0000/0000") {
+		t.Errorf("OSC 11 query was not answered black:\n%s", screen)
+	}
+}
+```
+
+Add `"github.com/charmbracelet/x/ansi"` to the test file's imports for
+`ansi.StringWidth`.
+
+Append to `internal/ui/layout_test.go`:
+
+```go
+func TestPaneFramesAndDividersShareOneWeight(t *testing.T) {
+	// The dividers between split panes are heavy box-drawing characters. A
+	// light frame around heavy dividers looks like two different tools drew
+	// the screen, so the frame has to match.
+	if got := mainStyle.GetBorderStyle().Left; got != verticalDivider {
+		t.Errorf("frame side is %q but the divider is %q; they must match", got, verticalDivider)
+	}
+	if got := mainStyle.GetBorderStyle().Top; got != horizontalDivider {
+		t.Errorf("frame top is %q but the divider is %q; they must match", got, horizontalDivider)
+	}
+}
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/terminal -run 'PanesRender|ScrolledHistory|BackgroundIsDark' -v && go test ./internal/ui -run TestPaneFramesAndDividers -v`
+Expected: FAIL. The terminal tests fail on the missing `\x1b[48;2;0;0;0m` and on the width check (a blank row renders as `""` today); the UI test fails because `RoundedBorder` gives `│`, not `┃`.
+
+- [ ] **Step 3: Draw through a buffer**
+
+In `internal/terminal/session.go`, add `"image/color"` to the imports and put
+this above the `Session` type:
+
+```go
+// paneBackground is the ground every pane is drawn on. Panes share one colour
+// whatever the host terminal uses, so each terminal reads as its own rectangle
+// instead of blending into whatever is behind tm.
+var paneBackground color.Color = color.Black
+
+// drawTarget adapts a uv.Buffer to the uv.Screen the emulator draws onto. A
+// Buffer is not a Screen by itself: it has no WidthMethod, which the emulator
+// needs to know how many cells a grapheme occupies.
+type drawTarget struct {
+	*uv.Buffer
+	width uv.WidthMethod
+}
+
+func (d drawTarget) WidthMethod() uv.WidthMethod { return d.width }
+```
+
+Add the buffer to `Session`, in the group `mu` guards:
+
+```go
+	buf           *uv.Buffer // reused render target; see paint
+```
+
+In `Start`, build it alongside the emulator and tell the emulator what colour
+it is on:
+
+```go
+		emu:           vt.NewEmulator(cfg.Cols, cfg.Rows),
+		buf:           uv.NewBuffer(cfg.Cols, cfg.Rows),
+```
+
+immediately after the struct literal, before `SetCallbacks`:
+
+```go
+	// Both, deliberately: the default is what a program's own reset returns
+	// to, and the current colour is what an OSC 11 query is answered with, so
+	// programs that theme themselves to the terminal pick their dark palette.
+	s.emu.SetDefaultBackgroundColor(paneBackground)
+	s.emu.SetBackgroundColor(paneBackground)
+```
+
+Add `paint`, and route both render paths through it:
+
+```go
+// paint draws the emulated screen onto the reused buffer and renders that.
+// Going through Draw rather than emu.Render is what puts the pane background
+// on every cell: Render emits nothing for a cell the program left at its
+// default, so those cells would show the host terminal's colour instead. Draw
+// also pads every row to the full width, which makes the pane a rectangle.
+//
+// The caller must hold s.mu. The buffer is reused across frames so a pane that
+// prints steadily does not allocate a full screen of cells per output event.
+func (s *Session) paint() string {
+	s.buf.Resize(s.emu.Width(), s.emu.Height())
+	s.emu.Draw(drawTarget{s.buf, s.emu.WidthMethod()}, s.buf.Bounds())
+	return s.buf.Render()
+}
+```
+
+In `Render`, replace each of the three `s.emu.Render()` calls with `s.paint()`.
+The cursor swap around it is unchanged.
+
+Rewrite the tail of `RenderScrolled` so history and live screen land in one
+buffer rather than being spliced as strings:
+
+```go
+func (s *Session) RenderScrolled(offset int) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if offset <= 0 || s.emu.IsAltScreen() {
+		return s.paint()
+	}
+	sb := s.emu.Scrollback()
+	if sb == nil {
+		return s.paint()
+	}
+
+	width, height := s.emu.Width(), s.emu.Height()
+	offset = min(offset, sb.Len())
+	rows := min(offset, height) // rows of history shown above the live screen
+
+	s.buf.Resize(width, height)
+	blank := uv.EmptyCell
+	blank.Style.Bg = paneBackground
+	s.buf.Fill(&blank)
+
+	for y := 0; y < rows; y++ {
+		line := sb.Line(sb.Len() - offset + y)
+		for x := 0; x < len(line) && x < width; x++ {
+			cell := line[x].Clone()
+			if cell.Style.Bg == nil {
+				cell.Style.Bg = paneBackground
+			}
+			s.buf.SetCell(x, y, cell)
+		}
+	}
+	// The live screen fills the rows history did not, clipped to them, which
+	// shows its top rows — the same lines the string-splicing version showed.
+	s.emu.Draw(drawTarget{s.buf, s.emu.WidthMethod()}, uv.Rect(0, rows, width, height-rows))
+	return s.buf.Render()
+}
+```
+
+`strings` may now be unused in `session.go`; check before building.
+
+- [ ] **Step 4: Re-weight the borders**
+
+In `internal/ui/styles.go`, replace the palette block and `mainStyle`:
+
+```go
+var (
+	accent = lipgloss.Color("69")  // focused border / cursor: brighter than before, to carry against the black pane ground
+	dim    = lipgloss.Color("240") // hints and the status bar
+	edge   = lipgloss.Color("245") // unfocused border: lifted off dim so an inactive pane keeps a visible edge
+	rule   = lipgloss.Color("245") // dividers between panes
+	bar    = lipgloss.Color("238") // unfocused pane header bar: a step above the black ground, so it reads as the pane's top edge
+
+	// The main pane has no padding so the emulated screen fills it exactly.
+	// The border is thick to match the dividers between split panes, which are
+	// heavy box-drawing characters; a light frame around heavy dividers looks
+	// like two different tools drew the screen.
+	mainStyle    = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(edge)
+	sidebarStyle = mainStyle.Padding(0, 1)
+```
+
+`dim` keeps its old value on purpose: it still colours hints and the status
+bar, which sit on the host background rather than on a pane, and did not need
+changing. Only the border moved.
+
+`ThickBorder` is one cell per side exactly as `RoundedBorder` was, so
+`framed`'s arithmetic and `scroll.go`'s hit-testing are unaffected.
+
+- [ ] **Step 5: Run the tests**
+
+Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/terminal -v && go test ./internal/ui -v` then `go test ./...`
+
+Expected: PASS, with one pre-existing test needing a change.
+`TestRenderScrolledShowsHistoryAboveTheScreen` ends with
+
+```go
+	if !strings.Contains(top[0], "line-1\x1b") && !strings.HasSuffix(strings.TrimRight(top[0], " "), "line-1") {
+```
+
+Both halves assumed an unpadded row: rows now end with `\x1b[m` after their
+padding, so `TrimRight(" ")` no longer reaches the text. Replace that condition
+with a check that does not depend on how the row ends:
+
+```go
+	if !strings.Contains(ansi.Strip(top[0]), "line-1 ") && strings.TrimSpace(ansi.Strip(top[0])) != "line-1" {
+		t.Errorf("RenderScrolled(1000) should start at the oldest line:\n%s", strings.Join(top, "\n"))
+	}
+```
+
+If any other test breaks, report which and why before changing it — a test
+asserting exact rendered output is telling you something about this change,
+and the fix is only obvious once you have read what it asserted.
+
+- [ ] **Step 6: Look at it**
+
+```bash
+export PATH=$HOME/.local/go/bin:$PATH
+go build -o ~/.local/bin/tm ./cmd/tm && go build -o tm ./cmd/tm
+```
+
+Open two or three split panes and confirm: each pane is a solid black
+rectangle with no ragged right edge, the frame and the dividers are the same
+weight, an unfocused pane still has a visible border, and the focused one is
+clearly the focused one.
+
+- [ ] **Step 7: Commit**
+
+```bash
+export PATH=$HOME/.local/go/bin:$PATH && gofmt -w internal/terminal internal/ui
+git add internal/terminal internal/ui
+git commit -m "Draw every pane on its own black ground"
+```
+
+---
+
+### Task 2: Let Esc reach the running program
 
 **Files:**
 - Modify: `internal/ui/keys.go` (the `Sidebar` binding)
@@ -103,7 +416,7 @@ git commit -m "Let Esc reach the running program"
 
 ---
 
-### Task 2: Ask git what changed
+### Task 3: Ask git what changed
 
 **Files:**
 - Create: `internal/git/changes.go`
@@ -424,7 +737,7 @@ git commit -m "Report the files that differ from HEAD, untracked ones included"
 
 ---
 
-### Task 3: Align two versions of a file
+### Task 4: Align two versions of a file
 
 **Files:**
 - Create: `internal/diff/diff.go`
@@ -688,7 +1001,7 @@ git commit -m "Align a file's committed and working versions"
 
 ---
 
-### Task 4: Open the viewer and list the changed files
+### Task 5: Open the viewer and list the changed files
 
 **Files:**
 - Create: `internal/ui/diffview.go`
@@ -696,7 +1009,7 @@ git commit -m "Align a file's committed and working versions"
 - Test: `internal/ui/diffview_test.go`
 
 **Interfaces:**
-- Consumes: `git.Changes(dir)`, `git.FileChange` (Task 2); `(*Terminal).Dir(p)` and `workspace.Project`.
+- Consumes: `git.Changes(dir)`, `git.FileChange` (Task 3); `(*Terminal).Dir(p)` and `workspace.Project`.
 - Produces:
 
 ```go
@@ -714,7 +1027,7 @@ func (d *diffView) view(width, height int) string
 
 plus `Model.diff *diffView`, `keys.Diff` (`d`), `keys.DiffTerm` (`alt+d`), `keys.DiffClose` (`esc`), `keys.DiffDown`/`DiffUp` (`j`/`k` and the arrows).
 
-This task delivers the modal and the file list only. The two code columns are Task 5.
+This task delivers the modal and the file list only. The two code columns are Task 6.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1001,14 +1314,14 @@ git commit -m "Open a view of a directory's uncommitted changes"
 
 ---
 
-### Task 5: Show the selected file, committed beside current
+### Task 6: Show the selected file, committed beside current
 
 **Files:**
 - Modify: `internal/ui/diffview.go`
 - Test: `internal/ui/diffview_test.go`
 
 **Interfaces:**
-- Consumes: `git.ShowHEAD`, `git.DiffHEAD` (Task 2); `diff.ParseHunks`, `diff.Align`, `diff.Row` (Task 3).
+- Consumes: `git.ShowHEAD`, `git.DiffHEAD` (Task 3); `diff.ParseHunks`, `diff.Align`, `diff.Row` (Task 4).
 - Produces: `diffView.rows []diff.Row`, `diffView.load()`, and the two-column rendering.
 
 - [ ] **Step 1: Write the failing test**
@@ -1226,14 +1539,14 @@ git commit -m "Show a file's committed and current versions side by side"
 
 ---
 
-### Task 6: Scroll, switch focus, and jump between changes
+### Task 7: Scroll, switch focus, and jump between changes
 
 **Files:**
 - Modify: `internal/ui/diffview.go`, `internal/ui/keys.go`, `internal/ui/model.go`
 - Test: `internal/ui/diffview_test.go`
 
 **Interfaces:**
-- Consumes: `diffView.rows` (Task 5).
+- Consumes: `diffView.rows` (Task 6).
 - Produces: `diffView.top`, `diffView.left`, `diffView.listFocus bool`; `keys.DiffTab`, `DiffLeft`, `DiffRight`, `DiffNextChange`, `DiffPrevChange`, `DiffRefresh`.
 
 **Why `Tab` rather than splitting j/k from the arrows:** everywhere else in tm `j`/`k` and the arrow keys are synonyms — the Terminal Manager binds both to "move a row". Making them diverge here would be the only place in the application where they mean different things. `Tab` moves between the file list and the diff, exactly as it moves between the sidebar and the main pane, and `j`/`k`/arrows then move within whichever has focus.
@@ -1441,7 +1754,7 @@ git commit -m "Scroll the changes view and jump between changes"
 
 ---
 
-### Task 7: Document it
+### Task 8: Document it
 
 **Files:**
 - Modify: `README.md`, `CLAUDE.md`
@@ -1450,6 +1763,13 @@ git commit -m "Scroll the changes view and jump between changes"
 - [ ] **Step 1: Update the README**
 
 Add to the feature list, after the mouse-wheel bullet:
+
+```markdown
+- Every terminal is drawn on its own black ground with a weighted border, so a
+  four-way split reads as four panes rather than one wall of text.
+```
+
+and:
 
 ```markdown
 - See what changed without leaving tm: `d` shows the uncommitted changes in the
@@ -1468,7 +1788,31 @@ Add to Usage, after the `n` bullet:
 
 - [ ] **Step 2: Update CLAUDE.md**
 
-Add a section after "Scrollback":
+Extend the Scrollback section with how a pane is drawn, then add the viewer
+section after it.
+
+Into "Scrollback":
+
+```markdown
+Panes are drawn by handing the emulated screen to `Emulator.Draw` on a
+`uv.Buffer` the session reuses, not by calling `Emulator.Render`. `Render`
+emits nothing for a cell the program left at its default background, so those
+cells would show the host terminal's colour through the pane; `Draw` fills the
+area first and pads every row to the full width, which is what makes a pane a
+solid rectangle with a straight right edge. `RenderScrolled` composes history
+and live screen into that same buffer rather than splicing strings, so scrolled
+rows carry the ground too. The emulator's default and current background are
+both set to black: the default is what a program's own reset returns to, and
+the current colour is what an OSC 11 query is answered with, so programs that
+theme themselves to their terminal pick a dark palette that matches.
+
+The pane frame uses `ThickBorder` to match the heavy box-drawing dividers
+between splits. `dim` still colours hints and the status bar, which sit on the
+host background rather than on a pane; the unfocused border has its own `edge`
+colour so it can be lifted without dragging those with it.
+```
+
+Add a section after that:
 
 ```markdown
 ### Uncommitted changes view
@@ -1519,11 +1863,12 @@ git commit -m "Document the uncommitted changes view"
 
 In a scratch workspace only, never a real repository:
 
-1. Edit a tracked file and create a new one. Press `d` — both appear, the new one marked `new file`.
-2. Select the edited file. The committed version is on the left, yours on the right, changed lines coloured, unchanged lines shown on both sides.
-3. `tab` into the diff, scroll to the bottom of a long file, and confirm the two sides stay in step.
-4. Press `→` a few times: both columns move together.
-5. Press `n` in a long file with one change far down — it jumps there.
-6. Delete a tracked file, reopen: it shows a committed left side and an empty right.
-7. Press `d` in a project with no changes — it says so rather than opening an empty split.
-8. In a Claude Code pane, press `Esc` — Claude Code interrupts, and tm does not steal it. `alt+esc` returns to the sidebar.
+1. Open two or three split panes. Each is a solid black rectangle with no ragged right edge; the frame and the dividers share one weight; an unfocused pane still has a visible border and the focused one is unmistakable.
+2. Edit a tracked file and create a new one. Press `d` — both appear, the new one marked `new file`.
+3. Select the edited file. The committed version is on the left, yours on the right, changed lines coloured, unchanged lines shown on both sides.
+4. `tab` into the diff, scroll to the bottom of a long file, and confirm the two sides stay in step.
+5. Press `→` a few times: both columns move together.
+6. Press `n` in a long file with one change far down — it jumps there.
+7. Delete a tracked file, reopen: it shows a committed left side and an empty right.
+8. Press `d` in a project with no changes — it says so rather than opening an empty split.
+9. In a Claude Code pane, press `Esc` — Claude Code interrupts, and tm does not steal it. `alt+esc` returns to the sidebar.
