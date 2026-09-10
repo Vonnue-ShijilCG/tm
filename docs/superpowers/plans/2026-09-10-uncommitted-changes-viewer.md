@@ -1968,7 +1968,14 @@ func (d *diffView) load() {
 		d.loadErr = "binary file"
 		return
 	}
-	old, _, err := git.ShowHEAD(d.dir, f.Path)
+	// A renamed file's committed content lives at the path it came FROM; the
+	// destination has nothing in HEAD. Without this a move would render as a
+	// whole-file addition, hiding whatever actually changed in it.
+	from := f.Path
+	if f.OldPath != "" {
+		from = f.OldPath
+	}
+	old, _, err := git.ShowHEAD(d.dir, from)
 	if err != nil {
 		d.loadErr = err.Error()
 		return
