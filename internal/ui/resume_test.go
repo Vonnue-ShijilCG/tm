@@ -264,9 +264,17 @@ func TestRestartIgnoresRemovedProjectsAndCorruptState(t *testing.T) {
 	if !strings.Contains(broken.notice, "could not read saved state") {
 		t.Errorf("corrupt state should produce a notice, got %q", broken.notice)
 	}
+	// The full message plus every key hint is wider than the window: the
+	// status bar now keeps the hints intact and truncates the label instead
+	// (hints matter more than the label), so only a truncated prefix of the
+	// notice need survive.
 	next, _ := broken.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
-	if !strings.Contains(next.(Model).View(), "could not read saved state") {
-		t.Error("notice should be visible in the status bar")
+	status := next.(Model).View()
+	if !strings.Contains(status, "could not read") {
+		t.Error("notice should still be visible, if truncated, in the status bar")
+	}
+	if !strings.Contains(status, "quit") {
+		t.Error("the key hints must not be pushed off by a long notice")
 	}
 }
 

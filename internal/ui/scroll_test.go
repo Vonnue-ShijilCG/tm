@@ -253,13 +253,14 @@ func TestWheelStillFindsThePaneUnderThePointerWithoutAnOuterFrame(t *testing.T) 
 			t.Errorf("pointer at (%d,%d) found the wrong pane", r.x, r.y)
 		}
 	}
-	// The leftmost pane starts immediately right of the sidebar: with no frame
-	// around the pane area there is no border cell to skip.
+	// The leftmost pane starts right of the sidebar and its one-cell gutter:
+	// with no frame around the pane area there is no border cell to skip, but
+	// the gutter still separates the sidebar from the first card.
 	minX := 1 << 30
 	for _, r := range rects {
 		minX = min(minX, r.x)
 	}
-	if minX != sidebarWidth {
-		t.Errorf("leftmost pane starts at x=%d, want %d (sidebar width, no outer border)", minX, sidebarWidth)
+	if minX != sidebarWidth+paneGutter {
+		t.Errorf("leftmost pane starts at x=%d, want %d (sidebar width + gutter, no outer border)", minX, sidebarWidth+paneGutter)
 	}
 }

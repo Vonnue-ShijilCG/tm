@@ -8,11 +8,15 @@ import (
 
 const sidebarWidth = 28
 
+// paneGutter is the blank column between the sidebar and the first card, so the
+// sidebar stands clear of the terminals the way the cards stand clear of each other.
+const paneGutter = 1
+
 var (
 	accent = lipgloss.Color("69")  // focused border / cursor: brighter than before, to carry against the black pane ground
 	dim    = lipgloss.Color("240") // hints and the status bar
 	edge   = lipgloss.Color("245") // unfocused border: lifted off dim so an inactive pane keeps a visible edge
-	bar    = lipgloss.Color("238") // unfocused pane header bar: a step above the black ground, so it reads as the pane's top edge
+	added  = lipgloss.Color("108") // a running terminal's status dot
 
 	// tm's own chrome sits on the same ground the panes are drawn on, taken
 	// from the same constant, so the sidebar, the gaps between splits and a
@@ -46,9 +50,11 @@ var (
 
 	hintStyle = lipgloss.NewStyle().Foreground(dim)
 
-	// Pane headers are filled bars: they are a pane's only top edge, so they
-	// are drawn across its full width whether it has focus or not.
-	paneBarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(bar)
+	// A pane's status dot: blue while it has focus, green while its process
+	// runs, dim once it has exited.
+	dotFocused = lipgloss.NewStyle().Foreground(accent)
+	dotRunning = lipgloss.NewStyle().Foreground(added)
+	dotExited  = lipgloss.NewStyle().Foreground(dim)
 
 	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 

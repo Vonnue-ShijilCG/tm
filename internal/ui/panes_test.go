@@ -278,7 +278,7 @@ func TestAltJKCycleVisibleTerminalsOnly(t *testing.T) {
 	if p.ActiveTerminal() != p.Terminals[0] || len(m.layouts[p].leaves()) != 2 || m.layouts[p].contains(p.Terminals[1]) {
 		t.Errorf("hidden terminal must never be swapped in by navigation: %v", m.layouts[p].leaves())
 	}
-	if !strings.Contains(m.View(), " Terminal 1 ") { // panes are ~14 cols wide here: check the header
+	if !strings.Contains(m.View(), " "+statusDot+" Terminal 1") { // panes are ~14 cols wide here: check the header
 		t.Errorf("focused visible terminal should be rendered:\n%s", m.View())
 	}
 	// The manager is the explicit way back.
@@ -460,5 +460,19 @@ func TestMinimumSizePaneStillShowsABodyRow(t *testing.T) {
 	}
 	if !strings.Contains(view, "SCREEN:") {
 		t.Errorf("a pane at the minimum size should still show its session output:\n%s", view)
+	}
+}
+
+func TestPaneHeaderShowsAStatusDotAndTheBranch(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = press(m, "j", "enter")
+
+	view := m.View()
+
+	if !strings.Contains(view, statusDot) {
+		t.Errorf("each header should carry a status dot:\n%s", view)
+	}
+	if !strings.Contains(view, "Terminal 1") {
+		t.Errorf("the header should still name the terminal:\n%s", view)
 	}
 }

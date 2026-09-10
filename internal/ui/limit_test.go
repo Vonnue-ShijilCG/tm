@@ -50,8 +50,11 @@ func TestEveryCreationKeyRespectsTheLimit(t *testing.T) {
 		if !strings.Contains(m.notice, "maximum terminals reached (2)") || !strings.Contains(m.notice, "max_terminals") || !strings.Contains(m.notice, "config.toml") {
 			t.Errorf("%v: notice = %q", keys, m.notice)
 		}
-		if !strings.Contains(m.View(), "maximum terminals reached") {
-			t.Errorf("%v: the status bar should show the message", keys)
+		// The key hints matter more than the label when both cannot fit (a
+		// t.TempDir() config path is far longer than a real one), so only a
+		// truncated prefix of the notice is guaranteed to survive.
+		if !strings.Contains(m.View(), "maximum terminal") {
+			t.Errorf("%v: the status bar should show the message: %s", keys, m.View())
 		}
 		m = press(m, "enter") // would submit a form, or re-enter the running project: nothing new either way
 		if len(*spawned) != 2 || len(p.Terminals) != 2 {

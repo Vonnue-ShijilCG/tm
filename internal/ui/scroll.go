@@ -103,7 +103,7 @@ func (m Model) paneScreenRects(p *workspace.Project) map[*workspace.Terminal]rec
 // screenRect translates a rectangle inside the main area (whose origin is
 // the top-left content cell of the main pane) to screen coordinates.
 func (m Model) screenRect(r rect) rect {
-	r.x += sidebarWidth + mainAreaStyle.GetBorderLeftSize()
+	r.x += sidebarWidth + paneGutter + mainAreaStyle.GetBorderLeftSize()
 	r.y += mainAreaStyle.GetBorderTopSize()
 	return r
 }

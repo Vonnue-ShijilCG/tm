@@ -513,7 +513,7 @@ func (m *Model) dropPane(p *workspace.Project, t *workspace.Terminal) {
 
 // mainArea is the region inside the main pane's frame.
 func (m Model) mainArea() rect {
-	return rect{0, 0, max(m.width-sidebarWidth-mainAreaStyle.GetHorizontalFrameSize(), 1),
+	return rect{0, 0, max(m.width-sidebarWidth-paneGutter-mainAreaStyle.GetHorizontalFrameSize(), 1),
 		max(m.height-statusHeight-mainAreaStyle.GetVerticalFrameSize(), 1)}
 }
 
@@ -977,7 +977,7 @@ func exitNotice(err error) string {
 // terminalSize is the screen size of every terminal: the main pane's inner
 // area.
 func (m Model) terminalSize() (cols, rows int) {
-	cols = m.width - sidebarWidth - mainAreaStyle.GetHorizontalFrameSize()
+	cols = m.width - sidebarWidth - paneGutter - mainAreaStyle.GetHorizontalFrameSize()
 	rows = m.height - statusHeight - mainAreaStyle.GetVerticalFrameSize()
 	return max(cols, 1), max(rows, 1)
 }
@@ -995,12 +995,13 @@ func (m Model) View() string {
 		return lipgloss.JoinVertical(lipgloss.Left, screen, m.viewStatus())
 	}
 	sidebar := framed(sidebarStyle, m.focus == focusSidebar, sidebarWidth, paneHeight).Render(m.viewSidebar())
-	mainPane := framed(mainAreaStyle, false, m.width-sidebarWidth, paneHeight).Render(m.viewMain())
+	style, focused := mainAreaStyle, false
 	if m.panel != nil || m.form != nil {
-		mainPane = framed(mainStyle, m.focus == focusMain, m.width-sidebarWidth, paneHeight).Render(m.viewMain())
+		style, focused = mainStyle, m.focus == focusMain
 	}
+	mainPane := framed(style, focused, m.width-sidebarWidth-paneGutter, paneHeight).Render(m.viewMain())
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, mainPane)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, gap(1, paneHeight), mainPane)
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.viewStatus())
 }
 
@@ -1014,29 +1015,46 @@ func (m Model) viewSidebar() string {
 		return b.String()
 	}
 
+	inner := sidebarWidth - sidebarStyle.GetHorizontalFrameSize()
 	for i, p := range m.ws.Projects {
-		// ● running workspace, ○ workspace that Enter will restore, otherwise blank.
-		line := "  " + p.Name
+		// ● running workspace, ○ workspace that Enter will restore, else blank.
+		marker := "  "
 		switch {
 		case len(p.Terminals) > 0:
-			line = "● " + p.Name
+			marker = "● "
 		case len(p.Saved) > 0:
-			line = "○ " + p.Name
+			marker = "○ "
 		}
+		style := lipgloss.NewStyle()
 		switch {
 		case i == m.cursor && m.focus == focusSidebar:
-			line = cursorStyle.Render(line + " ")
+			style = cursorStyle
 		case i == m.selected:
-			line = selectedStyle.Render(line)
+			style = selectedStyle
 		}
-		b.WriteString(line)
-		b.WriteByte('\n')
+		// Wrap rather than truncate: a project's name is how it is recognised,
+		// and the sidebar is narrow enough that real names do not fit. The
+		// marker is wrapped together with the name, so a continuation line
+		// starts flush at the margin instead of through an indent that would
+		// otherwise sit between two lines that split mid-word.
+		wrapped := strings.Split(ansi.Wrap(marker+p.Name, max(inner, 1), ""), "\n")
+		for j, part := range wrapped {
+			row := style
+			if j == len(wrapped)-1 { // only the row's last line fills the sidebar; an
+				// earlier line filled the same way would pad in a gap exactly where
+				// the wrap broke the name, so a wrapped name would no longer read
+				// back as one word once its line breaks are stripped.
+				row = row.Width(inner).MaxWidth(inner)
+			}
+			b.WriteString(row.Render(part))
+			b.WriteByte('\n')
+		}
 	}
 	return b.String()
 }
 
 func (m Model) viewMain() string {
-	innerWidth := m.width - sidebarWidth - mainStyle.GetHorizontalFrameSize()
+	innerWidth := m.width - sidebarWidth - paneGutter - mainStyle.GetHorizontalFrameSize()
 	if m.panel != nil {
 		return m.panel.view(innerWidth)
 	}
@@ -1113,7 +1131,7 @@ func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, f
 	innerW := max(r.w-cardStyle.GetHorizontalBorderSize(), 1)
 	innerH := max(r.h-cardStyle.GetVerticalBorderSize(), 1)
 
-	lines := []string{paneHeader(title, innerW, focused)}
+	lines := []string{paneHeader(title, innerW, focused, running(t))}
 	for i, line := range strings.Split(screen, "\n") {
 		if i >= innerH-paneHeaderHeight {
 			break
@@ -1123,20 +1141,47 @@ func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, f
 	return framed(cardStyle, focused, r.w, r.h).Render(strings.Join(lines, "\n"))
 }
 
-// paneHeader renders a pane's title bar, filled across the pane's full width
-// so that the bar is the pane's visible top edge.
-func paneHeader(title string, width int, focused bool) string {
-	return headerStyle(focused).Width(width).MaxWidth(width).Render(ansi.Truncate(" "+title+" ", width, "…"))
+// running reports whether t's process is still alive, without blocking: its
+// Done() channel is only ever closed on exit, so a select with a default
+// case tells the two apart in one step.
+func running(t *workspace.Terminal) bool {
+	select {
+	case <-t.Session.Done():
+		return false
+	default:
+		return true
+	}
 }
 
-// headerStyle is a pane's filled title bar. Both variants have a background,
-// because the bar is the pane's only top edge; the focused one is the accent
-// colour, which remains the single indicator of focus.
-func headerStyle(focused bool) lipgloss.Style {
-	if focused {
-		return cursorStyle
+// statusDot marks a pane's header with its terminal's state at a glance.
+const statusDot = "●"
+
+// paneHeader is a pane's title row: a status dot, the terminal's label, and
+// the branch it is on. It is no longer a filled bar — the card's border is
+// the pane's edge now, so the header only has to be readable.
+func paneHeader(title string, width int, focused bool, running bool) string {
+	dot := dotStyle(focused, running)
+	label := titleStyle.Render(title)
+	if !focused {
+		label = hintStyle.Render(title)
 	}
-	return paneBarStyle
+	line := " " + dot.Render(statusDot) + " " + label
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).Background(ground).
+		Render(ansi.Truncate(line, width, "…"))
+}
+
+// dotStyle picks the status dot's colour: accent while the pane has focus
+// (focus is the strongest signal, and wins even over a since-exited process),
+// green while its process still runs, dim once it has exited.
+func dotStyle(focused, running bool) lipgloss.Style {
+	switch {
+	case focused:
+		return dotFocused
+	case running:
+		return dotRunning
+	default:
+		return dotExited
+	}
 }
 
 // paneTitle is the terminal's identity as shown everywhere: `Terminal 2 ·
@@ -1243,7 +1288,13 @@ func (m Model) viewStatus() string {
 	if info != "" {
 		parts = append(parts, hintStyle.Render(info))
 	}
-	parts = append(parts, hints...)
-	line := ansi.Truncate(strings.Join(parts, "  •  "), width, "…")
+	left := strings.Join(parts, "  •  ")
+	right := strings.Join(hints, hintStyle.Render(" │ "))
+	space := width - ansi.StringWidth(left) - ansi.StringWidth(right)
+	if space < 1 { // too narrow for both: the hints matter more than the label
+		left = ansi.Truncate(left, max(width-ansi.StringWidth(right)-1, 0), "…")
+		space = 1
+	}
+	line := left + strings.Repeat(" ", space) + right
 	return statusStyle.Width(m.width).Render(line)
 }

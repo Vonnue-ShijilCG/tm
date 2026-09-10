@@ -6,12 +6,19 @@ import (
 	"testing"
 )
 
-// Terminal identity is shown once, on each pane's header, and the focused
-// pane's header is the only focus indicator. (Lip Gloss emits no colour
-// under go test, so the styles are compared, not rendered.)
+// Terminal identity is shown once, on each pane's header. Focus is carried
+// by the status dot's colour now, not by a filled bar; Lip Gloss emits no
+// colour under go test, so the dot's colour selection is asserted against
+// the style values directly, and the header text separately.
 func TestPaneHeadersAreTheOnlyTerminalIndicators(t *testing.T) {
-	if !reflect.DeepEqual(headerStyle(true), cursorStyle) || !reflect.DeepEqual(headerStyle(false), paneBarStyle) {
-		t.Error("the focused pane header must use the cursor highlight, others the muted bar")
+	if !reflect.DeepEqual(dotStyle(true, true), dotFocused) || !reflect.DeepEqual(dotStyle(true, false), dotFocused) {
+		t.Error("a focused pane's dot must always be the focus colour, running or not")
+	}
+	if !reflect.DeepEqual(dotStyle(false, true), dotRunning) {
+		t.Error("an unfocused, running pane's dot must be the running colour")
+	}
+	if !reflect.DeepEqual(dotStyle(false, false), dotExited) {
+		t.Error("an unfocused, exited pane's dot must be the exited colour")
 	}
 
 	m, _, p := twoPanes(t)
@@ -21,7 +28,7 @@ func TestPaneHeadersAreTheOnlyTerminalIndicators(t *testing.T) {
 		}
 		view := m.View()
 		panes := m.viewPanes(p, p.ActiveTerminal())
-		for _, header := range []string{" Terminal 1 ", " Terminal 2 "} {
+		for _, header := range []string{" " + statusDot + " Terminal 1", " " + statusDot + " Terminal 2"} {
 			if strings.Count(panes, header) != 1 {
 				t.Errorf("each visible terminal appears exactly once in the main view, as its pane header; %q found %d times:\n%s", header, strings.Count(panes, header), panes)
 			}
