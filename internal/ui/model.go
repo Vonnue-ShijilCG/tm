@@ -183,8 +183,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateTerminal routes keys while a terminal has focus. Only Esc and the
-// Alt shortcuts are handled here; everything else goes to the program.
+// updateTerminal routes keys while a terminal has focus. Only the Alt
+// shortcuts are handled here; everything else, including a lone Esc,
+// goes to the program.
 func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace.Terminal) (tea.Model, tea.Cmd) {
 	if m.deleting != nil {
 		return m.confirmDelete(msg, p)

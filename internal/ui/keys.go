@@ -10,13 +10,11 @@ import "github.com/charmbracelet/bubbles/key"
 // Conflict policy for terminal mode (summarised under Limitations in the
 // README): everything the user types reaches the program in the PTY —
 // letters, digits, Tab and Shift+Tab (completion), Ctrl+C/D/Z/\, plain
-// arrows, function keys. The application reserves exactly two kinds of key
-// while a terminal has focus: a lone Esc (back to the sidebar) and a small
-// set of Alt chords. Alt chords were chosen because bash, zsh and fish leave
-// them unbound by default; the known costs are Emacs' M-x/M-v, readline's
-// M-n and M--, and a lone Esc in Vim/less/Claude Code. Plain letters such as
-// s, m and z are application keys only in the sidebar and always PTY input in a
-// terminal.
+// arrows, function keys, and a lone Esc. The application reserves only Alt
+// chords while a terminal has focus. Alt chords were chosen because bash,
+// zsh and fish leave them unbound by default; the known costs are Emacs'
+// M-x/M-v and readline's M-n and M--. Plain letters such as s, m and z are
+// application keys only in the sidebar and always PTY input in a terminal.
 type keyMap struct {
 	// Sidebar.
 	Up         key.Binding
@@ -95,7 +93,7 @@ var keys = keyMap{
 	Help:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "help")),
 	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "quit")),
 
-	Sidebar:    key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "to sidebar")),
+	Sidebar:    key.NewBinding(key.WithKeys("alt+esc"), key.WithHelp("alt+esc", "to sidebar")),
 	NextTerm:   key.NewBinding(key.WithKeys("alt+j"), key.WithHelp("alt+j", "next terminal")),
 	PrevTerm:   key.NewBinding(key.WithKeys("alt+k"), key.WithHelp("alt+k", "prev terminal")),
 	NewTerm:    key.NewBinding(key.WithKeys("alt+n"), key.WithHelp("alt+n", "new terminal")),

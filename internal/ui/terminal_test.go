@@ -100,14 +100,14 @@ func TestEnterStartsShellInProjectDirAndFocusesTerminal(t *testing.T) {
 
 func TestEnterReturnsToExistingTerminal(t *testing.T) {
 	m, spawned := newTestModel(t)
-	m = press(m, "enter", "esc", "enter")
+	m = press(m, "enter", "alt+esc", "enter")
 	if len(*spawned) != 1 {
 		t.Fatalf("re-entering a project spawned %d sessions, want 1", len(*spawned))
 	}
 	if m.focus != focusMain {
 		t.Error("enter on a project with a terminal should focus it")
 	}
-	m = press(m, "esc", "j", "enter")
+	m = press(m, "alt+esc", "j", "enter")
 	if len(*spawned) != 2 || (*spawned)[1].dir != "/ws/ecommerce" {
 		t.Fatalf("second project should get its own session, got %d", len(*spawned))
 	}
@@ -272,14 +272,14 @@ func TestKeysGoToTerminalWhenFocused(t *testing.T) {
 	}
 }
 
-func TestEscReturnsToSidebarAndTabComesBack(t *testing.T) {
+func TestAltEscReturnsToSidebarAndTabComesBack(t *testing.T) {
 	m, spawned := newTestModel(t)
-	m = press(m, "enter", "esc")
+	m = press(m, "enter", "alt+esc")
 	if m.focus != focusSidebar {
-		t.Fatal("esc should return focus to the sidebar")
+		t.Fatal("alt+esc should return focus to the sidebar")
 	}
 	if len((*spawned)[0].keys) != 0 {
-		t.Errorf("esc must not be forwarded to the shell, got %+v", (*spawned)[0].keys)
+		t.Errorf("alt+esc must not be forwarded to the shell, got %+v", (*spawned)[0].keys)
 	}
 	m = press(m, "j")
 	if m.cursor != 1 {
@@ -293,7 +293,7 @@ func TestEscReturnsToSidebarAndTabComesBack(t *testing.T) {
 
 func TestResizePropagatesToAllTerminals(t *testing.T) {
 	m, spawned := newTestModel(t)
-	m = press(m, "enter", "alt+n", "enter", "esc", "j", "enter")
+	m = press(m, "enter", "alt+n", "enter", "alt+esc", "j", "enter")
 
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	m = next.(Model)
@@ -373,7 +373,7 @@ func TestLastTerminalExitReturnsToSidebarWithNotice(t *testing.T) {
 
 func TestQuitClosesAllTerminals(t *testing.T) {
 	m, spawned := newTestModel(t)
-	m = press(m, "enter", "alt+n", "enter", "esc", "j", "enter", "esc")
+	m = press(m, "enter", "alt+n", "enter", "alt+esc", "j", "enter", "alt+esc")
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if cmd == nil {
 		t.Fatal("q in sidebar should quit")
@@ -432,5 +432,26 @@ func TestKeyTranslation(t *testing.T) {
 				t.Errorf("keys = %+v, want %+v", f.keys, *tc.key)
 			}
 		})
+	}
+}
+
+func TestEscReachesTheProgramAndAltEscReturnsToTheSidebar(t *testing.T) {
+	m, spawned := newTestModel(t)
+	m = press(m, "j", "enter") // focus a terminal
+
+	m = press(m, "esc")
+
+	if m.focus != focusMain {
+		t.Error("esc must not leave the terminal; the program needs it")
+	}
+	s := (*spawned)[0]
+	if len(s.keys) != 1 || s.keys[0].Code != uv.KeyEscape {
+		t.Fatalf("program received %v, want a single Escape", s.keys)
+	}
+
+	m = press(m, "alt+esc")
+
+	if m.focus != focusSidebar {
+		t.Error("alt+esc should return to the sidebar")
 	}
 }

@@ -221,9 +221,9 @@ func TestMalformedLayoutDoesNotBreakStartupOrOpenAll(t *testing.T) {
 }
 
 func TestLayoutIsPerProject(t *testing.T) {
-	m, spawned := newTestModel(t)                  // three fake projects, plain terminals
-	m = press(m, "enter", "alt+v", "enter", "esc") // backend: two panes
-	m = press(m, "j", "enter", "esc")              // ecommerce: one terminal
+	m, spawned := newTestModel(t)                      // three fake projects, plain terminals
+	m = press(m, "enter", "alt+v", "enter", "alt+esc") // backend: two panes
+	m = press(m, "j", "enter", "alt+esc")              // ecommerce: one terminal
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if len(*spawned) != 3 {
 		t.Fatalf("setup spawned %d", len(*spawned))
@@ -233,8 +233,8 @@ func TestLayoutIsPerProject(t *testing.T) {
 	if backend.Layout == nil || len(backend.Layout.Leaves()) != 2 || ecommerce.Layout == nil || len(ecommerce.Layout.Leaves()) != 1 {
 		t.Fatalf("per-project layouts not restored: backend=%+v ecommerce=%+v", backend.Layout, ecommerce.Layout)
 	}
-	m2 = press(m2, "m", "a")             // backend
-	m2 = press(m2, "esc", "j", "m", "a") // ecommerce
+	m2 = press(m2, "m", "a")                 // backend
+	m2 = press(m2, "alt+esc", "j", "m", "a") // ecommerce
 	if len(*spawned2) != 3 {
 		t.Fatalf("spawned %d, want 3", len(*spawned2))
 	}

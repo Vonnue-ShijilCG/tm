@@ -103,7 +103,7 @@ func TestTypingIntoAScrolledPaneReturnsToLiveThenReachesTheShell(t *testing.T) {
 func TestWheelOverAnUnfocusedPaneScrollsThatPaneOnly(t *testing.T) {
 	m, spawned := newTestModel(t)
 	m = press(m, "j", "enter")
-	m = press(m, "esc")
+	m = press(m, "alt+esc")
 	m = makeTerminal(t, m, "v", "", "")
 	p, focused := m.activeTerminal()
 	if len(p.Terminals) != 2 {
@@ -133,13 +133,13 @@ func TestWheelOverAnUnfocusedPaneScrollsThatPaneOnly(t *testing.T) {
 
 func TestWheelWhileZoomedScrollsTheZoomedTerminal(t *testing.T) {
 	m, spawned := newTestModel(t)
-	m = press(m, "j", "enter", "esc")
+	m = press(m, "j", "enter", "alt+esc")
 	m = makeTerminal(t, m, "v", "", "")
 	_, focused := m.activeTerminal()
 	for _, s := range *spawned {
 		s.history = 100
 	}
-	m = press(m, "esc", "z")
+	m = press(m, "alt+esc", "z")
 	if !m.zoom {
 		t.Fatal("z in the sidebar should zoom")
 	}

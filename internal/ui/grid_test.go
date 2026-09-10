@@ -291,14 +291,14 @@ func TestManualSplitMakesLayoutManualAndAltNSplitsFocusedPane(t *testing.T) {
 
 func TestSidebarSplitKeysAreManualToo(t *testing.T) {
 	m, _, p := gridModel(t, 2, 100, 30)
-	m = press(m, "esc", "v", "enter") // sidebar v: beside the focused pane -> 1 | (2 | 3)
+	m = press(m, "alt+esc", "v", "enter") // sidebar v: beside the focused pane -> 1 | (2 | 3)
 	if automatic(m.layouts[p]) {
 		t.Error("sidebar v is a manual split")
 	}
 	checkTiling(t, m, p)
 
 	m, _, p = gridModel(t, 4, 100, 30)
-	m = press(m, "esc", "h", "enter") // sidebar h below terminal 4 -> a column 2 / (4 / 5) with 0.5 ratios
+	m = press(m, "alt+esc", "h", "enter") // sidebar h below terminal 4 -> a column 2 / (4 / 5) with 0.5 ratios
 	if automatic(m.layouts[p]) {
 		t.Error("sidebar h is a manual split")
 	}

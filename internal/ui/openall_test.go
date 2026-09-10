@@ -20,17 +20,17 @@ func savedProject(t *testing.T, withMissing bool) (Model, *[]*fakeSession, strin
 	t.Helper()
 	m, _, root := gitModel(t)
 	create := func(name, branch string) { m = makeTerminal(t, m, "n", name, branch) }
-	m = press(m, "esc")
+	m = press(m, "alt+esc")
 	create("Login", "develop")
-	m = press(m, "esc")
+	m = press(m, "alt+esc")
 	create("Payment", "feature/payment")
-	m = press(m, "esc")
+	m = press(m, "alt+esc")
 	create("Dev", "")
 	if withMissing {
-		m = press(m, "esc")
+		m = press(m, "alt+esc")
 		create("Gone", "feature/gone")
 	}
-	m = press(m, "esc")
+	m = press(m, "alt+esc")
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if withMissing {
 		if err := os.RemoveAll(filepath.Join(root, workspace.WorktreesDir, "app", "feature-gone")); err != nil {
@@ -95,7 +95,7 @@ func TestOpenAllReopensSavedTerminalsIntoPanes(t *testing.T) {
 	}
 
 	// Doing it again is a no-op: nothing to open, nothing duplicated.
-	m = press(m, "esc", "m", "a")
+	m = press(m, "alt+esc", "m", "a")
 	if len(*spawned) != 3 || m.panel == nil || !strings.Contains(m.panel.notice, "nothing to restore") {
 		t.Errorf("second open all should do nothing: spawned=%d panel=%v", len(*spawned), m.panel)
 	}
@@ -114,7 +114,7 @@ func TestOpenAllSkipsMissingWorktreeAndKeepsRunning(t *testing.T) {
 	if len(*spawned) != 1 {
 		t.Fatalf("setup: enter should open one terminal, got %d", len(*spawned))
 	}
-	m = press(m, "esc", "m", "a")
+	m = press(m, "alt+esc", "m", "a")
 
 	if len(*spawned) != 3 || len(app.Terminals) != 3 {
 		t.Fatalf("open all should add Payment and Dev only: spawned=%d terminals=%d", len(*spawned), len(app.Terminals))
@@ -169,7 +169,7 @@ func TestOpenAllOnSmallWindowHidesRatherThanShrinks(t *testing.T) {
 	if m.layouts[app].contains(hidden) || !m.layouts[app].contains(app.ActiveTerminal()) {
 		t.Error("alt+j/k must not reveal a hidden terminal")
 	}
-	m = press(m, "esc", "m")
+	m = press(m, "alt+esc", "m")
 	if !strings.Contains(m.View(), "hidden") {
 		t.Errorf("manager should list the hidden terminal:\n%s", m.View())
 	}

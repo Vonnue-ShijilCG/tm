@@ -52,9 +52,11 @@ tm
   project or in a worktree any tool created — opens a terminal there; a branch
   checked out nowhere gets a worktree, and a new branch also asks what it starts
   from. Leave the branch empty for a shell in the project itself.
-- `Esc` returns to the sidebar, `s` shows every shortcut, `q` quits.
-- Inside a terminal everything you type reaches the program. Only `Esc` and a
-  few `Alt` chords belong to `tm`; press `s` in the sidebar to see them.
+- `alt+esc` returns to the sidebar, `s` shows every shortcut, `q` quits. Plain
+  `Esc` goes to the program, so it interrupts Claude Code and leaves Vim's
+  insert mode as usual.
+- Inside a terminal everything you type reaches the program. Only a few
+  `Alt` chords belong to `tm`; press `s` in the sidebar to see them.
 
 ## Where things live
 
@@ -77,10 +79,10 @@ there runs the commands it contains.
 `make check` runs what CI runs: `gofmt`, `go vet`, `go test`, `go test
 -race`, `go build`.
 
-Limitations: Linux only. Inside a terminal `tm` reserves `Esc` and its
-`Alt` chords, so programs that bind those keys (Emacs `M-x`, readline
-`M-n`) lose them. While `tm` runs it owns the mouse, so selecting text in
-the host terminal needs `Shift` held.
+Limitations: Linux only. Inside a terminal `tm` reserves its `Alt` chords,
+so programs that bind those keys (Emacs `M-x`, readline `M-n`) lose them.
+While `tm` runs it owns the mouse, so selecting text in the host terminal
+needs `Shift` held.
 
 ## License
 

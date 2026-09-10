@@ -31,6 +31,7 @@ func TestTerminalModeKeyPolicy(t *testing.T) {
 		"left":      {Type: tea.KeyLeft},
 		"up":        {Type: tea.KeyUp},
 		"alt+f":     alt("f"), // an Alt chord tm does not use reaches the program (readline forward-word)
+		"esc":       {Type: tea.KeyEsc},
 	}
 	for name, msg := range passThrough {
 		m, spawned, _ := twoPanes(t)
@@ -51,7 +52,7 @@ func TestTerminalModeKeyPolicy(t *testing.T) {
 		"alt+v": alt("v"), "alt+h": alt("h"), "alt+z": alt("z"), "alt+=": alt("="), "alt+-": alt("-"),
 		"alt+left": {Type: tea.KeyLeft, Alt: true}, "alt+right": {Type: tea.KeyRight, Alt: true},
 		"alt+up": {Type: tea.KeyUp, Alt: true}, "alt+down": {Type: tea.KeyDown, Alt: true},
-		"esc": {Type: tea.KeyEsc},
+		"alt+esc": {Type: tea.KeyEsc, Alt: true},
 	}
 	for name, msg := range reserved {
 		m, spawned, _ := twoPanes(t)
@@ -70,7 +71,7 @@ func TestTerminalModeKeyPolicy(t *testing.T) {
 // sidebar mode, where no PTY has focus.
 func TestSidebarLettersAreApplicationKeys(t *testing.T) {
 	m, spawned, _ := twoPanes(t)
-	m = press(m, "esc")
+	m = press(m, "alt+esc")
 	m = press(m, "s")
 	if !m.help {
 		t.Error("s should open help in the sidebar")
@@ -83,7 +84,7 @@ func TestSidebarLettersAreApplicationKeys(t *testing.T) {
 	if !m.zoom {
 		t.Error("z should zoom in the sidebar")
 	}
-	m = press(m, "esc", "v")
+	m = press(m, "alt+esc", "v")
 	if m.form == nil || m.pendingSplit != splitSide {
 		t.Error("v should open the split-beside form in the sidebar")
 	}

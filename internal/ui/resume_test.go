@@ -83,7 +83,7 @@ func TestStateIsSavedOnCreateCloseAndQuit(t *testing.T) {
 	if len(*spawned) != 4 || len(m.ws.Projects[0].Terminals) != 2 || !hasLogin {
 		t.Fatalf("enter should restore both saved terminals, spawned=%d terminals=%+v (notice=%q)", len(*spawned), m.ws.Projects[0].Terminals, m.notice)
 	}
-	m = press(m, "esc")
+	m = press(m, "alt+esc")
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	if cmd == nil {
 		t.Fatal("q should quit")
@@ -104,7 +104,7 @@ func TestRestartOffersSavedTerminalsAndReopensThem(t *testing.T) {
 	if len(m.ws.Projects[0].Terminals) != 2 {
 		t.Fatalf("setup: expected 2 terminals, got %d", len(m.ws.Projects[0].Terminals))
 	}
-	m = press(m, "esc")
+	m = press(m, "alt+esc")
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}) // saves
 
 	m2, spawned := restartModel(t, m)
@@ -143,14 +143,14 @@ func TestRestartOffersSavedTerminalsAndReopensThem(t *testing.T) {
 	}
 
 	// Reopen the plain one; the panel then shows both as running.
-	m2 = press(m2, "esc", "m", "j", "enter")
+	m2 = press(m2, "alt+esc", "m", "j", "enter")
 	if len(*spawned) != 2 || (*spawned)[1].dir != app.Path {
 		t.Fatalf("enter on the saved plain terminal should start it in the project dir, spawned=%+v", *spawned)
 	}
 	if len(app.Saved) != 0 {
 		t.Errorf("Saved should be empty after reopening everything: %+v", app.Saved)
 	}
-	m2 = press(m2, "esc", "m")
+	m2 = press(m2, "alt+esc", "m")
 	if strings.Contains(m2.View(), "saved") || !strings.Contains(m2.View(), "Terminal 1 · ⎇ develop") || !strings.Contains(m2.View(), "visible") {
 		t.Errorf("manager should show both as visible running terminals:\n%s", m2.View())
 	}
@@ -169,7 +169,7 @@ func TestRestartOffersSavedTerminalsAndReopensThem(t *testing.T) {
 func TestRestartWithMissingWorktreeIsStaleNotRecreated(t *testing.T) {
 	m, _, root := gitModel(t)
 	m = makeTerminal(t, m, "n", "Login", "develop")
-	m = press(m, "esc")
+	m = press(m, "alt+esc")
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	wtPath := filepath.Join(root, workspace.WorktreesDir, "app", "develop")
 
@@ -208,7 +208,7 @@ func TestRestartWithMissingWorktreeIsStaleNotRecreated(t *testing.T) {
 	// Worktree removed from git entirely (git no longer lists it): stale row, forgettable.
 	m3, _, root3 := gitModel(t)
 	m3 = makeTerminal(t, m3, "n", "Gone", "develop")
-	m3 = press(m3, "esc")
+	m3 = press(m3, "alt+esc")
 	m3.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	gonePath := filepath.Join(root3, workspace.WorktreesDir, "app", "develop")
 	if err := os.RemoveAll(gonePath); err != nil {
@@ -247,7 +247,7 @@ func TestRestartWithMissingWorktreeIsStaleNotRecreated(t *testing.T) {
 
 func TestRestartIgnoresRemovedProjectsAndCorruptState(t *testing.T) {
 	m, _, root := gitModel(t)
-	m = press(m, "enter", "esc") // plain terminal in app
+	m = press(m, "enter", "alt+esc") // plain terminal in app
 	m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 
 	// Project disappeared: state mentions "app" but the workspace has no such project.
@@ -272,7 +272,7 @@ func TestRestartIgnoresRemovedProjectsAndCorruptState(t *testing.T) {
 
 func TestExitMessagesAfterQuitDoNotRewriteState(t *testing.T) {
 	m, spawned, root := gitModel(t)
-	m = press(m, "enter", "esc") // one running plain terminal
+	m = press(m, "enter", "alt+esc") // one running plain terminal
 	next, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
 	m = next.(Model)
 	if cmd == nil || !(*spawned)[0].closed {
@@ -293,7 +293,7 @@ func TestExitMessagesAfterQuitDoNotRewriteState(t *testing.T) {
 
 func TestManagerListsRunningPlainTerminals(t *testing.T) {
 	m, spawned := newTestModel(t)
-	m = press(m, "enter", "esc", "m") // one running plain terminal in backend
+	m = press(m, "enter", "alt+esc", "m") // one running plain terminal in backend
 	view := m.View()
 	if !strings.Contains(view, "Terminal 1") || !strings.Contains(view, "visible") || !strings.Contains(view, "t1") { // unnamed: the program's title stands in
 		t.Fatalf("manager should list the running plain terminal:\n%s", view)

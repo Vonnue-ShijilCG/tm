@@ -58,7 +58,7 @@ func TestAltXHidesWorktreeTerminalAndManagerRestoresItReusingTheWorktree(t *test
 		t.Error("navigation must not reveal the hidden terminal")
 	}
 
-	m = press(m, "esc", "m")
+	m = press(m, "alt+esc", "m")
 	view := m.View()
 	for _, want := range []string{"Manage terminals", "● Terminal 1 · main", "○ Terminal 2 · ⎇ develop", "hidden", "● Terminal 3 · ⎇ feature/payment", "visible"} {
 		if !strings.Contains(view, want) {
@@ -89,7 +89,7 @@ func TestManagerHideAndShowReturnPaneToItsSavedPlace(t *testing.T) {
 	rs := m.paneRects(p)
 	second := p.Terminals[1]
 	was := rs[second]
-	m = press(m, "esc", "m", "j", "h") // hide terminal 2 from the manager
+	m = press(m, "alt+esc", "m", "j", "h") // hide terminal 2 from the manager
 	if m.panel == nil || m.layouts[p].contains(second) || len(m.layouts[p].leaves()) != 3 || second.Session.(*fakeSession).closed {
 		t.Fatalf("h should hide terminal 2 and keep it running: visible=%d", len(m.layouts[p].leaves()))
 	}
@@ -136,7 +136,7 @@ func TestManagerEnterRestoresOnlyTheSelectedSavedTerminal(t *testing.T) {
 	if m.focus != focusMain || m.panel != nil || !m.layouts[app].isLeaf() {
 		t.Error("the restored terminal is focused as the only pane")
 	}
-	m = press(m, "esc", "m", "j", "j", "enter") // rows: Payment (running), Login, Dev -> Dev
+	m = press(m, "alt+esc", "m", "j", "j", "enter") // rows: Payment (running), Login, Dev -> Dev
 	if len(app.Terminals) != 2 || app.Terminals[1].Name != "Dev" || len(app.Saved) != 1 || app.Saved[0].Name != "Login" {
 		t.Errorf("Dev should be added alone: running=%+v saved=%+v", app.Terminals, app.Saved)
 	}
@@ -144,8 +144,8 @@ func TestManagerEnterRestoresOnlyTheSelectedSavedTerminal(t *testing.T) {
 
 func TestManagerIsScopedToOneProject(t *testing.T) {
 	m, _ := newTestModel(t)
-	m = press(m, "enter", "alt+n", "enter", "esc") // backend: 2
-	m = press(m, "j", "enter", "esc")              // ecommerce: 1
+	m = press(m, "enter", "alt+n", "enter", "alt+esc") // backend: 2
+	m = press(m, "j", "enter", "alt+esc")              // ecommerce: 1
 	m = press(m, "k", "m")
 	if v := m.View(); m.panel.project != m.ws.Projects[0] || !strings.Contains(v, "Terminal 1") || !strings.Contains(v, "Terminal 2") {
 		t.Errorf("backend manager wrong:\n%s", v)
@@ -163,7 +163,7 @@ func TestManagerNewUsesTheFormAndRespectsTheLimit(t *testing.T) {
 	write := configFile(t)
 	write("max_terminals = 2\n")
 	m, spawned := newTestModel(t)
-	m = press(m, "enter", "esc", "m", "n")
+	m = press(m, "enter", "alt+esc", "m", "n")
 	if m.form == nil || m.panel != nil {
 		t.Fatal("n in the manager should open the new-terminal form")
 	}
@@ -171,7 +171,7 @@ func TestManagerNewUsesTheFormAndRespectsTheLimit(t *testing.T) {
 	if len(*spawned) != 2 {
 		t.Fatalf("form should create the second terminal, spawned=%d", len(*spawned))
 	}
-	m = press(m, "esc", "m", "n")
+	m = press(m, "alt+esc", "m", "n")
 	if m.form != nil || m.panel == nil || !strings.Contains(m.panel.notice, "maximum terminals reached (2)") {
 		t.Errorf("at the limit the manager stays open and explains: form=%v panel=%+v", m.form != nil, m.panel)
 	}
@@ -202,7 +202,7 @@ func TestManagerDeleteIsSeparateFromHide(t *testing.T) {
 	m, spawned, p := repoWithThree(t)
 	login := p.Terminals[1]
 	wtPath := login.Worktree.Path
-	m = press(m, "esc", "m", "j", "d")
+	m = press(m, "alt+esc", "m", "j", "d")
 	if !m.panel.confirm || !strings.Contains(m.View(), "Delete Terminal 2 and its worktree \"develop\"") || !strings.Contains(m.View(), "worktree is clean") {
 		t.Fatalf("d should ask first and say the worktree goes too:\n%s", m.View())
 	}
@@ -235,7 +235,7 @@ func TestManagerDeleteIsSeparateFromHide(t *testing.T) {
 func TestUnusedWorktreeCleanupFromManager(t *testing.T) {
 	m, _, p := repoWithThree(t)
 	wtPath := orphanWorktree(t, m, p, "old-login", "feature/old-login")
-	m = press(m, "esc", "m")
+	m = press(m, "alt+esc", "m")
 	if len(m.panel.rows) != 4 || m.panel.rows[3].worktree == nil || m.panel.rows[3].worktree.Path != wtPath {
 		t.Fatalf("expected three terminals then one unused worktree: %+v", m.panel.rows)
 	}
@@ -349,7 +349,7 @@ func TestWorktreeTerminalsAreIsolatedFromTheCheckout(t *testing.T) {
 	for p.ActiveTerminal() != login {
 		m = press(m, "alt+k")
 	}
-	m = press(m, "alt+x", "esc", "m", "j", "enter")
+	m = press(m, "alt+x", "alt+esc", "m", "j", "enter")
 	if login.Worktree.Path != loginDir || (*spawned)[1].dir != loginDir || len(*spawned) != 3 {
 		t.Error("show must reuse the very same worktree")
 	}

@@ -68,7 +68,7 @@ func TestAPaneWithoutACommandKeepsItsNumber(t *testing.T) {
 
 func TestFormCreatesATerminalWithTheTypedCommand(t *testing.T) {
 	m, spawned := newTestModel(t)
-	m = press(m, "j", "enter", "esc")
+	m = press(m, "j", "enter", "alt+esc")
 
 	// newTestModel's projects are not Git repositories, so the form has no
 	// Branch field and opens with focus already on Command.
@@ -93,7 +93,7 @@ func TestFormCreatesATerminalWithTheTypedCommand(t *testing.T) {
 
 func TestCommandFieldAcceptsLongerTextThanBranch(t *testing.T) {
 	m, _ := newTestModel(t)
-	m = press(m, "j", "enter", "esc", "n")
+	m = press(m, "j", "enter", "alt+esc", "n")
 
 	long := strings.Repeat("a", 200)
 	m = typeText(m, long)
@@ -108,7 +108,7 @@ func TestManagerLabelsARowByItsCommand(t *testing.T) {
 	_, term := m.activeTerminal()
 	term.Command = "npm run dev"
 
-	m = press(m, "esc", "m")
+	m = press(m, "alt+esc", "m")
 	view := m.View()
 	if !strings.Contains(view, "npm run dev") {
 		t.Errorf("manager row should show the command:\n%s", view)
@@ -127,7 +127,7 @@ func TestManagerSavedRowLabelEscapesControlChars(t *testing.T) {
 	// a running terminal's.
 	p.Saved = append(p.Saved, workspace.SavedTerminal{Command: "deploy\x1b[2Jrm -rf /"})
 
-	m = press(m, "esc", "m")
+	m = press(m, "alt+esc", "m")
 	view := m.View()
 	if strings.Contains(view, "\x1b[2J") {
 		t.Errorf("a saved row must not render a raw ESC sequence from the command:\n%q", view)
