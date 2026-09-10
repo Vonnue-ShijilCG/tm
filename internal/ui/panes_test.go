@@ -32,17 +32,17 @@ func TestAltVCreatesSideBySidePanes(t *testing.T) {
 	}
 	for i, s := range *spawned {
 		r := rs[p.Terminals[i]]
-		if s.cols != r.w || s.rows != r.h-paneHeaderHeight {
-			t.Errorf("terminal %d session %dx%d, want %dx%d", i+1, s.cols, s.rows, r.w, r.h-paneHeaderHeight)
+		if s.cols != sessionCols(r) || s.rows != sessionRows(r) {
+			t.Errorf("terminal %d session %dx%d, want %dx%d", i+1, s.cols, s.rows, sessionCols(r), sessionRows(r))
 		}
 	}
 	if p.ActiveTerminal() != p.Terminals[1] || m.focus != focusMain {
 		t.Error("the new terminal should be focused")
 	}
 	view := m.View()
-	for _, want := range []string{"SCREEN:/ws/backend:t1", "SCREEN:/ws/backend:t2", verticalDivider} {
+	for _, want := range []string{"SCREEN:/ws/backend:t1", "SCREEN:/ws/backend:t2"} {
 		if !strings.Contains(view, want) {
-			t.Errorf("both terminals should be visible with a divider, missing %q:\n%s", want, view)
+			t.Errorf("both terminals should be visible, missing %q:\n%s", want, view)
 		}
 	}
 	if lines := strings.Count(view, "\n") + 1; lines > m.height {
@@ -59,9 +59,6 @@ func TestAltHCreatesStackedPanes(t *testing.T) {
 	area := m.mainArea()
 	if a.x != b.x || a.w != area.w || b.w != area.w || a.h+b.h+1 != area.h || b.y != a.y+a.h+1 {
 		t.Errorf("panes should be stacked over the area %+v: a=%+v b=%+v", area, a, b)
-	}
-	if !strings.Contains(m.View(), horizontalDivider) {
-		t.Error("stacked panes should show a horizontal divider")
 	}
 }
 
@@ -184,7 +181,7 @@ func TestClosingFocusedPaneLeavesOthersRunning(t *testing.T) {
 		t.Errorf("pane should be removed, leaving the other: %v", m.layouts[p].leaves())
 	}
 	area := m.mainArea()
-	if s := (*spawned)[0]; s.cols != area.w || s.rows != area.h-paneHeaderHeight {
+	if s := (*spawned)[0]; s.cols != sessionCols(area) || s.rows != sessionRows(area) {
 		t.Errorf("remaining pane should fill the area again, got %dx%d", s.cols, s.rows)
 	}
 	if m.focus != focusMain || p.ActiveTerminal() != p.Terminals[0] {
@@ -204,11 +201,12 @@ func TestResizeGrowsAndShrinksFocusedPane(t *testing.T) {
 	if after <= before {
 		t.Fatalf("alt+= should widen the focused pane: %d -> %d", before, after)
 	}
-	if s := (*spawned)[1]; s.cols != after {
-		t.Errorf("session should be resized with its pane: %d vs %d", s.cols, after)
+	if s := (*spawned)[1]; s.cols != sessionCols(rect{w: after}) {
+		t.Errorf("session should be resized with its pane: %d vs %d", s.cols, sessionCols(rect{w: after}))
 	}
-	if s := (*spawned)[0]; s.cols != m.mainArea().w-after-1 {
-		t.Errorf("the other session should shrink to %d, got %d", m.mainArea().w-after-1, s.cols)
+	otherWant := sessionCols(rect{w: m.mainArea().w - after - 1})
+	if s := (*spawned)[0]; s.cols != otherWant {
+		t.Errorf("the other session should shrink to %d, got %d", otherWant, s.cols)
 	}
 	m = press(m, "alt+-", "alt+-")
 	if w := m.paneRects(p)[p.Terminals[1]].w; w >= before {
@@ -232,8 +230,8 @@ func TestWindowResizeRecomputesPanes(t *testing.T) {
 		total := 0
 		for i, s := range *spawned {
 			r := rs[p.Terminals[i]]
-			if s.cols != r.w || s.rows != r.h-paneHeaderHeight {
-				t.Errorf("%dx%d: terminal %d session %dx%d, want %dx%d", size[0], size[1], i+1, s.cols, s.rows, r.w, r.h-paneHeaderHeight)
+			if s.cols != sessionCols(r) || s.rows != sessionRows(r) {
+				t.Errorf("%dx%d: terminal %d session %dx%d, want %dx%d", size[0], size[1], i+1, s.cols, s.rows, sessionCols(r), sessionRows(r))
 			}
 			if r.x+r.w > area.w || r.y+r.h > area.h {
 				t.Errorf("%dx%d: pane %+v exceeds area %+v", size[0], size[1], r, area)
@@ -339,6 +337,44 @@ func TestFramesFillTheWindowExactly(t *testing.T) {
 					break
 				}
 			}
+		}
+	}
+}
+
+func TestEachTerminalIsItsOwnCard(t *testing.T) {
+	m, spawned := newTestModel(t)
+	m = press(m, "j", "enter")
+	m = makeTerminal(t, m, "alt+v", "", "") // split beside the first
+
+	view := m.View()
+
+	// Two cards means two card tops on the same screen row, separated by a gap.
+	if n := strings.Count(view, "╭"); n < 2 {
+		t.Errorf("want a rounded top-left per terminal, found %d:\n%s", n, view)
+	}
+	// The heavy dividers are gone: cards are separated by space, not by a rule.
+	if strings.Contains(view, "┃") || strings.Contains(view, "━") {
+		t.Errorf("dividers should be replaced by gaps between cards:\n%s", view)
+	}
+
+	// A card spends one cell per side on its border, so the session inside it
+	// is narrower than the pane rect by exactly that much.
+	rects := m.paneRects(m.selectedProject())
+	for term, r := range rects {
+		var s *fakeSession
+		for _, f := range *spawned {
+			if f == term.Session {
+				s = f
+			}
+		}
+		if s == nil {
+			t.Fatal("no session for terminal")
+		}
+		wantCols := r.w - cardStyle.GetHorizontalBorderSize()
+		wantRows := r.h - cardStyle.GetVerticalBorderSize() - paneHeaderHeight
+		if s.cols != wantCols || s.rows != wantRows {
+			t.Errorf("session sized %dx%d, want %dx%d (pane %dx%d minus its own border and header)",
+				s.cols, s.rows, wantCols, wantRows, r.w, r.h)
 		}
 	}
 }

@@ -76,7 +76,7 @@ func TestLayoutSurvivesRestartThroughOpenAll(t *testing.T) {
 	}
 	for term, r := range m2.paneRects(app) {
 		s := term.Session.(*fakeSession)
-		if s.cols != r.w || s.rows != r.h-paneHeaderHeight {
+		if s.cols != sessionCols(r) || s.rows != sessionRows(r) {
 			t.Errorf("%s not resized to its pane", term.Name)
 		}
 	}

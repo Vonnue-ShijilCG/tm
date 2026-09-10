@@ -77,8 +77,8 @@ func TestOpenAllReopensSavedTerminalsIntoPanes(t *testing.T) {
 		if r.w < minPaneCols || r.h < minPaneRows {
 			t.Errorf("pane for %s too small: %+v", term.Name, r)
 		}
-		if s := term.Session.(*fakeSession); s.cols != r.w || s.rows != r.h-paneHeaderHeight {
-			t.Errorf("%s session %dx%d, want %dx%d", term.Name, s.cols, s.rows, r.w, r.h-paneHeaderHeight)
+		if s := term.Session.(*fakeSession); s.cols != sessionCols(r) || s.rows != sessionRows(r) {
+			t.Errorf("%s session %dx%d, want %dx%d", term.Name, s.cols, s.rows, sessionCols(r), sessionRows(r))
 		}
 	}
 	if !m.layouts[app].contains(app.ActiveTerminal()) {

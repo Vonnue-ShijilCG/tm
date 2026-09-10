@@ -349,7 +349,7 @@ func TestWindowResizeRescalesWithoutChangingOrientation(t *testing.T) {
 		area := m.mainArea()
 		for i, s := range *spawned {
 			r := rs[p.Terminals[i]]
-			if s.cols != r.w || s.rows != r.h-paneHeaderHeight {
+			if s.cols != sessionCols(r) || s.rows != sessionRows(r) {
 				t.Errorf("%dx%d: session %d not resized to its pane", size[0], size[1], i+1)
 			}
 			if r.x+r.w > area.w || r.y+r.h > area.h {

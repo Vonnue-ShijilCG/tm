@@ -12,7 +12,6 @@ var (
 	accent = lipgloss.Color("69")  // focused border / cursor: brighter than before, to carry against the black pane ground
 	dim    = lipgloss.Color("240") // hints and the status bar
 	edge   = lipgloss.Color("245") // unfocused border: lifted off dim so an inactive pane keeps a visible edge
-	rule   = lipgloss.Color("245") // dividers between panes
 	bar    = lipgloss.Color("238") // unfocused pane header bar: a step above the black ground, so it reads as the pane's top edge
 
 	// tm's own chrome sits on the same ground the panes are drawn on, taken
@@ -20,12 +19,15 @@ var (
 	// pane's own output read as one surface rather than three.
 	ground = lipgloss.Color(terminal.PaneGround)
 
-	// The main pane has no padding so the emulated screen fills it exactly.
-	// The border is thick to match the dividers between split panes, which are
-	// heavy box-drawing characters; a light frame around heavy dividers looks
-	// like two different tools drew the screen.
-	mainStyle    = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(edge).Background(ground)
+	// Thin and rounded: with every pane on its own ground and its own frame,
+	// separation comes from the card edges and the gaps between them, not
+	// from the weight of a line.
+	mainStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(edge).Background(ground)
 	sidebarStyle = mainStyle.Padding(0, 1)
+
+	// cardStyle is one terminal's box. It has no padding so the emulated
+	// screen meets its border exactly.
+	cardStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(edge).Background(ground)
 
 	titleStyle = lipgloss.NewStyle().Bold(true)
 
@@ -41,8 +43,6 @@ var (
 	// Pane headers are filled bars: they are a pane's only top edge, so they
 	// are drawn across its full width whether it has focus or not.
 	paneBarStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(bar)
-
-	dividerStyle = lipgloss.NewStyle().Foreground(rule)
 
 	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
 

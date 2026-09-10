@@ -535,15 +535,25 @@ func (m *Model) applyLayout(p *workspace.Project) {
 	}
 	if t := p.ActiveTerminal(); m.zoom && t != nil && p == m.selectedProject() {
 		area := m.mainArea()
-		t.Session.Resize(max(area.w, 1), max(area.h-paneHeaderHeight, 1))
+		t.Session.Resize(sessionCols(area), sessionRows(area))
 		return
 	}
 	for t, r := range m.paneRects(p) {
-		t.Session.Resize(max(r.w, 1), max(r.h-paneHeaderHeight, 1))
+		t.Session.Resize(sessionCols(r), sessionRows(r))
 	}
 }
 
 const paneHeaderHeight = 1
+
+// sessionCols and sessionRows are the cells a terminal actually gets: its
+// pane, minus the card border it is drawn inside and the header row.
+func sessionCols(r rect) int {
+	return max(r.w-cardStyle.GetHorizontalBorderSize(), 1)
+}
+
+func sessionRows(r rect) int {
+	return max(r.h-cardStyle.GetVerticalBorderSize()-paneHeaderHeight, 1)
+}
 
 // updateSidebar handles navigation and program-level keys.
 func (m Model) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -1075,40 +1085,40 @@ func (m Model) renderPane(p *workspace.Project, n *pane, r rect, active *workspa
 		wa := splitSize(r.w, n.ratio, minPaneCols)
 		left := m.renderPane(p, n.a, rect{r.x, r.y, wa, r.h}, active)
 		right := m.renderPane(p, n.b, rect{r.x + wa + 1, r.y, r.w - wa - 1, r.h}, active)
-		divider := dividerStyle.Render(strings.TrimRight(strings.Repeat(verticalDivider+"\n", r.h), "\n"))
-		return lipgloss.JoinHorizontal(lipgloss.Top, left, divider, right)
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, gap(1, r.h), right)
 	}
 	ha := splitSize(r.h, n.ratio, minPaneRows)
 	top := m.renderPane(p, n.a, rect{r.x, r.y, r.w, ha}, active)
 	bottom := m.renderPane(p, n.b, rect{r.x, r.y + ha + 1, r.w, r.h - ha - 1}, active)
-	divider := dividerStyle.Render(strings.Repeat(horizontalDivider, r.w))
-	return lipgloss.JoinVertical(lipgloss.Left, top, divider, bottom)
+	return lipgloss.JoinVertical(lipgloss.Left, top, gap(r.w, 1), bottom)
 }
 
-// renderLeaf draws one terminal into exactly r.w x r.h cells.
+// gap is the empty space between two cards, painted so the ground shows
+// through rather than the host terminal's own background.
+func gap(w, h int) string {
+	return lipgloss.NewStyle().Background(ground).Width(w).Height(h).Render("")
+}
+
+// renderLeaf draws one terminal as its own card, filling exactly r.w x r.h
+// cells including the card's border.
 func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, focused bool) string {
 	title, screen := m.paneTitle(p, t), t.Session.Render(focused)
 	if off := m.scroll[t]; off > 0 {
 		title += fmt.Sprintf(" %s %d", scrollMark, off)
 		screen = t.Session.RenderScrolled(off)
 	}
-	header := paneHeader(title, r.w, focused)
-	lines := []string{header}
+	innerW := max(r.w-cardStyle.GetHorizontalBorderSize(), 1)
+	innerH := max(r.h-cardStyle.GetVerticalBorderSize(), 1)
+
+	lines := []string{paneHeader(title, innerW, focused)}
 	for i, line := range strings.Split(screen, "\n") {
-		if i >= r.h-paneHeaderHeight {
+		if i >= innerH-paneHeaderHeight {
 			break
 		}
-		lines = append(lines, ansi.Truncate(line, r.w, ""))
+		lines = append(lines, ansi.Truncate(line, innerW, ""))
 	}
-	return lipgloss.NewStyle().Width(r.w).MaxWidth(r.w).Height(r.h).MaxHeight(r.h).Render(strings.Join(lines, "\n"))
+	return framed(cardStyle, focused, r.w, r.h).Render(strings.Join(lines, "\n"))
 }
-
-// Heavy dividers separate panes; with filled headers they make each pane's
-// extent obvious without counting cells.
-const (
-	verticalDivider   = "┃"
-	horizontalDivider = "━"
-)
 
 // paneHeader renders a pane's title bar, filled across the pane's full width
 // so that the bar is the pane's visible top edge.

@@ -31,8 +31,8 @@ func TestZoomFillsAreaAndUnzoomRestoresLayout(t *testing.T) {
 		t.Fatal("alt+z should zoom")
 	}
 	area := m.mainArea()
-	if s := (*spawned)[2]; s.cols != area.w || s.rows != area.h-paneHeaderHeight {
-		t.Errorf("zoomed session should fill the area: %dx%d vs %dx%d", s.cols, s.rows, area.w, area.h-paneHeaderHeight)
+	if s := (*spawned)[2]; s.cols != sessionCols(area) || s.rows != sessionRows(area) {
+		t.Errorf("zoomed session should fill the area: %dx%d vs %dx%d", s.cols, s.rows, sessionCols(area), sessionRows(area))
 	}
 	view := m.View()
 	if !strings.Contains(view, "SCREEN:/ws/backend:t3") || strings.Contains(view, "SCREEN:/ws/backend:t1") || strings.Contains(view, "SCREEN:/ws/backend:t2") {
@@ -83,7 +83,7 @@ func TestZoomFollowsFocus(t *testing.T) {
 		t.Fatalf("focus change while zoomed should keep zoom and move it: zoom=%v active=%v", m.zoom, p.ActiveTerminal())
 	}
 	area := m.mainArea()
-	if s := (*spawned)[0]; s.cols != area.w || s.rows != area.h-paneHeaderHeight {
+	if s := (*spawned)[0]; s.cols != sessionCols(area) || s.rows != sessionRows(area) {
 		t.Errorf("newly focused terminal should now fill the area: %dx%d", s.cols, s.rows)
 	}
 	if v := m.View(); !strings.Contains(v, "SCREEN:/ws/backend:t1") || strings.Contains(v, "SCREEN:/ws/backend:t2") {

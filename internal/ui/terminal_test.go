@@ -86,9 +86,9 @@ func TestEnterStartsShellInProjectDirAndFocusesTerminal(t *testing.T) {
 	if s.dir != "/ws/ecommerce" {
 		t.Errorf("shell dir = %q, want /ws/ecommerce", s.dir)
 	}
-	area := m.mainArea() // a single pane fills the main area, minus its header row
-	if s.cols != area.w || s.rows != area.h-paneHeaderHeight || area.w <= 0 || area.h <= 1 {
-		t.Errorf("session size %dx%d, want %dx%d", s.cols, s.rows, area.w, area.h-paneHeaderHeight)
+	area := m.mainArea() // a single pane fills the main area, minus its card border and header row
+	if s.cols != sessionCols(area) || s.rows != sessionRows(area) || area.w <= 0 || area.h <= 1 {
+		t.Errorf("session size %dx%d, want %dx%d", s.cols, s.rows, sessionCols(area), sessionRows(area))
 	}
 	if m.focus != focusMain {
 		t.Error("terminal should be focused after enter")
@@ -304,15 +304,15 @@ func TestResizePropagatesToAllTerminals(t *testing.T) {
 	for _, p := range m.ws.Projects {
 		for term, r := range m.paneRects(p) {
 			s := term.Session.(*fakeSession)
-			if s.cols != r.w || s.rows != r.h-paneHeaderHeight {
-				t.Errorf("terminal %d size %dx%d, want pane %dx%d", term.Num, s.cols, s.rows, r.w, r.h-paneHeaderHeight)
+			if s.cols != sessionCols(r) || s.rows != sessionRows(r) {
+				t.Errorf("terminal %d size %dx%d, want pane %dx%d", term.Num, s.cols, s.rows, sessionCols(r), sessionRows(r))
 			}
 		}
 	}
 	// The selected project's single pane fills the whole area.
 	area := m.mainArea()
-	if s := (*spawned)[2]; s.cols != area.w || s.rows != area.h-paneHeaderHeight {
-		t.Errorf("lone pane size %dx%d, want %dx%d", s.cols, s.rows, area.w, area.h-paneHeaderHeight)
+	if s := (*spawned)[2]; s.cols != sessionCols(area) || s.rows != sessionRows(area) {
+		t.Errorf("lone pane size %dx%d, want %dx%d", s.cols, s.rows, sessionCols(area), sessionRows(area))
 	}
 }
 
