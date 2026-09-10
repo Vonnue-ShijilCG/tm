@@ -84,9 +84,16 @@ func (d *diffView) load() {
 	if f.OldPath != "" {
 		from = f.OldPath
 	}
-	old, _, err := git.ShowHEAD(d.dir, from)
+	old, found, err := git.ShowHEAD(d.dir, from)
 	if err != nil {
 		d.loadErr = err.Error()
+		return
+	}
+	// ShowHEAD folds every git error into "not in HEAD". Only a new file is
+	// allowed that answer: for any other, aligning against an empty left side
+	// would draw a plausible whole-file addition where a failure belongs.
+	if !found && f.Kind != git.Added {
+		d.loadErr = fmt.Sprintf("cannot read %s from HEAD", from)
 		return
 	}
 	fresh := ""
@@ -203,7 +210,12 @@ func side(num int, text string, changed bool, style lipgloss.Style, width int) s
 	// Tabs become spaces before the line is cut: Truncate counts a tab as no
 	// cells while Render draws it as four, so a line cut with tabs still in
 	// it comes out wider than its column and shoves the other column along.
-	text = strings.ReplaceAll(text, "\t", "    ")
+	// Every other control character goes, after the tabs so indentation
+	// survives: a CRLF file keeps a \r on every line that Truncate, Width
+	// and pad all count as nothing, yet drawn it returns the cursor to column
+	// 0 and the right column lands on the file list; an escape sequence in a
+	// file would be executed by the terminal rather than shown.
+	text = stripControlChars(strings.ReplaceAll(text, "\t", "    "))
 	body := ansi.Truncate(text, max(width-gutterWidth, 0), "")
 	return pad(hintStyle.Render(gutter)+style.Render(" "+body), width)
 }

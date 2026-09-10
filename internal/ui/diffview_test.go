@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/Vonnue-ShijilCG/tm/internal/git"
 	"github.com/Vonnue-ShijilCG/tm/internal/workspace"
 )
 
@@ -465,5 +466,73 @@ func TestATabInACodeLineDoesNotWidenItsColumn(t *testing.T) {
 		if w := lipgloss.Width(line); w > m.width {
 			t.Errorf("line %d is %d cells wide in a %d-column window", i, w, m.width)
 		}
+	}
+}
+
+// splitLines splits on \n only, so every line of a CRLF file keeps a trailing
+// \r that Truncate, Width and pad all count as zero cells; drawn, it sends the
+// terminal back to column 0 and the right column lands on the file list. An
+// escape sequence in a file would likewise be executed rather than shown. A
+// tab is a control character too, but one that must survive as indentation.
+func TestControlCharactersInAFileAreNotDrawn(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := commitFile(t, root, "win.txt", "a\r\nb\r\n")
+	if err := os.WriteFile(filepath.Join(app, "win.txt"), []byte("a\r\nB \x1b]0;title\x07 here\r\n\tindented\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+
+	view := m.View()
+	if strings.Contains(view, "\r") {
+		t.Errorf("a carriage return from the file reached the screen:\n%q", view)
+	}
+	if strings.Contains(view, "\x1b]") {
+		t.Errorf("an OSC sequence from the file reached the screen:\n%q", view)
+	}
+	if row := plainLine(view, "here"); !strings.Contains(row, "2 b") || !strings.Contains(row, "2 B ") {
+		t.Errorf("the line with the escape should still be shown, aligned with its counterpart, got %q", row)
+	}
+	if row := plainLine(view, "indented"); !strings.Contains(row, "    indented") {
+		t.Errorf("a tab should still indent its line, got %q", row)
+	}
+}
+
+// The right column starts at the same cell on every row whatever the left
+// side holds; that is what makes the two columns readable as columns.
+func TestTheRightColumnStartsAtTheSameCellOnEveryRow(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := commitFile(t, root, "f.txt", "x\na much longer committed line\n")
+	if err := os.WriteFile(filepath.Join(app, "f.txt"), []byte("R1\nR2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+
+	view := m.View()
+	start := func(marker string) int {
+		row := plainLine(view, marker)
+		return lipgloss.Width(row[:strings.Index(row, marker)])
+	}
+	if a, b := start("R1"), start("R2"); a != b {
+		t.Errorf("right column starts at cell %d on one row and %d on the next:\n%s", a, b, ansi.Strip(view))
+	}
+}
+
+// ShowHEAD folds every git error into "not in HEAD". For a file that is not
+// new that answer is a failure, and aligning against an empty left side would
+// render it as a plausible whole-file addition.
+func TestAModifiedFileMissingFromHEADIsReportedNotShownAsNew(t *testing.T) {
+	_, _, root := gitModel(t)
+	app := filepath.Join(root, "app")
+	if err := os.WriteFile(filepath.Join(app, "ghost.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &diffView{dir: app, files: []git.FileChange{{Path: "ghost.txt", Kind: git.Modified}}}
+
+	d.load()
+
+	if d.loadErr == "" || d.rows != nil {
+		t.Errorf("loadErr %q, rows %+v; want an error and no rows", d.loadErr, d.rows)
 	}
 }
