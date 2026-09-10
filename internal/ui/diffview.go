@@ -53,7 +53,10 @@ func (d *diffView) view(width, height int) string {
 	lines := []string{d.header(width), ""}
 	switch {
 	case d.err != "":
-		lines = append(lines, " "+errorStyle.Render(ansi.Truncate(d.err, width-1, "…")))
+		// Some git failures are several lines ("dubious ownership … To add an
+		// exception …"); only the first fits the one row budgeted for it.
+		first, _, _ := strings.Cut(d.err, "\n")
+		lines = append(lines, " "+errorStyle.Render(ansi.Truncate(first, width-1, "…")))
 	case len(d.files) == 0:
 		lines = append(lines, " "+hintStyle.Render(ansi.Truncate("No uncommitted changes in "+d.dir, width-1, "…")))
 	default:
@@ -63,10 +66,13 @@ func (d *diffView) view(width, height int) string {
 }
 
 // header names what is being shown and, when there is something, totals it.
+// It is cut to one line: Lip Gloss wraps an over-long line rather than
+// clipping it, and a second header row would push the status bar off the
+// window. The totals are short and fixed, so the branch name gives way.
 func (d *diffView) header(width int) string {
 	left := titleStyle.Render("Uncommitted changes") + textStyle.Render("  "+d.title)
 	if len(d.files) == 0 {
-		return " " + left
+		return " " + ansi.Truncate(left, max(width-1, 1), "…")
 	}
 	added, deleted := 0, 0
 	for _, f := range d.files {
@@ -74,6 +80,7 @@ func (d *diffView) header(width int) string {
 		deleted += f.Deleted
 	}
 	right := hintStyle.Render(fmt.Sprintf("%d file%s  +%d  -%d", len(d.files), plural(len(d.files)), added, deleted))
+	left = ansi.Truncate(left, max(width-lipgloss.Width(right)-3, 1), "…") // leading space, one gap cell, trailing cell
 	gap := max(width-lipgloss.Width(left)-lipgloss.Width(right)-2, 1)
 	return " " + left + textStyle.Render(strings.Repeat(" ", gap)) + right
 }

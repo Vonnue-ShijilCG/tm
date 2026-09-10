@@ -211,3 +211,41 @@ func TestTheChangesViewStatusBarListsItsKeys(t *testing.T) {
 		t.Errorf("status bar wraps:\n%s", status)
 	}
 }
+
+// Lip Gloss's Width wraps an over-long line rather than clipping it. The
+// frame pads short content up to its height, so a wrapped header only shows
+// once the list fills the budget: then it adds a row and pushes the status
+// bar off the window.
+func TestTheChangesViewHeaderNeverWrapsInANarrowWindow(t *testing.T) {
+	m, _, root := gitModel(t)
+	for i := 0; i < 20; i++ {
+		if err := os.WriteFile(filepath.Join(root, "app", fmt.Sprintf("f%02d.txt", i)), []byte("x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 40, Height: 13}) // narrower than title + project + branch + totals; the list fills the height exactly
+	m = next.(Model)
+
+	m = press(m, "d")
+
+	view := m.View()
+	if lines := strings.Count(view, "\n") + 1; lines != m.height {
+		t.Errorf("the view is %d lines tall in a %d-line window:\n%s", lines, m.height, view)
+	}
+	if !strings.Contains(view, "20 files") {
+		t.Errorf("the totals must survive a narrow window:\n%s", view)
+	}
+}
+
+func TestTheChangesViewShowsOnlyTheFirstLineOfAGitError(t *testing.T) {
+	d := &diffView{title: "app", err: "detected dubious ownership\nTo add an exception run:\n\tgit config --global --add safe.directory x"}
+
+	out := d.view(80, 10)
+
+	if lines := strings.Count(out, "\n") + 1; lines != 3 { // header, blank, one error line
+		t.Errorf("a multi-line error rendered as %d lines:\n%s", lines, out)
+	}
+	if !strings.Contains(out, "dubious ownership") {
+		t.Errorf("the first line of the error should be shown:\n%s", out)
+	}
+}

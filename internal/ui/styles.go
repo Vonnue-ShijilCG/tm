@@ -60,8 +60,9 @@ var (
 
 	// textStyle is for plain text that follows a styled run on the same line:
 	// that run's closing reset has dropped the ground, so unstyled text after
-	// it would show the user's own terminal colour.
-	textStyle = lipgloss.NewStyle().Background(ground)
+	// it would show the user's own terminal colour. It is the ground and
+	// nothing else, which is what mainAreaStyle already is.
+	textStyle = mainAreaStyle
 
 	cursorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#f0f6fc")).
