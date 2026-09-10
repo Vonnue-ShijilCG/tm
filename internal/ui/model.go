@@ -137,6 +137,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, p := range m.ws.Projects {
 			m.applyLayout(p)
 		}
+		if m.diff != nil {
+			m.diff.scroll(0, m.diffRows()) // a taller window must not show blank rows under the file
+		}
 
 	case tea.MouseMsg:
 		m.handleMouse(msg)
@@ -565,9 +568,7 @@ func sessionRows(r rect) int {
 // screen it consumes every key, so nothing reaches a terminal underneath.
 // Up and down go to whichever half has focus; the rest act on the diff.
 func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// The code rows on screen: the window less the status bar, the modal's
-	// frame and the rows above the code, so scrolling can clamp at the end.
-	height := max(m.height-statusHeight-modalStyle.GetVerticalFrameSize()-diffChromeRows, 1)
+	height := m.diffRows()
 	d := m.diff
 	switch {
 	case key.Matches(msg, keys.DiffClose):
@@ -599,6 +600,13 @@ func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// diffRows is how many code rows the changes view shows: the window less the
+// status bar, the modal's frame and the rows above the code. Scrolling clamps
+// against it, so it must measure the frame View draws.
+func (m Model) diffRows() int {
+	return max(m.height-statusHeight-modalStyle.GetVerticalFrameSize()-diffChromeRows, 1)
 }
 
 // openDiff shows the uncommitted changes of wherever the user's attention is:

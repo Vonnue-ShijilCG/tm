@@ -652,7 +652,7 @@ func TestTabMovesFocusAndScrollingIsLockedAcrossColumns(t *testing.T) {
 func TestHorizontalScrollCutsBothColumnsTogether(t *testing.T) {
 	m, _, root := gitModel(t)
 	app := commitFile(t, root, "f.txt", "abcdefgh12345678\nx\n")
-	if err := os.WriteFile(filepath.Join(app, "f.txt"), []byte("abcdefgh12345678\ny\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(app, "f.txt"), []byte("abcdefgh12345678\n"+strings.Repeat("y", 20)+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -665,6 +665,14 @@ func TestHorizontalScrollCutsBothColumnsTogether(t *testing.T) {
 	m = press(m, "left", "left") // clamps at the start
 	if m.diff.left != 0 {
 		t.Errorf("left = %d, want 0 after scrolling back past the start", m.diff.left)
+	}
+	// The offset stops at the widest line on either side, so the view never
+	// runs on into empty columns that take as many presses to come back from.
+	for i := 0; i < 10; i++ {
+		m = press(m, "right")
+	}
+	if m.diff.left != 20 {
+		t.Errorf("left = %d, want 20, the width of the widest line", m.diff.left)
 	}
 }
 
@@ -680,9 +688,10 @@ func TestNextChangeJumpsPastUnchangedLines(t *testing.T) {
 	}
 }
 
-// A jump lands with context above the change, so the next search must start
-// past that context or n finds the same change again and never moves on. N
-// must be able to return all the way to a change on the very first row.
+// Each press continues from the change the last one landed on, so n never
+// finds the same change twice and N can return all the way to a change on
+// the very first row. A fresh view starts its search at the top row, so the
+// first n reaches a change there rather than skipping it.
 func TestChangeJumpsVisitEachRunOnceAndReturnToTheFirst(t *testing.T) {
 	m, _, root := gitModel(t)
 	bigFile(t, root, 0, 50, 150)
@@ -692,6 +701,7 @@ func TestChangeJumpsVisitEachRunOnceAndReturnToTheFirst(t *testing.T) {
 		key  string
 		want int
 	}{
+		{"n", 0}, // the change on row 0, already on screen
 		{"n", 50 - diffJumpContext},
 		{"n", 150 - diffJumpContext},
 		{"N", 50 - diffJumpContext},
@@ -845,6 +855,82 @@ func TestScrollingStopsAtTheEndOfTheFile(t *testing.T) {
 
 // A change in the last screenful of the file is shown by scrolling to the
 // end, never past it: the jump clamps as scrolling does.
+// A fresh view has no jump to continue from, so n searches from the top row:
+// a change on row 2 is found there rather than skipped for the one below it.
+func TestNextChangeOnAFreshViewReachesAChangeNearTheTop(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 2, 5)
+
+	m = press(m, "d", "tab", "n")
+	if m.diff.top != 0 {
+		t.Errorf("top = %d, want 0: the first n lands on the change on row 2, which is already on screen", m.diff.top)
+	}
+	m = press(m, "n")
+	if want := 5 - diffJumpContext; m.diff.top != want {
+		t.Errorf("top = %d, want %d: the second n moves on to the change on row 5", m.diff.top, want)
+	}
+}
+
+// A landing near the start is clamped to top 0, so the change is not the
+// usual two rows below top. The next jump must continue from the change
+// itself, or one starting in those two rows is skipped.
+func TestJumpsContinueFromAClampedLanding(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 0, 2, 5)
+
+	m = press(m, "d", "tab")
+	for i, want := range []int{0, 0, 5 - diffJumpContext} { // rows 0, 2 (both clamped to top 0), then 5
+		m = press(m, "n")
+		if m.diff.top != want {
+			t.Errorf("n press %d: top = %d, want %d", i+1, m.diff.top, want)
+		}
+	}
+}
+
+// Scrolling by hand abandons the last jump: the next N searches up from the
+// top row of the screen, so a change sitting on that row is already in view
+// and the one above the screen is the previous one.
+func TestScrollingByHandMovesTheJumpOrigin(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 0, 50, 150)
+
+	m = press(m, "d", "tab", "n", "n", "n") // at the change on row 150
+	for i := 0; i < 150-diffJumpContext-50; i++ {
+		m = press(m, "up")
+	}
+	if m.diff.top != 50 {
+		t.Fatalf("top = %d, want 50 after scrolling up: the change on row 50 on the top row", m.diff.top)
+	}
+
+	m = press(m, "N")
+
+	if m.diff.top != 0 {
+		t.Errorf("top = %d, want 0: N should find the change above the screen, on row 0, not the one on the top row", m.diff.top)
+	}
+}
+
+// Enlarging the window after scrolling to the end would leave blank rows
+// under the file until the next key; the view re-clamps as soon as it grows.
+func TestEnlargingTheWindowKeepsTheFileEndOnTheLastRow(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 150)
+	m = press(m, "d", "tab")
+	for i := 0; i < 300; i++ {
+		m = press(m, "down")
+	}
+
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = next.(Model)
+
+	if want := 200 - codeRows(m); m.diff.top != want {
+		t.Errorf("top = %d, want %d after the window grew", m.diff.top, want)
+	}
+	lines := strings.Split(ansi.Strip(m.View()), "\n")
+	if bottom := lines[len(lines)-3]; !strings.Contains(bottom, "200 line 200") {
+		t.Errorf("the bottom code row should be line 200, got %q", bottom)
+	}
+}
+
 func TestAJumpNearTheEndStopsAtTheEndOfTheFile(t *testing.T) {
 	m, _, root := gitModel(t)
 	bigFile(t, root, 199)

@@ -29,6 +29,8 @@ type diffView struct {
 
 	top       int  // first visible row of the diff
 	left      int  // horizontal offset, shared by both columns
+	widest    int  // cells in the widest row text on either side; left stops there
+	change    int  // row of the change the last jump landed on; -1 once the view has moved by other means
 	listFocus bool // true when j/k move the file list rather than the diff
 }
 
@@ -95,27 +97,43 @@ func (d *diffView) refresh() {
 }
 
 // scroll moves the diff vertically, clamping so the view cannot run past
-// either end of the file; height is the number of code rows on screen.
+// either end of the file; height is the number of code rows on screen. A
+// delta of 0 only re-clamps, after a re-read or a resize, and leaves the
+// last jump in place; scrolling by hand abandons it.
 func (d *diffView) scroll(delta, height int) {
+	if delta != 0 {
+		d.change = -1
+	}
 	d.top = min(max(d.top+delta, 0), max(len(d.rows)-height, 0))
 }
 
 // scrollX moves both columns sideways together; there is one offset, so they
-// stay showing the same columns of the same lines.
+// stay showing the same columns of the same lines. It stops at the widest
+// line: past it there is nothing to see, and every press further would be
+// one more to come back.
 func (d *diffView) scrollX(delta int) {
-	d.left = max(d.left+delta, 0)
+	d.left = min(max(d.left+delta, 0), d.widest)
 }
 
 // jumpChange moves to the next (dir 1) or previous (dir -1) run of changed
 // rows. Without it a single edit in a long file would have to be found by
-// scrolling, which is what makes a full-file view practical. A jump leaves
-// diffJumpContext rows above the change, so the change the view is at sits
-// that far below top: the search starts from there, not from top, or the
-// next jump would find the same change again and never move on.
+// scrolling, which is what makes a full-file view practical. Each press
+// continues from the change the last one landed on: a jump leaves context
+// above its change, so searching from top would find the same change again
+// and never move on. With no jump to continue from, the top row of the
+// screen is the origin — searched itself going down, so a fresh view reaches
+// a change on its first rows, and skipped going up, since it is in view.
 func (d *diffView) jumpChange(dir, height int) {
-	at := d.top + diffJumpContext
-	for i := at + dir; i >= 0 && i < len(d.rows); i += dir {
+	start := d.top
+	switch {
+	case d.change >= 0:
+		start = d.change + dir
+	case dir < 0:
+		start = d.top - 1
+	}
+	for i := start; i >= 0 && i < len(d.rows); i += dir {
 		if d.rows[i].Changed && (i == 0 || !d.rows[i-1].Changed) {
+			d.change = i
 			d.top = min(max(i-diffJumpContext, 0), max(len(d.rows)-height, 0))
 			return
 		}
@@ -141,7 +159,7 @@ func (d *diffView) move(delta int) {
 // one just created — aligns against an empty left side, which renders as all
 // additions.
 func (d *diffView) load() {
-	d.rows, d.loadErr, d.top, d.left = nil, "", 0, 0
+	d.rows, d.loadErr, d.top, d.left, d.widest, d.change = nil, "", 0, 0, 0, -1
 	if len(d.files) == 0 {
 		return
 	}
@@ -204,6 +222,9 @@ func (d *diffView) load() {
 		hunks = []diff.Hunk{{OldStart: 0, OldCount: 0, NewStart: 1, NewCount: len(lines)}}
 	}
 	d.rows = diff.Align(splitLines(old), lines, hunks)
+	for _, r := range d.rows {
+		d.widest = max(d.widest, lipgloss.Width(plainText(r.OldText)), lipgloss.Width(plainText(r.NewText)))
+	}
 }
 
 // splitLines splits file content into lines without a trailing empty element.
@@ -292,17 +313,21 @@ func side(num int, text string, changed bool, style lipgloss.Style, width, left 
 	if !changed || num == 0 {
 		style = textStyle
 	}
-	// Tabs become spaces before the line is cut: Truncate counts a tab as no
-	// cells while Render draws it as four, so a line cut with tabs still in
-	// it comes out wider than its column and shoves the other column along.
-	// Every other control character goes, after the tabs so indentation
-	// survives: a CRLF file keeps a \r on every line that Truncate, Width
-	// and pad all count as nothing, yet drawn it returns the cursor to column
-	// 0 and the right column lands on the file list; an escape sequence in a
-	// file would be executed by the terminal rather than shown.
-	text = stripControlChars(strings.ReplaceAll(text, "\t", "    "))
-	body := ansi.Truncate(ansi.TruncateLeft(text, left, ""), max(width-gutterWidth, 0), "")
+	body := ansi.Truncate(ansi.TruncateLeft(plainText(text), left, ""), max(width-gutterWidth, 0), "")
 	return pad(hintStyle.Render(gutter)+style.Render(" "+body), width)
+}
+
+// plainText is a file's line as it is measured and drawn. Tabs become spaces
+// before anything is cut: Truncate counts a tab as no cells while Render
+// draws it as four, so a line cut with tabs still in it comes out wider than
+// its column and shoves the other column along. Every other control
+// character goes, after the tabs so indentation survives: a CRLF file keeps
+// a \r on every line that Truncate, Width and pad all count as nothing, yet
+// drawn it returns the cursor to column 0 and the right column lands on the
+// file list; an escape sequence in a file would be executed by the terminal
+// rather than shown.
+func plainText(text string) string {
+	return stripControlChars(strings.ReplaceAll(text, "\t", "    "))
 }
 
 // headingStyles is what the list heading and the two column labels are drawn
