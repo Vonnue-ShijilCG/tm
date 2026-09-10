@@ -92,3 +92,21 @@ func TestAlignANewFileHasNoLeftSide(t *testing.T) {
 		}
 	}
 }
+
+func TestAlignDropsAHunkBeyondBothFiles(t *testing.T) {
+	// The file was rewritten between git diff and the read, so the hunk names
+	// lines neither version has any more.
+	old := []string{"a"}
+	fresh := []string{"a"}
+	hunks := []Hunk{{OldStart: 5, OldCount: 2, NewStart: 5, NewCount: 2}}
+
+	rows := Align(old, fresh, hunks)
+
+	want := []Row{{OldNum: 1, OldText: "a", NewNum: 1, NewText: "a"}}
+	if len(rows) != len(want) {
+		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
+	}
+	if rows[0] != want[0] {
+		t.Errorf("row 0 = %+v, want %+v", rows[0], want[0])
+	}
+}

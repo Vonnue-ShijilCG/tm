@@ -92,6 +92,12 @@ func Align(old, fresh []string, hunks []Hunk) []Row {
 				r.NewNum, r.NewText = n+1, fresh[n]
 				n++
 			}
+			// Both sides ran out: the file changed after the diff was taken and the
+			// hunk names lines that no longer exist. A row empty on both sides
+			// would be padding for nothing, so stop rather than draw one.
+			if r.OldNum == 0 && r.NewNum == 0 {
+				break
+			}
 			rows = append(rows, r)
 		}
 	}
