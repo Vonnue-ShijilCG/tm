@@ -1989,7 +1989,11 @@ func (d *diffView) load() {
 		}
 		fresh = string(data)
 	}
-	unified, err := git.DiffHEAD(d.dir, f.Path)
+	// Both paths, when this is a rename: git only detects a rename if both
+	// sides are inside the pathspec. With the destination alone it reports a
+	// whole-file addition, which would contradict the committed content
+	// ShowHEAD just returned and misalign the two columns.
+	unified, err := git.DiffHEAD(d.dir, f.Path, f.OldPath)
 	if err != nil {
 		d.loadErr = err.Error()
 		return
