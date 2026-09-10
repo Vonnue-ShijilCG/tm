@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Vonnue-ShijilCG/tm/internal/workspace"
 )
@@ -247,5 +249,221 @@ func TestTheChangesViewShowsOnlyTheFirstLineOfAGitError(t *testing.T) {
 	}
 	if !strings.Contains(out, "dubious ownership") {
 		t.Errorf("the first line of the error should be shown:\n%s", out)
+	}
+}
+
+// gitRun runs a git command in dir and fails the test if it errors.
+func gitRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+// commitFile writes content to name inside the project checkout and commits
+// it, so a later write to the same file is a modification rather than a new
+// file.
+func commitFile(t *testing.T, root, name, content string) string {
+	t.Helper()
+	app := filepath.Join(root, "app")
+	if err := os.WriteFile(filepath.Join(app, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, app, "add", "-A")
+	gitRun(t, app, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "base")
+	return app
+}
+
+// plainLine is the first line of view, colours stripped, that contains want;
+// "" when none does.
+func plainLine(view, want string) string {
+	for _, line := range strings.Split(ansi.Strip(view), "\n") {
+		if strings.Contains(line, want) {
+			return line
+		}
+	}
+	return ""
+}
+
+func TestTheSelectedFileShowsBothVersionsAligned(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := commitFile(t, root, "f.txt", "a\nb\nc\n")
+	if err := os.WriteFile(filepath.Join(app, "f.txt"), []byte("a\nB CHANGED\nc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+	view := m.View()
+
+	// The two versions of line 2 face each other on one row, each behind its
+	// own line number; a plain Contains on "b" would be met by tm's chrome.
+	if row := plainLine(view, "B CHANGED"); !strings.Contains(row, "2 b ") || !strings.Contains(row, "2 B CHANGED") {
+		t.Errorf("committed line 2 should face current line 2 on one row, got %q in:\n%s", row, view)
+	}
+	if row := plainLine(view, "1 a"); strings.Count(row, "1 a") != 2 {
+		t.Errorf("unchanged lines are shown on both sides - this is a full-file view, got %q in:\n%s", row, view)
+	}
+	if !strings.Contains(view, "HEAD") || !strings.Contains(view, "WORKING TREE") {
+		t.Errorf("the two columns should be labelled:\n%s", view)
+	}
+}
+
+func TestANewFileHasNoCommittedSide(t *testing.T) {
+	m, _, root := gitModel(t)
+	if err := os.WriteFile(filepath.Join(root, "app", "fresh.txt"), []byte("only\nnew\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+
+	d := m.diff
+	if len(d.rows) != 2 {
+		t.Fatalf("got %d rows, want 2: %+v", len(d.rows), d.rows)
+	}
+	for i, r := range d.rows {
+		if r.OldNum != 0 || r.OldText != "" {
+			t.Errorf("row %d has a committed side %+v; a new file has none", i, r)
+		}
+		if !r.Changed || r.NewText == "" {
+			t.Errorf("row %d = %+v, want an added line", i, r)
+		}
+	}
+}
+
+func TestADeletedFileHasNoCurrentSide(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := commitFile(t, root, "gone.txt", "one\ntwo\n")
+	if err := os.Remove(filepath.Join(app, "gone.txt")); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+
+	d := m.diff
+	if d.loadErr != "" || len(d.rows) != 2 {
+		t.Fatalf("loadErr %q, %d rows, want 2 rows and no error: %+v", d.loadErr, len(d.rows), d.rows)
+	}
+	for i, r := range d.rows {
+		if r.NewNum != 0 || r.NewText != "" || !r.Changed || r.OldText == "" {
+			t.Errorf("row %d = %+v, want a removed line with no current side", i, r)
+		}
+	}
+}
+
+// A renamed file's committed content lives at the path it came from, and git
+// only pairs the two sides of a rename when both are in the pathspec. Getting
+// either wrong renders a move as a whole-file addition.
+func TestARenamedFileIsComparedWithItsSource(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := commitFile(t, root, "old.txt", "keep\nsame\nedit me\n")
+	gitRun(t, app, "mv", "old.txt", "new.txt")
+	if err := os.WriteFile(filepath.Join(app, "new.txt"), []byte("keep\nsame\nEDITED\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+
+	d := m.diff
+	if d.loadErr != "" || len(d.rows) != 3 {
+		t.Fatalf("loadErr %q, %d rows, want 3: %+v", d.loadErr, len(d.rows), d.rows)
+	}
+	if r := d.rows[0]; r.Changed || r.OldNum != 1 || r.NewNum != 1 || r.OldText != "keep" {
+		t.Errorf("row 0 = %+v, want the unchanged first line on both sides", r)
+	}
+	if r := d.rows[2]; !r.Changed || r.OldText != "edit me" || r.NewText != "EDITED" {
+		t.Errorf("row 2 = %+v, want the edit with its committed text beside it", r)
+	}
+}
+
+func TestMovingTheSelectionShowsThatFile(t *testing.T) {
+	m, _, root := gitModel(t)
+	for name, content := range map[string]string{"a.txt": "alpha\n", "b.txt": "bravo\n"} {
+		if err := os.WriteFile(filepath.Join(root, "app", name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m = press(m, "d")
+	if view := m.View(); !strings.Contains(view, "alpha") || strings.Contains(view, "bravo") {
+		t.Errorf("the first file's content should show, and only its:\n%s", view)
+	}
+
+	m = press(m, "j")
+	if view := m.View(); !strings.Contains(view, "bravo") || strings.Contains(view, "alpha") {
+		t.Errorf("after j the second file's content should show, and only its:\n%s", view)
+	}
+}
+
+func TestABinaryFileShowsNoColumns(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := commitFile(t, root, "blob.bin", "\x00\x01\x02\n")
+	if err := os.WriteFile(filepath.Join(app, "blob.bin"), []byte("\x00\x03\x04\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+
+	view := m.View()
+	if !strings.Contains(view, "binary file") || strings.Contains(view, "WORKING TREE") {
+		t.Errorf("a binary file should be named as such instead of aligned:\n%s", view)
+	}
+}
+
+// Lip Gloss's Width wraps rather than clips, and the frame pads short content
+// up to its height, so an over-long code line only shows once the columns
+// fill the window: then it takes two rows and pushes the status bar off. The
+// fixture is taller than the window so every pane row is in use, and the long
+// line is on the committed side, where an uncut line would shove its
+// counterpart past the frame instead of merely being cut there.
+func TestCodeColumnsClipLongLinesInsteadOfWrapping(t *testing.T) {
+	m, _, root := gitModel(t)
+	var sb strings.Builder
+	for i := 0; i < 40; i++ {
+		sb.WriteString(fmt.Sprintf("line %d\n", i))
+	}
+	long := strings.Repeat("x", 300)
+	app := commitFile(t, root, "long.txt", long+"\n"+sb.String())
+	if err := os.WriteFile(filepath.Join(app, "long.txt"), []byte("short\n"+sb.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+
+	view := m.View()
+	if lines := strings.Count(view, "\n") + 1; lines != m.height {
+		t.Errorf("the view is %d lines tall in a %d-line window:\n%s", lines, m.height, view)
+	}
+	for i, line := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Errorf("line %d is %d cells wide in a %d-column window", i, w, m.width)
+		}
+	}
+	if row := plainLine(view, "xxxxxxxx"); !strings.Contains(row, "1 short") {
+		t.Errorf("the long committed line should be cut so its replacement still faces it, got %q", row)
+	}
+}
+
+// Truncate counts a tab as no cells while Render draws it as four, so a line
+// cut with its tabs still in it comes out wider than its column and pushes
+// the other column past the frame. Thirty tabs are enough to push the whole
+// current side off a 120-column window.
+func TestATabInACodeLineDoesNotWidenItsColumn(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := commitFile(t, root, "tabs.go", strings.Repeat("\t", 30)+"x\n")
+	if err := os.WriteFile(filepath.Join(app, "tabs.go"), []byte("short\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+
+	view := m.View()
+	if row := plainLine(view, "1 short"); row == "" {
+		t.Errorf("the current line should still face its tab-indented counterpart:\n%s", view)
+	}
+	for i, line := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(line); w > m.width {
+			t.Errorf("line %d is %d cells wide in a %d-column window", i, w, m.width)
+		}
 	}
 }

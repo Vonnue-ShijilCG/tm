@@ -81,9 +81,13 @@ var (
 
 	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).Background(ground)
 
-	// Line counts and, later, the lines themselves in the changes view.
+	// Line counts and the lines themselves in the changes view.
 	addStyle = lipgloss.NewStyle().Foreground(added).Background(ground)
 	delStyle = lipgloss.NewStyle().Foreground(removed).Background(ground)
+
+	// dividerStyle draws the rule between the file list and the code columns
+	// in the unfocused-border colour, so it reads as frame rather than content.
+	dividerStyle = lipgloss.NewStyle().Foreground(edge).Background(ground)
 
 	statusStyle = lipgloss.NewStyle().Foreground(dim).Background(ground).Padding(0, 1)
 )
