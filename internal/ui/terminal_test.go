@@ -279,7 +279,7 @@ func TestKeysGoToTerminalWhenFocused(t *testing.T) {
 	}
 }
 
-func TestAltEscReturnsToSidebarAndTabComesBack(t *testing.T) {
+func TestAltSReturnsToSidebarAndTabComesBack(t *testing.T) {
 	m, spawned := newTestModel(t)
 	m = press(m, "enter", "alt+s")
 	if m.focus != focusSidebar {
@@ -442,7 +442,7 @@ func TestKeyTranslation(t *testing.T) {
 	}
 }
 
-func TestEscReachesTheProgramAndAltEscReturnsToTheSidebar(t *testing.T) {
+func TestEscReachesTheProgramAndAltSReturnsToTheSidebar(t *testing.T) {
 	m, spawned := newTestModel(t)
 	m = press(m, "j", "enter") // focus a terminal
 

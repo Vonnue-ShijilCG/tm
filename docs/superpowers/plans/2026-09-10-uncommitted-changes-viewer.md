@@ -1,5 +1,7 @@
 # Uncommitted changes viewer — Implementation Plan
 
+> **Historical document.** The code superseded this plan in several places (the `git` package's `ShowHEAD`/`DiffHEAD` signatures and output handling, the modal frame style, the body layout). `CLAUDE.md` describes what shipped; where the two disagree, `CLAUDE.md` and the code are right.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A full-screen view, one keystroke away, showing the uncommitted changes in the directory you are looking at — files on the left, the selected file rendered twice in full and aligned line for line, red for removals and green for additions.

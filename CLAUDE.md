@@ -170,7 +170,8 @@ cuts each line with `ansi.TruncateLeft`/`ansi.Truncate` at the shared offset,
 and `scrollX` stops at the widest line because past it there is nothing to see.
 
 **File-derived text is stripped of control characters** — code lines
-(`plainText`), paths, rename sources and load errors. This is the first tm
+(`plainText`), paths, rename sources, load errors and the line git itself
+prints when the listing fails. This is the first tm
 view that renders repository bytes straight into the frame; the terminal
 panes pass everything through a vt emulator that interprets it first. A lone
 `\r` from a CRLF file counts as zero cells to both `ansi.Truncate` and

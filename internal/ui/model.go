@@ -1290,7 +1290,9 @@ func terminalLabel(t *workspace.Terminal) string {
 // command is free text that can contain raw ESC or other control bytes; left
 // in a label, they can rewrite the surrounding terminal display (pane
 // header, manager row, deletion prompt) instead of just being shown as
-// text. Everything else, including multi-byte UTF-8, is left unchanged.
+// text. The changes view renders repository bytes — code lines, paths,
+// git's own output — straight into the frame and strips them here for the
+// same reason. Everything else, including multi-byte UTF-8, is left unchanged.
 func stripControlChars(s string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {

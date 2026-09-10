@@ -112,8 +112,10 @@ existing focus model already solves it.
 | `esc` | close |
 
 `alt+d` rather than a plain letter in terminal focus, because tm reserves only
-`Esc` and `Alt` chords there — a plain letter belongs to the running program.
-This mirrors `m` / `alt+m` for the Terminal Manager.
+`Alt` chords there — a plain letter, and a lone `Esc`, belong to the running
+program (Esc is how one interrupts Claude Code or leaves Vim's insert mode).
+This mirrors `m` / `alt+m` for the Terminal Manager and `alt+s` for returning
+to the sidebar.
 
 All bindings go in `ui/keys.go`, which feeds input matching, the help screen and
 the status bar. They form their own context-scoped set, as the Terminal Manager's
