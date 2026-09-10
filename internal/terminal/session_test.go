@@ -2,6 +2,7 @@ package terminal
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -223,7 +224,7 @@ func TestPanesRenderOnTheirOwnBackground(t *testing.T) {
 		t.Fatalf("Render gave %d lines, want one per row: %q", len(lines), lines)
 	}
 	for i, line := range lines {
-		if !strings.Contains(line, "\x1b[48;2;7;17;43m") {
+		if !strings.Contains(line, groundSGR()) {
 			t.Errorf("row %d carries no pane background: %q", i, line)
 		}
 		// The pane is a rectangle: a blank row is as wide as a full one, so
@@ -243,7 +244,7 @@ func TestScrolledHistoryIsOnTheSameBackground(t *testing.T) {
 		t.Fatalf("RenderScrolled gave %d lines, want 5", len(lines))
 	}
 	for i, line := range lines {
-		if !strings.Contains(line, "\x1b[48;2;7;17;43m") {
+		if !strings.Contains(line, groundSGR()) {
 			t.Errorf("scrolled row %d carries no pane background: %q", i, line)
 		}
 	}
@@ -263,5 +264,36 @@ func TestTheProgramIsToldWhatGroundItIsOn(t *testing.T) {
 	// line on a newline, so it would block forever.)
 	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "printf '\\033]11;?\\033\\\\'; sleep 30"}, Dir: t.TempDir(), Cols: 60, Rows: 4})
 
-	waitFor(t, s, "rgb:0707/1111/2b2b")
+	waitFor(t, s, groundOSCReply())
+}
+
+// groundSGR is PaneGround as the background sequence every pane row carries,
+// derived from the constant so a change of ground cannot leave these tests
+// asserting the old colour.
+func groundSGR() string {
+	c := mustParseHex(PaneGround)
+	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", c.R, c.G, c.B)
+}
+
+// groundOSCReply is PaneGround as an OSC 11 reply spells it: each 8-bit
+// channel doubled to 16 bits.
+func groundOSCReply() string {
+	c := mustParseHex(PaneGround)
+	return fmt.Sprintf("rgb:%02x%02x/%02x%02x/%02x%02x", c.R, c.R, c.G, c.G, c.B, c.B)
+}
+
+func TestMustParseHexTakesExactlySixDigits(t *testing.T) {
+	if got := mustParseHex("#07112b"); got.R != 0x07 || got.G != 0x11 || got.B != 0x2b || got.A != 0xff {
+		t.Errorf("mustParseHex(#07112b) = %+v", got)
+	}
+	for _, bad := range []string{"#07112b00", "#0711", "#zz112b", ""} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("mustParseHex(%q) accepted a malformed constant", bad)
+				}
+			}()
+			mustParseHex(bad)
+		}()
+	}
 }

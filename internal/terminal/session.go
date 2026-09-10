@@ -62,8 +62,9 @@ var paneBackground color.Color = mustParseHex(PaneGround)
 // constant — it only ever parses constants in this package, so a bad value is
 // a programming error caught on the first run, not a condition to handle.
 func mustParseHex(s string) color.RGBA {
-	v, err := strconv.ParseUint(strings.TrimPrefix(s, "#"), 16, 32)
-	if err != nil {
+	hex := strings.TrimPrefix(s, "#")
+	v, err := strconv.ParseUint(hex, 16, 32)
+	if err != nil || len(hex) != 6 { // ParseUint alone would take eight digits and misplace every channel
 		panic("terminal: bad colour constant " + s)
 	}
 	return color.RGBA{R: uint8(v >> 16), G: uint8(v >> 8), B: uint8(v), A: 0xff}
