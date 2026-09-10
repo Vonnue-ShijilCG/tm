@@ -23,8 +23,11 @@ type pane struct {
 }
 
 const (
-	minPaneCols = 12
-	minPaneRows = 3 // header + two screen rows
+	// A pane must fit its card border, its header, and two rows of output.
+	// Below that a split produces a box with nothing readable inside it.
+	// The 2s are cardStyle's border, which is not a constant expression.
+	minPaneCols = 2 + 12
+	minPaneRows = 2 + 1 + 2
 	minRatio    = 0.15
 	maxRatio    = 0.85
 	resizeStep  = 0.1

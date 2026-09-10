@@ -346,20 +346,24 @@ func TestEachTerminalIsItsOwnCard(t *testing.T) {
 	m = press(m, "j", "enter")
 	m = makeTerminal(t, m, "alt+v", "", "") // split beside the first
 
-	view := m.View()
+	p := m.selectedProject()
+	panes := m.viewPanes(p, p.ActiveTerminal())
 
-	// Two cards means two card tops on the same screen row, separated by a gap.
-	if n := strings.Count(view, "╭"); n < 2 {
-		t.Errorf("want a rounded top-left per terminal, found %d:\n%s", n, view)
+	// Two cards means two card tops, separated by a gap. Counting corners in
+	// panes (not m.View()) matters: the sidebar and main frame each draw
+	// their own rounded corner, so the whole view always has at least two
+	// even with no terminal cards at all.
+	if n := strings.Count(panes, "╭"); n != 2 {
+		t.Errorf("want one rounded top-left per terminal (2), found %d:\n%s", n, panes)
 	}
 	// The heavy dividers are gone: cards are separated by space, not by a rule.
-	if strings.Contains(view, "┃") || strings.Contains(view, "━") {
-		t.Errorf("dividers should be replaced by gaps between cards:\n%s", view)
+	if strings.Contains(panes, "┃") || strings.Contains(panes, "━") {
+		t.Errorf("dividers should be replaced by gaps between cards:\n%s", panes)
 	}
 
 	// A card spends one cell per side on its border, so the session inside it
 	// is narrower than the pane rect by exactly that much.
-	rects := m.paneRects(m.selectedProject())
+	rects := m.paneRects(p)
 	for term, r := range rects {
 		var s *fakeSession
 		for _, f := range *spawned {
@@ -376,5 +380,85 @@ func TestEachTerminalIsItsOwnCard(t *testing.T) {
 			t.Errorf("session sized %dx%d, want %dx%d (pane %dx%d minus its own border and header)",
 				s.cols, s.rows, wantCols, wantRows, r.w, r.h)
 		}
+	}
+}
+
+// TestStackedTerminalsAreAlsoCards covers the other split direction:
+// TestEachTerminalIsItsOwnCard only exercises alt+v (side by side). Without
+// this, the two cards being joined with no gap row between them (or the
+// heavy divider coming back) would still pass the geometry tests — rects()
+// doesn't know or care how the pane is rendered — and slip through unnoticed.
+func TestStackedTerminalsAreAlsoCards(t *testing.T) {
+	m, spawned := newTestModel(t)
+	m = press(m, "j", "enter")
+	m = makeTerminal(t, m, "alt+h", "", "") // split below the first
+
+	p := m.selectedProject()
+	panes := m.viewPanes(p, p.ActiveTerminal())
+
+	if n := strings.Count(panes, "╭"); n != 2 {
+		t.Errorf("want one rounded top-left per terminal (2), found %d:\n%s", n, panes)
+	}
+	if strings.Contains(panes, "┃") || strings.Contains(panes, "━") {
+		t.Errorf("dividers should be replaced by gaps between cards:\n%s", panes)
+	}
+
+	var tops []int
+	lines := strings.Split(panes, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "╭") {
+			tops = append(tops, i)
+		}
+	}
+	if len(tops) != 2 {
+		t.Fatalf("expected two card tops, found at rows %v:\n%s", tops, panes)
+	}
+	// A real gap row sits strictly between the two cards. If the gap were
+	// drawn at zero height, the second card's top border would sit right
+	// after the first card's bottom border with nothing blank between them.
+	if tops[1] <= tops[0]+1 {
+		t.Fatalf("second card starts immediately after the first, no gap row: tops=%v", tops)
+	}
+	if gapLine := stripANSI(lines[tops[1]-1]); strings.TrimSpace(gapLine) != "" {
+		t.Errorf("row between the stacked cards should be a blank gap, got %q:\n%s", gapLine, panes)
+	}
+
+	rects := m.paneRects(p)
+	for term, r := range rects {
+		var s *fakeSession
+		for _, f := range *spawned {
+			if f == term.Session {
+				s = f
+			}
+		}
+		if s == nil {
+			t.Fatal("no session for terminal")
+		}
+		wantCols := r.w - cardStyle.GetHorizontalBorderSize()
+		wantRows := r.h - cardStyle.GetVerticalBorderSize() - paneHeaderHeight
+		if s.cols != wantCols || s.rows != wantRows {
+			t.Errorf("session sized %dx%d, want %dx%d", s.cols, s.rows, wantCols, wantRows)
+		}
+	}
+}
+
+// TestMinimumSizePaneStillShowsABodyRow guards minPaneRows: a pane must fit
+// the card's own border, the header, and at least one row of session output.
+// Before minPaneRows accounted for the card border, a pane at the minimum
+// had innerH-paneHeaderHeight == 0 and renderLeaf's loop broke before ever
+// appending a body line, so the card rendered nothing readable inside it
+// while sessionRows still reported at least one row to the PTY.
+func TestMinimumSizePaneStillShowsABodyRow(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = press(m, "j", "enter")
+	p, term := m.activeTerminal()
+
+	view := m.renderLeaf(p, term, rect{0, 0, minPaneCols, minPaneRows}, false)
+	lines := strings.Split(view, "\n")
+	if len(lines) != minPaneRows {
+		t.Fatalf("card at the minimum should be exactly %d rows tall, got %d:\n%s", minPaneRows, len(lines), view)
+	}
+	if !strings.Contains(view, "SCREEN:") {
+		t.Errorf("a pane at the minimum size should still show its session output:\n%s", view)
 	}
 }

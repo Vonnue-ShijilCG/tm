@@ -174,7 +174,12 @@ func TestGridOrientationFollowsWindowShape(t *testing.T) {
 }
 
 func TestGridOnTinyWindowFallsBackWithoutLosingTerminals(t *testing.T) {
-	m, spawned, p := gridModel(t, 4, 50, 30) // area 20x26: too narrow for two columns
+	// height raised from 30 (area 20x27) to 40 (area 20x37): with cards'
+	// card-aware minPaneRows, 30 no longer leaves room to split every pane
+	// without swapping one out, which starved alt+j of a terminal it should
+	// still reach; 40 keeps the "too narrow for two columns" intent (width
+	// is still 20, well under 2*minPaneCols+1) without also being too short.
+	m, spawned, p := gridModel(t, 4, 50, 40) // area 20x37: too narrow for two columns
 	checkTiling(t, m, p)
 	if len(p.Terminals) != 4 {
 		t.Fatalf("all four must keep running: %d", len(p.Terminals))

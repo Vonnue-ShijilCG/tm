@@ -120,10 +120,12 @@ func TestMinimumSizesAndSplitGuards(t *testing.T) {
 	if rs[ts[0]].w < minPaneCols || rs[ts[1]].w < minPaneCols {
 		t.Errorf("panes should keep the minimum width: %+v %+v", rs[ts[0]], rs[ts[1]])
 	}
-	if canSplit(rect{0, 0, 20, 10}, splitSide) || !canSplit(rect{0, 0, 25, 10}, splitSide) {
+	// Thresholds are 2*minPaneCols+1 and 2*minPaneRows+1: 29 and 11 with the
+	// card-aware minimums.
+	if canSplit(rect{0, 0, 28, 10}, splitSide) || !canSplit(rect{0, 0, 29, 10}, splitSide) {
 		t.Error("canSplit side thresholds wrong")
 	}
-	if canSplit(rect{0, 0, 80, 6}, splitStack) || !canSplit(rect{0, 0, 80, 7}, splitStack) {
+	if canSplit(rect{0, 0, 80, 10}, splitStack) || !canSplit(rect{0, 0, 80, 11}, splitStack) {
 		t.Error("canSplit stack thresholds wrong")
 	}
 	if autoDir(rect{0, 0, 100, 20}) != splitSide || autoDir(rect{0, 0, 39, 20}) != splitStack {
