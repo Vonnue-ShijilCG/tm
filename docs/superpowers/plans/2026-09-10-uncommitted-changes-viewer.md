@@ -347,7 +347,7 @@ git commit -m "Draw every pane on its own black ground"
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: `keys.Sidebar` bound to `alt+esc` instead of `esc`. Nothing else in this plan depends on it; it is first because it is independent and immediately useful.
+- Produces: `keys.Sidebar` bound to `alt+s` instead of `esc`. Nothing else in this plan depends on it; it is first because it is independent and immediately useful.
 
 Today `updateTerminal` matches `keys.Sidebar` (bound to `esc`) before falling through to `forwardKey`, so pressing Esc in a pane returns to the sidebar and never reaches the program. That makes Claude Code uninterruptible from inside tm, stops Vim leaving insert mode, and stops `less` quitting. After this task tm reserves only `Alt` chords in terminal focus, which is a simpler rule than the one it has now.
 
@@ -370,15 +370,15 @@ func TestEscReachesTheProgramAndAltEscReturnsToTheSidebar(t *testing.T) {
 		t.Fatalf("program received %v, want a single Escape", s.keys)
 	}
 
-	m = press(m, "alt+esc")
+	m = press(m, "alt+s")
 
 	if m.focus != focusSidebar {
-		t.Error("alt+esc should return to the sidebar")
+		t.Error("alt+s should return to the sidebar")
 	}
 }
 ```
 
-`press` builds a `tea.KeyMsg` from a string; check its switch handles `"alt+esc"` and add a case if not — the existing `alt+delete` case shows the shape (`tea.KeyMsg{Type: tea.KeyEsc, Alt: true}`).
+`press` builds a `tea.KeyMsg` from a string; check its switch handles `"alt+s"` and add a case if not — the existing `alt+delete` case shows the shape (`tea.KeyMsg{Type: tea.KeyEsc, Alt: true}`).
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -390,7 +390,7 @@ Expected: FAIL — `esc must not leave the terminal`, because `keys.Sidebar` sti
 In `internal/ui/keys.go`:
 
 ```go
-	Sidebar:    key.NewBinding(key.WithKeys("alt+esc"), key.WithHelp("alt+esc", "to sidebar")),
+	Sidebar:    key.NewBinding(key.WithKeys("alt+s"), key.WithHelp("alt+s", "to sidebar")),
 ```
 
 Update the key-policy comment at the top of the file: tm now reserves only `Alt` chords while a terminal has focus, so the sentence naming a lone `Esc` as reserved, and the note about its cost to Vim, `less` and Claude Code, are both wrong and should go.
@@ -398,14 +398,14 @@ Update the key-policy comment at the top of the file: tm now reserves only `Alt`
 - [ ] **Step 4: Run the whole UI suite**
 
 Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/ui -v` then `go test ./...`
-Expected: PASS. Tests that press `"esc"` expecting to reach the sidebar from a terminal encode the old contract — change them to `"alt+esc"` and list each in your report. Do NOT change a test that presses `esc` to close the help screen, the form or the manager: modals intercept every key, so `esc` still closes them and that is correct.
+Expected: PASS. Tests that press `"esc"` expecting to reach the sidebar from a terminal encode the old contract — change them to `"alt+s"` and list each in your report. Do NOT change a test that presses `esc` to close the help screen, the form or the manager: modals intercept every key, so `esc` still closes them and that is correct.
 
 - [ ] **Step 5: Update the README and commit**
 
 In `README.md`, the Usage bullet reads "`Esc` returns to the sidebar, `s` shows every shortcut, `q` quits." Replace with:
 
 ```markdown
-- `alt+esc` returns to the sidebar, `s` shows every shortcut, `q` quits. Plain
+- `alt+s` returns to the sidebar, `s` shows every shortcut, `q` quits. Plain
   `Esc` goes to the program, so it interrupts Claude Code and leaves Vim's
   insert mode as usual.
 ```
@@ -2420,4 +2420,4 @@ In a scratch workspace only, never a real repository:
 6. Press `n` in a long file with one change far down — it jumps there.
 7. Delete a tracked file, reopen: it shows a committed left side and an empty right.
 8. Press `d` in a project with no changes — it says so rather than opening an empty split.
-9. In a Claude Code pane, press `Esc` — Claude Code interrupts, and tm does not steal it. `alt+esc` returns to the sidebar.
+9. In a Claude Code pane, press `Esc` — Claude Code interrupts, and tm does not steal it. `alt+s` returns to the sidebar.

@@ -75,9 +75,37 @@ Creating a worktree on a branch that does not already exist requires `Options.Ba
 
 The Bubble Tea program runs with mouse reporting on (`tea.WithMouseCellMotion()`), used only for the wheel. `ui/scroll.go` hit-tests the pointer against `paneScreenRects` (pane rects translated by the sidebar width and main-pane border) and keeps a per-terminal offset in `Model.scroll`. Rendering calls `Session.RenderScrolled` when the offset is non-zero; typing, `applyLayout` (resizes) and `dropPane` clear it. A program that enabled mouse tracking (Claude Code, htop, Vim with mouse) gets the wheel forwarded through `Session.SendWheel` in its own protocol; alt-screen programs without mouse tracking get arrow keys; everything else scrolls tm's own history view. Scroll positions are never persisted.
 
+### Appearance
+
+Every terminal is drawn as its own rounded card on a shared ground
+(`terminal.PaneGround`, a hex string both the emulator and Lip Gloss read, so
+the two cannot drift). Cards are separated by blank gaps, not divider glyphs,
+and there is no frame around the pane area — each card carries its own border.
+`(*pane).rects` reserves one cell between split children, which is that gap;
+the card border grows inward from the rect, so pane arithmetic and mouse
+hit-testing are unaffected by the card. `minPaneCols`/`minPaneRows` are written
+as visible arithmetic (`2 + 12`, `2 + 1 + 2`) because the leading 2 is the card
+border — a pane smaller than that renders a box with nothing inside it.
+
+Colour rules, both learned the hard way:
+
+1. **Never use an ANSI-256 index.** An index is a slot number, not a colour;
+   the user's terminal theme decides what it paints. tm's borders and hints
+   came out maroon on a user's machine for exactly this reason. Every colour in
+   `ui/styles.go` is an exact hex value.
+2. **Paint every cell tm owns**, including border glyphs (`BorderBackground`)
+   and any style that would otherwise set only a foreground — a nested span
+   that sets no background ends with a reset that drops the ground around it.
+   On top of that, `cmd/tm` sets the terminal's own background with OSC 11 on
+   start and restores it with OSC 111 on exit, which is the only thing that
+   reaches the emulator's window padding. The two layers are deliberate
+   belt-and-braces: tmux filters OSC 11 unless `allow-passthrough` is on.
+
 ### Key handling policy
 
-`ui/keys.go` is the single source of truth for shortcuts: input matching, the help screen and the status bar all read from it, so adding a binding there is enough. In terminal focus the app reserves only a lone `Esc` and a small set of `Alt` chords; everything else (letters, Tab, Ctrl+C, arrows) goes to the PTY. Do not add plain-letter or Ctrl shortcuts in terminal mode.
+`ui/keys.go` is the single source of truth for shortcuts: input matching, the help screen and the status bar all read from it, so adding a binding there is enough. In terminal focus the app reserves **only `Alt` chords**; everything else — letters, Tab, Ctrl+C, arrows and a lone `Esc` — goes to the PTY, which is what lets Esc interrupt Claude Code, leave Vim's insert mode and quit `less`. Do not add plain-letter or Ctrl shortcuts in terminal mode.
+
+`alt+s`, not `alt+esc`, returns to the sidebar: GNOME binds Alt+Esc to "switch windows directly", so the window manager takes it before tm ever sees it. Check what the desktop already claims before binding an Alt chord.
 
 ## Testing conventions
 
