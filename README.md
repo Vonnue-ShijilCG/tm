@@ -22,6 +22,10 @@ Workspace
   dev server or agent session instead of an empty shell.
 - Hide a running terminal and bring it back later.
 - Mouse wheel scrolls a terminal's history.
+- Every terminal is drawn as its own card on one dark ground, so a four-way
+  split reads as four panes rather than one wall of text.
+- See what changed without leaving tm: `d` shows a project's uncommitted
+  changes, each file as it was committed beside how it is now, line for line.
 - Terminal definitions and layouts survive restarts. Processes do not.
 - One small JSON state file per workspace, no daemon.
 
@@ -52,6 +56,14 @@ tm
   project or in a worktree any tool created — opens a terminal there; a branch
   checked out nowhere gets a worktree, and a new branch also asks what it starts
   from. Leave the branch empty for a shell in the project itself.
+- `d` on a project, or `alt+d` inside a terminal, shows the uncommitted
+  changes in that directory: the changed files on the left — new, untracked
+  ones included — and the selected file shown twice in full, committed
+  against current, aligned line for line. `tab` moves between the list and
+  the diff, `j`/`k` and the arrows move within whichever has focus, `←`/`→`
+  scroll both columns together, `n`/`N` jump between changes, `r` re-reads
+  from git, `Esc` closes. Long lines are cut rather than wrapped so the two
+  sides stay in step.
 - `alt+s` returns to the sidebar, `s` shows every shortcut, `q` quits. Plain
   `Esc` goes to the program, so it interrupts Claude Code and leaves Vim's
   insert mode as usual.

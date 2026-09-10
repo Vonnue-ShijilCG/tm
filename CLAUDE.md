@@ -18,7 +18,7 @@ go test ./internal/ui -run 'TestManagerHideAndShowReturnPaneToItsSavedPlace'   #
 go test ./internal/ui -run 'TestManager' -v                # by prefix
 ```
 
-Tests need `git` on `PATH` (git/workspace/ui worktree tests create temp repos). Requires the Go version in `go.mod`. CI (`.github/workflows/ci.yml`) fails on any unformatted file, so run `gofmt` before committing.
+Tests need `git` on `PATH` (git/workspace/ui worktree and changes tests create temp repos; the `diff` property test skips without it). Requires the Go version in `go.mod`. CI (`.github/workflows/ci.yml`) fails on any unformatted file, so run `gofmt` before committing.
 
 ## Architecture
 
@@ -27,17 +27,19 @@ Dependency direction (lower layers know nothing about higher ones):
 ```
 cmd/tm  →  ui  →  workspace  →  { project, git, config, state }
                 ↘  terminal (PTY + vt emulator; independent of everything above)
+                ↘  diff (hunk headers → aligned rows; imports neither git nor Bubble Tea)
 ```
 
 - **`project`**: `Discover(root)` — every direct subdirectory with a `.git` entry.
-- **`git`**: thin wrapper over the `git` CLI (branches, worktrees, dirty check). `git.Head(dir)` reads `.git/HEAD` directly without spawning a process; the UI uses it via a 1s TTL cache (`ui/branches.go`) because rendering happens on every output event.
+- **`git`**: thin wrapper over the `git` CLI (branches, worktrees, dirty check, and in `git/changes.go` the uncommitted-changes queries `Changes`, `ShowHEAD`, `DiffHEAD`). `git.Head(dir)` reads `.git/HEAD` directly without spawning a process; the UI uses it via a 1s TTL cache (`ui/branches.go`) because rendering happens on every output event.
+- **`diff`**: `ParseHunks` and `Align`, pure functions over strings — the one real algorithm behind the changes view, kept free of git and Bubble Tea so it can be tested on its own (see Uncommitted changes view).
 - **`terminal`**: `Start(Config)` runs a command in a PTY and mirrors output into a `vt.Emulator`. Exposes `Output()`/`Done()` channels; the UI's per-terminal watcher command turns those into Bubble Tea messages.
 - **`workspace`**: the runtime tree `Workspace → Project → Terminal`. Owns terminal creation (with the per-project limit), worktree creation/removal, hidden/saved bookkeeping and the state snapshot. A terminal's `Command` is written into its shell by `startTerminal`, the single choke point every start path goes through, so `terminal.Spawner` never learns about commands. It depends only on the `Session` interface and a `Spawner` func, so tests inject fakes and never open a PTY.
 - **`state`**: the JSON file format (`Version = 3`). Stores only metadata: names, branches, commands, workspace-relative worktree paths, an index-based layout tree. Paths are relative to the
 root by design, which is why the form refuses a worktree outside the workspace rather than
 accepting one and dropping the terminal on save. Malformed layout nodes decode to empty nodes and are sanitised away rather than failing the load.
 - **`config`**: `$XDG_CONFIG_HOME/tm/config.toml` with `max_terminals`. Re-read on every creation attempt (`workspace.LimitSource`), so edits apply without restart; invalid values fall back to the default and carry a `Notice`.
-- **`ui`**: the Bubble Tea `Model` (`ui/model.go`), the new-terminal form, the per-project Terminal Manager (`ui/manager.go`), and the pane tree.
+- **`ui`**: the Bubble Tea `Model` (`ui/model.go`), the new-terminal form, the per-project Terminal Manager (`ui/manager.go`), the uncommitted-changes view (`ui/diffview.go`), and the pane tree.
 
 ### Three layout representations
 
@@ -87,6 +89,19 @@ hit-testing are unaffected by the card. `minPaneCols`/`minPaneRows` are written
 as visible arithmetic (`2 + 12`, `2 + 1 + 2`) because the leading 2 is the card
 border — a pane smaller than that renders a box with nothing inside it.
 
+A pane's cells come from `Emulator.Draw` onto a `uv.Buffer` the session
+reuses (`Session.paint`), not from `Emulator.Render`: `Render` emits nothing
+for a cell the program left at its default background, so those cells would
+show the host terminal's colour through the card, while `Draw` fills the area
+and pads every row to the full width, which is what makes a card a solid
+rectangle. `RenderScrolled` composes history and live screen into that same
+buffer rather than splicing strings, so scrolled rows carry the ground too.
+The emulator's current *and* default background are both `PaneGround`, for
+different reasons: the current colour is what `Draw` fills a default cell
+with; the default is what a program's own reset returns to (without it a reset
+would drop the pane to black) and what answers an OSC 11 query, so a program
+that themes itself to its terminal picks colours that suit the ground.
+
 Colour rules, both learned the hard way:
 
 1. **Never use an ANSI-256 index.** An index is a slot number, not a colour;
@@ -100,6 +115,70 @@ Colour rules, both learned the hard way:
    start and restores it with OSC 111 on exit, which is the only thing that
    reaches the emulator's window padding. The two layers are deliberate
    belt-and-braces: tmux filters OSC 11 unless `allow-passthrough` is on.
+
+### Uncommitted changes view
+
+`d` (sidebar) and `alt+d` (terminal focus) open `ui/diffview.go`, a
+full-screen modal framed like the help screen (`modalStyle`, sized to
+`m.width` rather than the narrower main pane). It shows the changes in the
+focused terminal's directory, or the selected project's checkout when opened
+from the sidebar, and like the help screen it consumes every key. `tab` moves
+focus between the file list and the diff; `j`/`k` and the arrows act on
+whichever half has focus; `←`/`→` move both columns by one shared offset;
+`n`/`N` jump between runs of changed rows; `r` re-reads; `esc` closes.
+Nothing is read on a timer: the list on open and on `r`, a file when it is
+selected, so content cannot shift while it is being read. `diffRows` and
+`View` must measure the same frame, which is why `modalStyle` has a name.
+
+**The untracked-file trap.** Every form of `git diff` — plain, `--cached`,
+`HEAD` — ignores untracked files, so a file an agent just created is invisible
+to all of them. `git.Changes` therefore consults `git status --porcelain=v1 -z
+--untracked-files=all` as well as `git diff HEAD --numstat -z`;
+`--untracked-files=all` is what lists the files inside a new directory
+individually instead of as one `dir/` entry. tm counts an untracked file's
+lines itself, with git's unterminated-last-line rule, and `load` synthesises
+one whole-file hunk for it because `git diff HEAD -U0` yields none.
+
+**Rename detection comes from numstat, not status.** status reports from the
+index — a `git mv` is always `R` to it — while diff decides by content
+similarity, and the two disagree below git's 50% threshold. The hunks
+`DiffHEAD` produces follow numstat's pairing, so taking the pairing from the
+same command that produces the hunks is what stops the file list disagreeing
+with the alignment: a move status calls a rename but numstat did not pair is
+listed as an addition and a deletion. `DiffHEAD` is handed both paths of a
+rename because git pairs the two sides only when both are inside the
+pathspec; given the destination alone it reports a whole-file addition.
+
+**Alignment.** `git diff HEAD -U0` hunk headers carry the whole mapping, so
+`diff.ParseHunks` reads only the `@@` lines and the diff body is never
+parsed. A zero count means the start names the line the change sits *after*
+(`@@ -3,0 +4 @@` inserts after old line 3), which `Align` honours when it
+decides where the unchanged run before a hunk ends. `Align` walks both
+complete files and pads whichever side is shorter, so the two columns' line
+numbers legitimately diverge; a hunk naming lines beyond both files (the file
+changed between the diff and the read) is dropped rather than drawn as
+padding for nothing. `internal/diff` imports neither git nor Bubble Tea: that
+isolation is what makes the one real algorithm here testable on its own,
+including `TestAlignReproducesBothFilesAgainstRealGit`, which asks real git
+for the hunks of random edits and checks that each column reads back as its
+file.
+
+**Long lines scroll, never wrap.** A wrapped line takes two rows on one side
+and one on the other, destroying the alignment the view exists for. `side`
+cuts each line with `ansi.TruncateLeft`/`ansi.Truncate` at the shared offset,
+and `scrollX` stops at the widest line because past it there is nothing to see.
+
+**File-derived text is stripped of control characters** — code lines
+(`plainText`), paths, rename sources and load errors. This is the first tm
+view that renders repository bytes straight into the frame; the terminal
+panes pass everything through a vt emulator that interprets it first. A lone
+`\r` from a CRLF file counts as zero cells to both `ansi.Truncate` and
+`lipgloss.Width`, so it slips past every width guard, and drawn it returns
+the cursor to column 0 so the right column lands on the file list. Tabs are
+expanded to four spaces *before* stripping: Truncate counts a tab as nothing
+while the terminal draws it wide, so a line cut with tabs in it shoves the
+other column along. `d.title` and `d.dir` are the deliberate exemptions: they
+name where tm runs, not what is inside the repository.
 
 ### Key handling policy
 

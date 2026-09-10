@@ -359,6 +359,11 @@ func pad(s string, width int) string {
 // It is cut to one line: Lip Gloss wraps an over-long line rather than
 // clipping it, and a second header row would push the status bar off the
 // window. The totals are short and fixed, so the branch name gives way.
+// d.title here and d.dir in view are exempt from stripControlChars: they name
+// where tm runs — a workspace child directory, a branch name (git refuses
+// control characters in refs), a tm-sanitised worktree path — not what is
+// inside the repository, which is the boundary every other string in this
+// view is stripped at.
 func (d *diffView) header(width int) string {
 	left := titleStyle.Render("Uncommitted changes") + textStyle.Render("  "+d.title)
 	if len(d.files) == 0 {
