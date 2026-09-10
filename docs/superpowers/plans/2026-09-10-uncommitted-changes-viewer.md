@@ -873,7 +873,54 @@ Rewrite the row loop in `viewSidebar` so the row is built at full width before i
 
 Confirm `ansi.Wrap`'s signature in the pinned `github.com/charmbracelet/x/ansi` before using it; if it differs, use whatever that package provides for wrapping to a width.
 
-- [ ] **Step 5: The status bar**
+- [ ] **Step 5: A gutter between the sidebar and the first card, and one render per view**
+
+Two things found after Task 4 landed, both in code the plan itself prescribed.
+
+**The sidebar and the first card touch.** Rendered on a real terminal the boundary reads
+`╯╰` — the cards are separated from each other by a one-cell gap but not from the
+sidebar, which is inconsistent both with them and with the design. Give the pane area a
+one-cell left gutter on the ground, so the sidebar stands clear:
+
+```go
+	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, gap(1, paneHeight), mainPane)
+```
+
+and take that cell out of the pane area's width wherever it is measured — `mainArea()`,
+the `cols`/`rows` pair, and the `mainPane` width in `View()` all currently use
+`m.width - sidebarWidth`, which must become `m.width - sidebarWidth - paneGutter`. Define
+it next to `sidebarWidth`:
+
+```go
+// paneGutter is the blank column between the sidebar and the first card, so the
+// sidebar stands clear of the terminals the way the cards stand clear of each other.
+const paneGutter = 1
+```
+
+`screenRect` in `internal/ui/scroll.go` must add it too, or the wheel will target one
+cell to the left of every pane:
+
+```go
+	r.x += sidebarWidth + paneGutter
+```
+
+Extend the hit-testing test from Task 4 so its `minX` assertion expects
+`sidebarWidth + paneGutter`. That test is the only thing standing between this change and
+silently mis-targeted scrolling.
+
+**`viewMain()` renders twice when a form or panel is open.** The Task 4 code builds the
+borderless `mainPane`, then throws it away and rebuilds it framed. Compute the style
+first and render once:
+
+```go
+	style, focused := mainAreaStyle, false
+	if m.panel != nil || m.form != nil {
+		style, focused = mainStyle, m.focus == focusMain
+	}
+	mainPane := framed(style, focused, m.width-sidebarWidth-paneGutter, paneHeight).Render(m.viewMain())
+```
+
+- [ ] **Step 6: The status bar**
 
 In `viewStatus`, keep building `parts` and `hints` as they are, then lay them out with the hints pushed right instead of joining everything with `•`:
 
@@ -891,12 +938,12 @@ In `viewStatus`, keep building `parts` and `hints` as they are, then lay them ou
 
 where `parts` no longer has the hints appended to it — remove the `parts = append(parts, hints...)` line.
 
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 7: Run the tests**
 
 Run: `export PATH=$HOME/.local/go/bin:$PATH && go test ./internal/ui -v` then `go test ./...`
 Expected: PASS. Tests asserting the old status-bar joining or the filled header will need updating; list each in your report.
 
-- [ ] **Step 7: Build it and look**
+- [ ] **Step 8: Build it and look**
 
 ```bash
 export PATH=$HOME/.local/go/bin:$PATH
@@ -905,7 +952,7 @@ go build -o bin/tm ./cmd/tm
 
 Report that the binary built. Do not install it over `~/.local/bin/tm` — the controller does that, because a tm may be running.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 export PATH=$HOME/.local/go/bin:$PATH && gofmt -w internal/ui
