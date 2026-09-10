@@ -439,7 +439,7 @@ Append to `internal/ui/panes_test.go`:
 func TestEachTerminalIsItsOwnCard(t *testing.T) {
 	m, spawned := newTestModel(t)
 	m = press(m, "j", "enter")
-	makeTerminal(t, &m, "alt+v", "", "") // split beside the first
+	m = makeTerminal(t, m, "alt+v", "", "") // split beside the first
 
 	view := m.View()
 
@@ -618,7 +618,7 @@ Append to `internal/ui/scroll_test.go`:
 func TestWheelStillFindsThePaneUnderThePointerWithoutAnOuterFrame(t *testing.T) {
 	m, _ := newTestModel(t)
 	m = press(m, "j", "enter")
-	makeTerminal(t, &m, "alt+v", "", "")
+	m = makeTerminal(t, m, "alt+v", "", "")
 
 	p := m.selectedProject()
 	rects := m.paneScreenRects(p)
