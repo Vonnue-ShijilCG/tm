@@ -223,7 +223,7 @@ func TestPanesRenderOnTheirOwnBackground(t *testing.T) {
 		t.Fatalf("Render gave %d lines, want one per row: %q", len(lines), lines)
 	}
 	for i, line := range lines {
-		if !strings.Contains(line, "\x1b[48;2;0;0;0m") {
+		if !strings.Contains(line, "\x1b[48;2;42;54;74m") {
 			t.Errorf("row %d carries no pane background: %q", i, line)
 		}
 		// The pane is a rectangle: a blank row is as wide as a full one, so
@@ -243,11 +243,25 @@ func TestScrolledHistoryIsOnTheSameBackground(t *testing.T) {
 		t.Fatalf("RenderScrolled gave %d lines, want 5", len(lines))
 	}
 	for i, line := range lines {
-		if !strings.Contains(line, "\x1b[48;2;0;0;0m") {
+		if !strings.Contains(line, "\x1b[48;2;42;54;74m") {
 			t.Errorf("scrolled row %d carries no pane background: %q", i, line)
 		}
 	}
 	if !strings.Contains(lines[0], "line-24") {
 		t.Errorf("scrolling still has to show the right history: %q", lines[0])
 	}
+}
+
+func TestTheProgramIsToldWhatGroundItIsOn(t *testing.T) {
+	// A program that themes itself to its terminal asks with OSC 11. It must
+	// be told tm's ground, not the emulator library's default, or it will pick
+	// colours for a black background it is not actually on.
+	//
+	// The reply arrives on the child's stdin and the pty echoes it back to the
+	// screen, which is what we wait for. (It cannot be read with the shell's
+	// own "read": the reply is BEL-terminated, and POSIX read only completes a
+	// line on a newline, so it would block forever.)
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "printf '\\033]11;?\\033\\\\'; sleep 30"}, Dir: t.TempDir(), Cols: 60, Rows: 4})
+
+	waitFor(t, s, "rgb:2a2a/3636/4a4a")
 }

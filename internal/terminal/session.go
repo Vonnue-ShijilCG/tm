@@ -43,8 +43,10 @@ type Config struct {
 
 // paneBackground is the ground every pane is drawn on. Panes share one colour
 // whatever the host terminal uses, so each terminal reads as its own rectangle
-// instead of blending into whatever is behind tm.
-var paneBackground color.Color = color.Black
+// instead of blending into whatever is behind tm. It is a dark slate rather
+// than true black: black against a bordered pane reads as a hole in the
+// screen, and leaves nothing for a program's own dark colours to sit on.
+var paneBackground color.Color = color.RGBA{R: 0x2a, G: 0x36, B: 0x4a, A: 0xff}
 
 // drawTarget adapts a uv.Buffer to the uv.Screen the emulator draws onto. A
 // Buffer is not a Screen by itself: it has no WidthMethod, which the emulator
@@ -102,13 +104,12 @@ func Start(cfg Config) (*Session, error) {
 	// SetBackgroundColor is load-bearing: it sets e.bgColor, which is what
 	// Draw's per-cell top-up checks before filling a cell the program left at
 	// its default, so this is what actually puts the ground under a pane's
-	// own output. SetDefaultBackgroundColor is defensive rather than
-	// necessary here — the library's own default background is already
-	// black, which is also what answers an OSC 11 query via BackgroundColor's
-	// fallback to it — but it keeps a program's own reset (which restores the
-	// default, not the current colour) landing on paneBackground rather than
-	// whatever the library's default happens to be if that default ever
-	// changes or paneBackground stops being black.
+	// own output. SetDefaultBackgroundColor matters because paneBackground is
+	// not the library's default: a program's own reset restores the default
+	// rather than the current colour, so without this a reset would drop the
+	// pane to black instead of back onto the ground tm draws. It is also what
+	// answers an OSC 11 query, so a program that themes itself to its
+	// terminal picks colours that suit this ground.
 	s.emu.SetDefaultBackgroundColor(paneBackground)
 	s.emu.SetBackgroundColor(paneBackground)
 	// Called from emu.Write, i.e. while s.mu is held by readLoop.
