@@ -620,15 +620,16 @@ func TestWheelStillFindsThePaneUnderThePointerWithoutAnOuterFrame(t *testing.T) 
 	m = press(m, "j", "enter")
 	makeTerminal(t, &m, "alt+v", "", "")
 
-	rects := m.paneScreenRects(m.selectedProject())
+	p := m.selectedProject()
+	rects := m.paneScreenRects(p)
 	if len(rects) != 2 {
 		t.Fatalf("want two panes, got %d", len(rects))
 	}
 	for term, r := range rects {
 		// The pointer at a pane's own top-left cell must find that pane.
-		got := m.paneAt(r.x, r.y)
+		got, _ := m.paneAt(p, r.x, r.y)
 		if got != term {
-			t.Errorf("pointer at (%d,%d) found %v, want the pane whose rect starts there", r.x, r.y, got)
+			t.Errorf("pointer at (%d,%d) found the wrong pane", r.x, r.y)
 		}
 	}
 	// The leftmost pane starts immediately right of the sidebar: with no frame
@@ -643,7 +644,7 @@ func TestWheelStillFindsThePaneUnderThePointerWithoutAnOuterFrame(t *testing.T) 
 }
 ```
 
-Check `paneAt`'s real signature and return type in `internal/ui/scroll.go` and adapt the call if it differs.
+`paneAt` is `func (m Model) paneAt(p *workspace.Project, x, y int) (*workspace.Terminal, rect)` — verified; the test above already calls it correctly.
 
 - [ ] **Step 2: Run it to verify it fails**
 
