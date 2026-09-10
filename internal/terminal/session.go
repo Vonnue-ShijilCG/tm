@@ -11,6 +11,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 
 	uv "github.com/charmbracelet/ultraviolet"
@@ -41,12 +43,31 @@ type Config struct {
 	Rows    int      // initial terminal height in cells
 }
 
-// paneBackground is the ground every pane is drawn on. Panes share one colour
-// whatever the host terminal uses, so each terminal reads as its own rectangle
-// instead of blending into whatever is behind tm. It is a dark slate rather
-// than true black: black against a bordered pane reads as a hole in the
-// screen, and leaves nothing for a program's own dark colours to sit on.
-var paneBackground color.Color = color.RGBA{R: 0x2a, G: 0x36, B: 0x4a, A: 0xff}
+// PaneGround is the ground every pane is drawn on, as a hex string. Panes
+// share one colour whatever the host terminal uses, so each terminal reads as
+// its own rectangle instead of blending into whatever is behind tm. It is a
+// dark slate rather than true black: black against a bordered pane reads as a
+// hole in the screen, and leaves nothing for a program's own dark colours to
+// sit on.
+//
+// It is exported as the string form because the UI paints its own chrome to
+// match, and Lip Gloss takes a hex string while the emulator takes a
+// color.Color. One constant, parsed once, keeps the two from drifting.
+const PaneGround = "#2a364a"
+
+// paneBackground is PaneGround in the form the emulator wants.
+var paneBackground color.Color = mustParseHex(PaneGround)
+
+// mustParseHex turns "#rrggbb" into a colour, panicking on a malformed
+// constant — it only ever parses constants in this package, so a bad value is
+// a programming error caught on the first run, not a condition to handle.
+func mustParseHex(s string) color.RGBA {
+	v, err := strconv.ParseUint(strings.TrimPrefix(s, "#"), 16, 32)
+	if err != nil {
+		panic("terminal: bad colour constant " + s)
+	}
+	return color.RGBA{R: uint8(v >> 16), G: uint8(v >> 8), B: uint8(v), A: 0xff}
+}
 
 // drawTarget adapts a uv.Buffer to the uv.Screen the emulator draws onto. A
 // Buffer is not a Screen by itself: it has no WidthMethod, which the emulator
