@@ -91,11 +91,21 @@ by scrolling. tm already knows every changed line's position from the diff.
 
 ## Keys
 
+The modal has two focusable halves, the file list and the diff, and `Tab` moves
+between them — the same shape as the sidebar and the main pane in tm proper.
+`j`/`k` and `↑`/`↓` then both mean "move within whatever has focus": rows in the
+file list, lines in the diff.
+
+That matters because everywhere else in tm `j`/`k` and the arrows are synonyms.
+Making them diverge here — `j`/`k` for files, arrows for scrolling — would be
+the only place in the application where they mean different things, and the
+existing focus model already solves it.
+
 | Key | Action |
 | --- | --- |
 | `d` (sidebar) / `alt+d` (terminal) | open |
-| `j` / `k` | previous / next file |
-| `↑` / `↓` | scroll the file |
+| `tab` | move between the file list and the diff |
+| `j` / `k`, `↑` / `↓` | move within the focused half |
 | `←` / `→` | scroll long lines |
 | `n` / `N` | next / previous change |
 | `r` | re-read from git |
@@ -103,8 +113,13 @@ by scrolling. tm already knows every changed line's position from the diff.
 
 `alt+d` rather than a plain letter in terminal focus, because tm reserves only
 `Esc` and `Alt` chords there — a plain letter belongs to the running program.
-This mirrors `m` / `alt+m` for the Terminal Manager. All bindings go in
-`ui/keys.go`, which feeds input matching, the help screen and the status bar.
+This mirrors `m` / `alt+m` for the Terminal Manager.
+
+All bindings go in `ui/keys.go`, which feeds input matching, the help screen and
+the status bar. They form their own context-scoped set, as the Terminal Manager's
+do: `n` already means "new terminal" in the sidebar and in the manager, so `n`
+meaning "next change" inside this view follows the existing convention rather
+than breaking it.
 
 ## Refresh
 
