@@ -260,7 +260,9 @@ func (s *Session) RenderScrolled(offset int) string {
 }
 ```
 
-`strings` may now be unused in `session.go`; check before building.
+The `strings` import is now unused in `session.go` — its only two uses were
+the `Split`/`Join` in the old `RenderScrolled`. Remove it, or the package
+will not compile.
 
 - [ ] **Step 4: Re-weight the borders**
 
@@ -1201,14 +1203,17 @@ func (d *diffView) counts(f git.FileChange) string {
 }
 ```
 
-Add the two colours to `internal/ui/styles.go`, beside the existing ones:
+`internal/ui/styles.go` has a single `var (...)` block holding both the colour
+constants and the styles built from them. Add these inside it — the colours
+beside the other colours, the styles beside the other styles. Do not open a
+second block.
 
 ```go
-	added   = lipgloss.Color("108") // additions: green, legible on a dark ground
+	added   = lipgloss.Color("108") // additions: green, legible on the black pane ground
 	removed = lipgloss.Color("174") // removals: red
-)
+```
 
-var (
+```go
 	addStyle = lipgloss.NewStyle().Foreground(added)
 	delStyle = lipgloss.NewStyle().Foreground(removed)
 ```
