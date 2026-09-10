@@ -1,12 +1,14 @@
 package ui
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 )
 
 func TestHelpOpensFromSidebarAndEscRestoresState(t *testing.T) {
@@ -90,4 +92,28 @@ func TestStatusBarFitsOneLine(t *testing.T) {
 		}
 	}
 	_ = tea.KeyMsg{}
+}
+
+// TestStatusBarNeverExceedsTheWindowWidth guards the backstop in viewStatus:
+// the key hints alone (before any notice/prompt/info is even considered) can
+// be wider than a narrow window, and the label is sacrificed down to nothing
+// before the hints are ever shortened, so without a final clamp the assembled
+// line can still overflow. The width is derived from keys.go's own sidebar
+// hints — the single source of truth for their text — rather than a
+// hardcoded number, so this can't rot silently if a binding's help text
+// changes.
+func TestStatusBarNeverExceedsTheWindowWidth(t *testing.T) {
+	m, _ := newTestModel(t)
+
+	var hints []string
+	for _, b := range keys.sidebarHelp() {
+		h := b.Help()
+		hints = append(hints, fmt.Sprintf("%s %s", h.Key, hintStyle.Render(h.Desc)))
+	}
+	hintsWidth := ansi.StringWidth(strings.Join(hints, hintStyle.Render(" │ ")))
+
+	m.width = hintsWidth / 2 // narrower than the hints alone; nothing else can fit either
+	if w := ansi.StringWidth(m.viewStatus()); w > m.width {
+		t.Errorf("status bar is %d cells wide, want at most the window's %d", w, m.width)
+	}
 }
