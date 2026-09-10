@@ -160,3 +160,15 @@ func TestNeighborFindsAdjacentPanes(t *testing.T) {
 		t.Error("unknown terminal has no neighbours")
 	}
 }
+
+func TestPaneFramesAndDividersShareOneWeight(t *testing.T) {
+	// The dividers between split panes are heavy box-drawing characters. A
+	// light frame around heavy dividers looks like two different tools drew
+	// the screen, so the frame has to match.
+	if got := mainStyle.GetBorderStyle().Left; got != verticalDivider {
+		t.Errorf("frame side is %q but the divider is %q; they must match", got, verticalDivider)
+	}
+	if got := mainStyle.GetBorderStyle().Top; got != horizontalDivider {
+		t.Errorf("frame top is %q but the divider is %q; they must match", got, horizontalDivider)
+	}
+}

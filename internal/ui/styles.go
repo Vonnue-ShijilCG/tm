@@ -5,13 +5,17 @@ import "github.com/charmbracelet/lipgloss"
 const sidebarWidth = 28
 
 var (
-	accent = lipgloss.Color("62")  // focused border / cursor
-	dim    = lipgloss.Color("240") // unfocused border / hints
-	rule   = lipgloss.Color("245") // dividers between panes: brighter than dim, so edges read at a glance
-	bar    = lipgloss.Color("238") // unfocused pane header bar
+	accent = lipgloss.Color("69")  // focused border / cursor: brighter than before, to carry against the black pane ground
+	dim    = lipgloss.Color("240") // hints and the status bar
+	edge   = lipgloss.Color("245") // unfocused border: lifted off dim so an inactive pane keeps a visible edge
+	rule   = lipgloss.Color("245") // dividers between panes
+	bar    = lipgloss.Color("238") // unfocused pane header bar: a step above the black ground, so it reads as the pane's top edge
 
 	// The main pane has no padding so the emulated screen fills it exactly.
-	mainStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(dim)
+	// The border is thick to match the dividers between split panes, which are
+	// heavy box-drawing characters; a light frame around heavy dividers looks
+	// like two different tools drew the screen.
+	mainStyle    = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(edge)
 	sidebarStyle = mainStyle.Padding(0, 1)
 
 	titleStyle = lipgloss.NewStyle().Bold(true)

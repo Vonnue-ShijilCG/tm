@@ -9,6 +9,7 @@ import (
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const waitTimeout = 5 * time.Second
@@ -156,7 +157,7 @@ func TestRenderScrolledShowsHistoryAboveTheScreen(t *testing.T) {
 	}
 
 	top := strings.Split(s.RenderScrolled(1000), "\n") // clamps to the history length
-	if !strings.Contains(top[0], "line-1\x1b") && !strings.HasSuffix(strings.TrimRight(top[0], " "), "line-1") {
+	if !strings.Contains(ansi.Strip(top[0]), "line-1 ") && strings.TrimSpace(ansi.Strip(top[0])) != "line-1" {
 		t.Errorf("RenderScrolled(1000) should start at the oldest line:\n%s", strings.Join(top, "\n"))
 	}
 
@@ -211,4 +212,59 @@ func waitUntil(t *testing.T, cond func() bool, what string) {
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", what)
+}
+
+func TestPanesRenderOnTheirOwnBackground(t *testing.T) {
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "printf 'hi\\n'; sleep 30"}, Dir: t.TempDir(), Cols: 12, Rows: 3})
+	waitFor(t, s, "hi")
+
+	lines := strings.Split(s.Render(false), "\n")
+	if len(lines) != 3 {
+		t.Fatalf("Render gave %d lines, want one per row: %q", len(lines), lines)
+	}
+	for i, line := range lines {
+		if !strings.Contains(line, "\x1b[48;2;0;0;0m") {
+			t.Errorf("row %d carries no pane background: %q", i, line)
+		}
+		// The pane is a rectangle: a blank row is as wide as a full one, so
+		// nothing behind the pane shows through at a short line's end.
+		if w := ansi.StringWidth(line); w != 12 {
+			t.Errorf("row %d is %d cells wide, want 12: %q", i, w, line)
+		}
+	}
+}
+
+func TestScrolledHistoryIsOnTheSameBackground(t *testing.T) {
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "i=1; while [ $i -le 30 ]; do printf 'line-%s\\n' $i; i=$((i+1)); done; sleep 30"}, Dir: t.TempDir(), Cols: 20, Rows: 5})
+	waitFor(t, s, "line-30")
+
+	lines := strings.Split(s.RenderScrolled(3), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("RenderScrolled gave %d lines, want 5", len(lines))
+	}
+	for i, line := range lines {
+		if !strings.Contains(line, "\x1b[48;2;0;0;0m") {
+			t.Errorf("scrolled row %d carries no pane background: %q", i, line)
+		}
+	}
+	if !strings.Contains(lines[0], "line-24") {
+		t.Errorf("scrolling still has to show the right history: %q", lines[0])
+	}
+}
+
+func TestTheProgramIsToldTheBackgroundIsDark(t *testing.T) {
+	// A program that asks with OSC 11 must be answered black, or it will pick
+	// a light theme and fight the ground tm draws it on.
+	//
+	// The reply arrives on the child's stdin, but the pty's local echo puts
+	// the same bytes back on screen, which is what we wait for and assert on
+	// here. (A round trip through the shell's own "read" can't be used to
+	// observe this: the reply is BEL-terminated, not newline-terminated, so
+	// POSIX read - which only completes a line on '\n' - never returns.)
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "printf '\\033]11;?\\033\\\\'; sleep 30"}, Dir: t.TempDir(), Cols: 60, Rows: 4})
+
+	waitFor(t, s, "rgb:0000/0000/0000")
+	if screen := s.Render(false); !strings.Contains(screen, "rgb:0000/0000/0000") {
+		t.Errorf("OSC 11 query was not answered black:\n%s", screen)
+	}
 }

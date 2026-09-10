@@ -7,10 +7,10 @@ package terminal
 
 import (
 	"errors"
+	"image/color"
 	"io"
 	"os"
 	"os/exec"
-	"strings"
 	"sync"
 
 	uv "github.com/charmbracelet/ultraviolet"
@@ -41,6 +41,21 @@ type Config struct {
 	Rows    int      // initial terminal height in cells
 }
 
+// paneBackground is the ground every pane is drawn on. Panes share one colour
+// whatever the host terminal uses, so each terminal reads as its own rectangle
+// instead of blending into whatever is behind tm.
+var paneBackground color.Color = color.Black
+
+// drawTarget adapts a uv.Buffer to the uv.Screen the emulator draws onto. A
+// Buffer is not a Screen by itself: it has no WidthMethod, which the emulator
+// needs to know how many cells a grapheme occupies.
+type drawTarget struct {
+	*uv.Buffer
+	width uv.WidthMethod
+}
+
+func (d drawTarget) WidthMethod() uv.WidthMethod { return d.width }
+
 // Session is a live process attached to a PTY plus the emulated screen
 // that mirrors its output. All methods are safe for concurrent use.
 type Session struct {
@@ -49,6 +64,7 @@ type Session struct {
 
 	mu            sync.Mutex // guards emu, cursorVisible, title and mouseModes
 	emu           *vt.Emulator
+	buf           *uv.Buffer // reused render target; see paint
 	cursorVisible bool
 	title         string             // last title set by the program via OSC 0/2
 	mouseModes    map[ansi.Mode]bool // mouse tracking modes the program has enabled
@@ -77,11 +93,17 @@ func Start(cfg Config) (*Session, error) {
 		cmd:           cmd,
 		pty:           ptmx,
 		emu:           vt.NewEmulator(cfg.Cols, cfg.Rows),
+		buf:           uv.NewBuffer(cfg.Cols, cfg.Rows),
 		cursorVisible: true,
 		mouseModes:    map[ansi.Mode]bool{},
 		output:        make(chan struct{}, 1),
 		done:          make(chan struct{}),
 	}
+	// Both, deliberately: the default is what a program's own reset returns
+	// to, and the current colour is what an OSC 11 query is answered with, so
+	// programs that theme themselves to the terminal pick their dark palette.
+	s.emu.SetDefaultBackgroundColor(paneBackground)
+	s.emu.SetBackgroundColor(paneBackground)
 	// Called from emu.Write, i.e. while s.mu is held by readLoop.
 	s.emu.SetCallbacks(vt.Callbacks{
 		CursorVisibility: func(visible bool) { s.cursorVisible = visible },
@@ -251,6 +273,20 @@ func (s *Session) Size() (cols, rows int) {
 	return s.emu.Width(), s.emu.Height()
 }
 
+// paint draws the emulated screen onto the reused buffer and renders that.
+// Going through Draw rather than emu.Render is what puts the pane background
+// on every cell: Render emits nothing for a cell the program left at its
+// default, so those cells would show the host terminal's colour instead. Draw
+// also pads every row to the full width, which makes the pane a rectangle.
+//
+// The caller must hold s.mu. The buffer is reused across frames so a pane that
+// prints steadily does not allocate a full screen of cells per output event.
+func (s *Session) paint() string {
+	s.buf.Resize(s.emu.Width(), s.emu.Height())
+	s.emu.Draw(drawTarget{s.buf, s.emu.WidthMethod()}, s.buf.Bounds())
+	return s.buf.Render()
+}
+
 // Render returns the screen as styled text, one line per row. When
 // showCursor is true the cursor cell is drawn in reverse video.
 func (s *Session) Render(showCursor bool) string {
@@ -258,13 +294,13 @@ func (s *Session) Render(showCursor bool) string {
 	defer s.mu.Unlock()
 
 	if !showCursor || !s.cursorVisible {
-		return s.emu.Render()
+		return s.paint()
 	}
 
 	pos := s.emu.CursorPosition()
 	cell := s.emu.CellAt(pos.X, pos.Y)
 	if cell == nil {
-		return s.emu.Render()
+		return s.paint()
 	}
 
 	original := cell.Clone()
@@ -274,7 +310,7 @@ func (s *Session) Render(showCursor bool) string {
 	}
 	highlighted.Style.Attrs ^= uv.AttrReverse
 	s.emu.SetCell(pos.X, pos.Y, highlighted)
-	out := s.emu.Render()
+	out := s.paint()
 	s.emu.SetCell(pos.X, pos.Y, original)
 	return out
 }
@@ -321,21 +357,35 @@ func (s *Session) IsAltScreen() bool {
 func (s *Session) RenderScrolled(offset int) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	live := s.emu.Render()
 	if offset <= 0 || s.emu.IsAltScreen() {
-		return live
+		return s.paint()
 	}
 	sb := s.emu.Scrollback()
 	if sb == nil {
-		return live
+		return s.paint()
 	}
+
+	width, height := s.emu.Width(), s.emu.Height()
 	offset = min(offset, sb.Len())
-	height := s.emu.Height()
-	lines := make([]string, 0, height)
-	for i := sb.Len() - offset; i < sb.Len() && len(lines) < height; i++ {
-		lines = append(lines, sb.Line(i).Render())
+	rows := min(offset, height) // rows of history shown above the live screen
+
+	s.buf.Resize(width, height)
+	blank := uv.EmptyCell
+	blank.Style.Bg = paneBackground
+	s.buf.Fill(&blank)
+
+	for y := 0; y < rows; y++ {
+		line := sb.Line(sb.Len() - offset + y)
+		for x := 0; x < len(line) && x < width; x++ {
+			cell := line[x].Clone()
+			if cell.Style.Bg == nil {
+				cell.Style.Bg = paneBackground
+			}
+			s.buf.SetCell(x, y, cell)
+		}
 	}
-	screen := strings.Split(live, "\n")
-	lines = append(lines, screen[:max(height-len(lines), 0)]...)
-	return strings.Join(lines, "\n")
+	// The live screen fills the rows history did not, clipped to them, which
+	// shows its top rows — the same lines the string-splicing version showed.
+	s.emu.Draw(drawTarget{s.buf, s.emu.WidthMethod()}, uv.Rect(0, rows, width, height-rows))
+	return s.buf.Render()
 }
