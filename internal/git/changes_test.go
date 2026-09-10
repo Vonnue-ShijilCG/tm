@@ -141,8 +141,10 @@ func TestChangesListsFilesInsideANewDirectory(t *testing.T) {
 
 // With -z, numstat prints a rename as "add\tdel\t" followed by the source
 // and destination paths in two further fields. status lists the destination,
-// so the counts must be keyed by it or a renamed file shows no numbers.
-func TestChangesKeysARenamedFileByItsNewPath(t *testing.T) {
+// so the counts must be keyed by it or a renamed file shows no numbers. The
+// source survives as OldPath so the viewer can show the moved file's original
+// content rather than treating it as new.
+func TestChangesReportsBothPathsOfARename(t *testing.T) {
 	r := initRepo(t)
 	writeFile(t, r, "old.txt", "one\ntwo\nthree\nfour\n")
 	writeFile(t, r, "other.txt", "x\n")
@@ -166,12 +168,38 @@ func TestChangesKeysARenamedFileByItsNewPath(t *testing.T) {
 	if !ok {
 		t.Fatalf("new.txt missing from Changes: %v", byPath)
 	}
+	if renamed.OldPath != "old.txt" {
+		t.Errorf("new.txt OldPath = %q, want old.txt", renamed.OldPath)
+	}
+	if renamed.Kind != Modified {
+		t.Errorf("new.txt Kind = %v, want Modified", renamed.Kind)
+	}
+	// The counts describe the edit made after the move, not the whole file.
 	if renamed.Added != 1 || renamed.Deleted != 1 {
 		t.Errorf("new.txt counts = +%d -%d, want +1 -1", renamed.Added, renamed.Deleted)
 	}
 	// The record after the rename must still parse as its own file.
-	if other := byPath["other.txt"]; other.Added != 1 || other.Deleted != 0 {
-		t.Errorf("other.txt = %+v, want +1 -0", other)
+	if other := byPath["other.txt"]; other.Added != 1 || other.Deleted != 0 || other.OldPath != "" {
+		t.Errorf("other.txt = %+v, want +1 -0 and no OldPath", other)
+	}
+}
+
+// numstat counts an unterminated last line; the untracked count must agree
+// so a file reports the same number before and after it is staged.
+func TestChangesCountsAnUnterminatedLastLineLikeGit(t *testing.T) {
+	r := initRepo(t)
+	writeFile(t, r, "untracked.txt", "a\nb")
+	writeFile(t, r, "staged.txt", "a\nb")
+	if _, err := run(r.Dir, "add", "staged.txt"); err != nil {
+		t.Fatal(err)
+	}
+
+	byPath := changesByPath(t, r)
+	if byPath["staged.txt"].Added != 2 {
+		t.Fatalf("staged.txt Added = %d, want git's 2 (the test's premise)", byPath["staged.txt"].Added)
+	}
+	if byPath["untracked.txt"].Added != 2 {
+		t.Errorf("untracked.txt Added = %d, want 2 like the staged copy", byPath["untracked.txt"].Added)
 	}
 }
 

@@ -23,6 +23,7 @@ const (
 // for a binary file.
 type FileChange struct {
 	Path    string // relative to the repository root
+	OldPath string // where a rename came from; empty otherwise
 	Kind    ChangeKind
 	Added   int
 	Deleted int
@@ -51,10 +52,12 @@ func Changes(dir string) ([]FileChange, error) {
 			continue
 		}
 		x, y, path := rec[0], rec[1], rec[3:]
-		if strings.ContainsAny(rec[:2], "RC") {
-			i++ // a rename or copy is followed by its source path; skip it
+		var oldPath string
+		if strings.ContainsAny(rec[:2], "RC") && i+1 < len(fields) {
+			i++ // a rename or copy is followed by its source path
+			oldPath = fields[i]
 		}
-		c := FileChange{Path: path, Kind: Modified}
+		c := FileChange{Path: path, OldPath: oldPath, Kind: Modified}
 		switch {
 		case x == '?' && y == '?':
 			c.Kind = Added
@@ -102,6 +105,8 @@ func diffCounts(dir string) (map[string][2]int, map[string]bool) {
 			binary[path] = true
 			continue
 		}
+		// numstat prints only digits or "-" here, and "-" was handled above,
+		// so a parse failure cannot happen and is not worth a code path.
 		a, _ := strconv.Atoi(add)
 		d, _ := strconv.Atoi(del)
 		counts[path] = [2]int{a, d}
@@ -124,7 +129,11 @@ func untrackedLines(path string) (int, bool) {
 	if bytes.IndexByte(head, 0) >= 0 {
 		return 0, true
 	}
-	return bytes.Count(data, []byte("\n")), false
+	n := bytes.Count(data, []byte("\n"))
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		n++ // git counts an unterminated last line too
+	}
+	return n, false
 }
 
 // ShowHEAD returns the committed content of path, byte for byte, and whether
@@ -147,5 +156,5 @@ func ShowHEAD(dir, path string) (string, bool, error) {
 // lines. With -U0 the @@ headers alone carry the whole alignment, so the body
 // never has to be parsed.
 func DiffHEAD(dir, path string) (string, error) {
-	return run(dir, "diff", "HEAD", "-U0", "--", path)
+	return output(dir, "diff", "HEAD", "-U0", "--", path)
 }
