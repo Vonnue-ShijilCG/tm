@@ -53,7 +53,7 @@ type Config struct {
 // It is exported as the string form because the UI paints its own chrome to
 // match, and Lip Gloss takes a hex string while the emulator takes a
 // color.Color. One constant, parsed once, keeps the two from drifting.
-const PaneGround = "#2a364a"
+const PaneGround = "#07112b"
 
 // paneBackground is PaneGround in the form the emulator wants.
 var paneBackground color.Color = mustParseHex(PaneGround)

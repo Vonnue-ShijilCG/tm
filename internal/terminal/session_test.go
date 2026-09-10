@@ -223,7 +223,7 @@ func TestPanesRenderOnTheirOwnBackground(t *testing.T) {
 		t.Fatalf("Render gave %d lines, want one per row: %q", len(lines), lines)
 	}
 	for i, line := range lines {
-		if !strings.Contains(line, "\x1b[48;2;42;54;74m") {
+		if !strings.Contains(line, "\x1b[48;2;7;17;43m") {
 			t.Errorf("row %d carries no pane background: %q", i, line)
 		}
 		// The pane is a rectangle: a blank row is as wide as a full one, so
@@ -243,7 +243,7 @@ func TestScrolledHistoryIsOnTheSameBackground(t *testing.T) {
 		t.Fatalf("RenderScrolled gave %d lines, want 5", len(lines))
 	}
 	for i, line := range lines {
-		if !strings.Contains(line, "\x1b[48;2;42;54;74m") {
+		if !strings.Contains(line, "\x1b[48;2;7;17;43m") {
 			t.Errorf("scrolled row %d carries no pane background: %q", i, line)
 		}
 	}
@@ -263,5 +263,5 @@ func TestTheProgramIsToldWhatGroundItIsOn(t *testing.T) {
 	// line on a newline, so it would block forever.)
 	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "printf '\\033]11;?\\033\\\\'; sleep 30"}, Dir: t.TempDir(), Cols: 60, Rows: 4})
 
-	waitFor(t, s, "rgb:2a2a/3636/4a4a")
+	waitFor(t, s, "rgb:0707/1111/2b2b")
 }

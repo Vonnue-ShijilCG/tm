@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/Vonnue-ShijilCG/tm/internal/terminal"
+)
 
 const sidebarWidth = 28
 
@@ -11,11 +15,16 @@ var (
 	rule   = lipgloss.Color("245") // dividers between panes
 	bar    = lipgloss.Color("238") // unfocused pane header bar: a step above the black ground, so it reads as the pane's top edge
 
+	// tm's own chrome sits on the same ground the panes are drawn on, taken
+	// from the same constant, so the sidebar, the gaps between splits and a
+	// pane's own output read as one surface rather than three.
+	ground = lipgloss.Color(terminal.PaneGround)
+
 	// The main pane has no padding so the emulated screen fills it exactly.
 	// The border is thick to match the dividers between split panes, which are
 	// heavy box-drawing characters; a light frame around heavy dividers looks
 	// like two different tools drew the screen.
-	mainStyle    = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(edge)
+	mainStyle    = lipgloss.NewStyle().Border(lipgloss.ThickBorder()).BorderForeground(edge).Background(ground)
 	sidebarStyle = mainStyle.Padding(0, 1)
 
 	titleStyle = lipgloss.NewStyle().Bold(true)
