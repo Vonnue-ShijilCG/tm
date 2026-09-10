@@ -217,6 +217,17 @@ func IsDirty(dir string) (bool, error) {
 
 // run executes git in dir and returns trimmed stdout.
 func run(dir string, args ...string) (string, error) {
+	out, err := output(dir, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// output executes git in dir and returns stdout exactly as written. Use it
+// where a leading space or trailing newline carries meaning: file contents,
+// and porcelain status records whose first column is a space.
+func output(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -227,5 +238,5 @@ func run(dir string, args ...string) (string, error) {
 		}
 		return "", &Error{Args: args, Stderr: strings.TrimSpace(stderr.String())}
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.String(), nil
 }
