@@ -32,7 +32,14 @@ var (
 	// Thin and rounded: with every pane on its own ground and its own frame,
 	// separation comes from the card edges and the gaps between them, not
 	// from the weight of a line.
-	mainStyle    = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(edge).Background(ground)
+	// BorderBackground as well as Background: a border glyph is a cell like any
+	// other, and one drawn with only a foreground leaves its cell on the
+	// terminal's default background. On a translucent or non-black terminal
+	// that shows the desktop through tm's own frame, which is what made the
+	// borders and header text appear in colours tm never chose. tm paints
+	// every cell it owns.
+	mainStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).
+			BorderForeground(edge).BorderBackground(ground).Background(ground)
 	sidebarStyle = mainStyle.Padding(0, 1)
 
 	// mainAreaStyle is the ground the terminal cards float on. It has no
@@ -43,28 +50,29 @@ var (
 
 	// cardStyle is one terminal's box. It has no padding so the emulated
 	// screen meets its border exactly.
-	cardStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(edge).Background(ground)
+	cardStyle = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).
+			BorderForeground(edge).BorderBackground(ground).Background(ground)
 
-	titleStyle = lipgloss.NewStyle().Bold(true)
+	titleStyle = lipgloss.NewStyle().Bold(true).Background(ground)
 
 	cursorStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#f0f6fc")).
 			Background(accent).
 			Bold(true)
 
-	selectedStyle = lipgloss.NewStyle().Foreground(accent).Bold(true)
+	selectedStyle = lipgloss.NewStyle().Foreground(accent).Bold(true).Background(ground)
 
-	hintStyle = lipgloss.NewStyle().Foreground(dim)
+	hintStyle = lipgloss.NewStyle().Foreground(dim).Background(ground)
 
 	// A pane's status dot: blue while it has focus, green while its process
 	// runs, dim once it has exited.
-	dotFocused = lipgloss.NewStyle().Foreground(accent)
-	dotRunning = lipgloss.NewStyle().Foreground(added)
-	dotExited  = lipgloss.NewStyle().Foreground(dim)
+	dotFocused = lipgloss.NewStyle().Foreground(accent).Background(ground)
+	dotRunning = lipgloss.NewStyle().Foreground(added).Background(ground)
+	dotExited  = lipgloss.NewStyle().Foreground(dim).Background(ground)
 
-	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171"))
+	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).Background(ground)
 
-	statusStyle = lipgloss.NewStyle().Foreground(dim).Padding(0, 1)
+	statusStyle = lipgloss.NewStyle().Foreground(dim).Background(ground).Padding(0, 1)
 )
 
 // framed applies the focus colour and sizes a pane so its outer box is

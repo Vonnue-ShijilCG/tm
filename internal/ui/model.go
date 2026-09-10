@@ -1042,7 +1042,7 @@ func (m Model) viewSidebar() string {
 			case i == m.cursor && m.focus == focusSidebar:
 				style = cursorStyle
 			case i == m.selected:
-				style = selectedStyle.Background(ground)
+				style = selectedStyle
 			}
 			b.WriteString(style.Width(inner).MaxWidth(inner).Render(prefix + part))
 			b.WriteByte('\n')
