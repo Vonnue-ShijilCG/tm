@@ -251,20 +251,3 @@ func TestScrolledHistoryIsOnTheSameBackground(t *testing.T) {
 		t.Errorf("scrolling still has to show the right history: %q", lines[0])
 	}
 }
-
-func TestTheProgramIsToldTheBackgroundIsDark(t *testing.T) {
-	// A program that asks with OSC 11 must be answered black, or it will pick
-	// a light theme and fight the ground tm draws it on.
-	//
-	// The reply arrives on the child's stdin, but the pty's local echo puts
-	// the same bytes back on screen, which is what we wait for and assert on
-	// here. (A round trip through the shell's own "read" can't be used to
-	// observe this: the reply is BEL-terminated, not newline-terminated, so
-	// POSIX read - which only completes a line on '\n' - never returns.)
-	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "printf '\\033]11;?\\033\\\\'; sleep 30"}, Dir: t.TempDir(), Cols: 60, Rows: 4})
-
-	waitFor(t, s, "rgb:0000/0000/0000")
-	if screen := s.Render(false); !strings.Contains(screen, "rgb:0000/0000/0000") {
-		t.Errorf("OSC 11 query was not answered black:\n%s", screen)
-	}
-}

@@ -62,7 +62,7 @@ type Session struct {
 	cmd *exec.Cmd
 	pty *os.File
 
-	mu            sync.Mutex // guards emu, cursorVisible, title and mouseModes
+	mu            sync.Mutex // guards emu, buf, cursorVisible, title and mouseModes
 	emu           *vt.Emulator
 	buf           *uv.Buffer // reused render target; see paint
 	cursorVisible bool
@@ -99,9 +99,16 @@ func Start(cfg Config) (*Session, error) {
 		output:        make(chan struct{}, 1),
 		done:          make(chan struct{}),
 	}
-	// Both, deliberately: the default is what a program's own reset returns
-	// to, and the current colour is what an OSC 11 query is answered with, so
-	// programs that theme themselves to the terminal pick their dark palette.
+	// SetBackgroundColor is load-bearing: it sets e.bgColor, which is what
+	// Draw's per-cell top-up checks before filling a cell the program left at
+	// its default, so this is what actually puts the ground under a pane's
+	// own output. SetDefaultBackgroundColor is defensive rather than
+	// necessary here — the library's own default background is already
+	// black, which is also what answers an OSC 11 query via BackgroundColor's
+	// fallback to it — but it keeps a program's own reset (which restores the
+	// default, not the current colour) landing on paneBackground rather than
+	// whatever the library's default happens to be if that default ever
+	// changes or paneBackground stops being black.
 	s.emu.SetDefaultBackgroundColor(paneBackground)
 	s.emu.SetBackgroundColor(paneBackground)
 	// Called from emu.Write, i.e. while s.mu is held by readLoop.
