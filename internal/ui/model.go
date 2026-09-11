@@ -512,7 +512,7 @@ func (m *Model) dropPane(p *workspace.Project, t *workspace.Terminal) {
 	collapsed := root.remove(t)
 	if wasAuto && collapsed != nil && !automatic(collapsed) {
 		remaining := g.without(t).rowMajor()
-		rebuilt := gridFor(remaining, chooseCols(len(remaining), m.mainArea())).tree()
+		rebuilt := gridFor(remaining, chooseCols(remaining, m.mainArea())).tree()
 		if rebuilt.fits(m.mainArea()) {
 			collapsed = rebuilt
 		}

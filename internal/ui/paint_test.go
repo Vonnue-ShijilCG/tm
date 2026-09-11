@@ -160,6 +160,15 @@ func cellBackgrounds(s string) []string {
 				bg = applyBackground(string(rs[i+2:j]), bg)
 			}
 			i = j + 1
+		case c == '\x1b' && i+1 < len(rs) && rs[i+1] == ']': // OSC, up to BEL or ST: its payload is not cells
+			j := i + 2
+			for j < len(rs) && rs[j] != '\a' && !(rs[j] == '\x1b' && j+1 < len(rs) && rs[j+1] == '\\') {
+				j++
+			}
+			if j < len(rs) && rs[j] == '\x1b' {
+				j++
+			}
+			i = j + 1
 		case c == '\x1b':
 			i += 2
 		case c < 0x20 || c == 0x7f:
@@ -237,6 +246,12 @@ func TestCellBackgroundsTracksTheColourUnderEachCell(t *testing.T) {
 	want := []string{"48;2;7;17;43", "", "48;2;16;30;58", "48;2;16;30;58", "", "44"}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("cellBackgrounds = %q, want %q", got, want)
+	}
+	// An OSC sequence (a hyperlink here) is not cells: its payload must not
+	// leak into the count, whether it ends in BEL or in ST.
+	osc := "\x1b[44m\x1b]8;;http://x.test/path\x07ab\x1b]8;;\x1b\\c\x1b[0m"
+	if got := cellBackgrounds(osc); strings.Join(got, "|") != "44|44|44" {
+		t.Fatalf("cellBackgrounds over OSC = %q, want three cells on 44", got)
 	}
 }
 

@@ -41,17 +41,24 @@ func allowedCols(n int) []int {
 	return []int{lo, lo + 1}
 }
 
-// chooseCols picks the allowed column count for n terminals in r whose
-// cells come closest to square (a character cell is about twice as tall as
-// wide), preferring counts that keep every pane at the minimum size. It
-// only decides orientation when a grid is generated; a window resize keeps
+// chooseCols picks the allowed column count for ts in r whose cells come
+// closest to square (a character cell is about twice as tall as wide),
+// preferring counts that keep every pane at the minimum size. It only
+// decides orientation when a grid is generated; a window resize keeps
 // whatever was chosen.
-func chooseCols(n int, r rect) int {
-	options := allowedCols(n)
+//
+// Whether a count fits is asked of the grid itself — built, laid out by
+// rects, and measured by fits — not predicted. A prediction has to agree
+// with rects about the gap and with chain about how the width is shared,
+// and a chain rounds its first column up and starves its last, so the ideal
+// share can clear the minimum while the real last column falls under it.
+// cellSize survives only for the shape score, where an ideal share is fine.
+func chooseCols(ts []*workspace.Terminal, r rect) int {
+	options := allowedCols(len(ts))
 	best, bestScore, bestFits := options[0], math.Inf(1), false
 	for _, cols := range options {
-		w, h := cellSize(n, cols, r)
-		fits := w >= minPaneCols && h >= minPaneRows
+		w, h := cellSize(len(ts), cols, r)
+		fits := gridFor(ts, cols).tree().fits(r)
 		score := math.Abs(math.Log(float64(max(w, 1)) / 2 / float64(max(h, 1))))
 		if (fits && !bestFits) || (fits == bestFits && score < bestScore) {
 			best, bestScore, bestFits = cols, score, fits
@@ -60,8 +67,9 @@ func chooseCols(n int, r rect) int {
 	return best
 }
 
-// cellSize is the size of one pane in an n-terminal grid with cols columns
-// filling r, the gaps between cards taken out.
+// cellSize is the ideal size of one pane in an n-terminal grid with cols
+// columns filling r, the gaps between cards taken out. It is a shape
+// estimate for chooseCols's score; the real sizes come from rects.
 func cellSize(n, cols int, r rect) (w, h int) {
 	rows := (n + cols - 1) / cols
 	return (r.w - (cols-1)*paneGap) / cols, (r.h - (rows - 1)) / rows
@@ -197,7 +205,7 @@ func (g grid) without(t *workspace.Terminal) grid {
 // otherwise the grid is refilled row by row with nt last.
 func (g grid) grow(nt *workspace.Terminal, r rect) grid {
 	ts := append(g.rowMajor(), nt)
-	cols := chooseCols(len(ts), r)
+	cols := chooseCols(ts, r)
 	if cols != len(g) {
 		return gridFor(ts, cols)
 	}

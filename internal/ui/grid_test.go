@@ -93,18 +93,19 @@ func TestAutomaticGridGeometryOneToSix(t *testing.T) {
 		area := m.mainArea()
 		rs := m.paneRects(p)
 		g, _ := gridOf(root)
-		// Columns share the width evenly (within a gap: a column chain rounds
-		// each split's share of the space left after one gap, so with a
-		// two-column gap three columns can come out k+1, k, k-1) and each
-		// column's panes share its height evenly; every column spans the
-		// full height.
+		// Columns share the width within two cells: one systematic column
+		// from the chain's share — each split rounds its first child's share
+		// of the width left after a single gap, so the first column is
+		// usually the widest and the last pays for it (k+1, k, k-1 with
+		// three columns) — plus one of rounding. Each column's panes share
+		// its height evenly; every column spans the full height.
 		colW := rs[g[0][0]].w
 		for _, col := range g {
 			top, bottom := rs[col[0]], rs[col[len(col)-1]]
 			if top.y != 0 || bottom.y+bottom.h != area.h {
 				t.Errorf("%d terminals: column does not span the height: %+v .. %+v", n, top, bottom)
 			}
-			if d := rs[col[0]].w - colW; d < -paneGap || d > paneGap {
+			if d := rs[col[0]].w - colW; d < -2 || d > 2 {
 				t.Errorf("%d terminals: column widths differ: %d vs %d", n, rs[col[0]].w, colW)
 			}
 			for _, term := range col {
@@ -177,16 +178,27 @@ func TestGridOrientationFollowsWindowShape(t *testing.T) {
 }
 
 // TestChooseColsCountsTheGapBetweenColumns: chooseCols judges whether a
-// column count fits by cellSize, which must take the same gap out of the
-// width that rects will. One column short of two cards and the two-column
-// gap, two columns cannot hold cards even though their shape would score
-// better than one tall column's; one column more and they can.
+// column count fits by what rects will actually give the grid, gaps and
+// the chain's uneven share included. One column short of two cards and
+// the two-column gap, two columns cannot hold cards even though their
+// shape would score better than one tall column's; one column more and
+// they can. Three columns need more than their ideal share: at 46 the
+// ideal is 14 each, but the chain gives 15, 14, 13 and the last column is
+// under the minimum, so 46 must not get three columns while 47 (15, 14,
+// 14) may. A height of 17 lets two columns fit either way, so the choice
+// is between fitting counts and not a tie of unfit ones.
 func TestChooseColsCountsTheGapBetweenColumns(t *testing.T) {
-	if got := chooseCols(2, rect{0, 0, 2*minPaneCols + paneGap - 1, 11}); got != 1 {
+	if got := chooseCols(terms(2), rect{0, 0, 2*minPaneCols + paneGap - 1, 11}); got != 1 {
 		t.Errorf("one column short of two cards and a gap: chooseCols = %d, want 1", got)
 	}
-	if got := chooseCols(2, rect{0, 0, 2*minPaneCols + paneGap, 11}); got != 2 {
+	if got := chooseCols(terms(2), rect{0, 0, 2*minPaneCols + paneGap, 11}); got != 2 {
 		t.Errorf("exactly two cards and a gap: chooseCols = %d, want 2", got)
+	}
+	if got := chooseCols(terms(5), rect{0, 0, 46, 17}); got == 3 {
+		t.Errorf("at 46 the chain's third column is %d wide: chooseCols must not pick 3", 46-15-paneGap-14-paneGap)
+	}
+	if got := chooseCols(terms(5), rect{0, 0, 47, 17}); got != 3 {
+		t.Errorf("at 47 three columns fit and are the squarer shape: chooseCols = %d, want 3", got)
 	}
 }
 
@@ -239,7 +251,7 @@ func TestAutomaticDetectionIsStructural(t *testing.T) {
 	ts := terms(8)
 	area := rect{0, 0, 70, 26}
 	for n := 1; n <= 8; n++ {
-		root := gridFor(ts[:n], chooseCols(n, area)).tree()
+		root := gridFor(ts[:n], chooseCols(ts[:n], area)).tree()
 		if !automatic(root) {
 			t.Errorf("generated grid for %d must be automatic", n)
 		}
