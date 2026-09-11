@@ -22,10 +22,18 @@ const wheelStep = 3
 // scrollMark precedes the scrolled-back line count in a pane header.
 const scrollMark = "↑"
 
-// handleMouse routes wheel events to the pane under the pointer. Every
-// other mouse event is ignored.
+// handleMouse routes wheel events to whatever is under the pointer: the
+// changes view when it is open, else the terminal pane. Every other mouse
+// event is ignored.
 func (m *Model) handleMouse(msg tea.MouseMsg) {
-	if msg.Action != tea.MouseActionPress || m.help || m.form != nil || m.panel != nil || m.diff != nil {
+	if msg.Action != tea.MouseActionPress {
+		return
+	}
+	if m.diff != nil {
+		m.diffWheel(msg)
+		return
+	}
+	if m.help || m.form != nil || m.panel != nil {
 		return
 	}
 	var up bool
@@ -72,6 +80,39 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 		return
 	}
 	m.scroll[t] = off
+}
+
+// diffWheel scrolls the changes view. The pointer picks what moves: over the
+// file list the wheel changes the selected file, and the columns follow it to
+// that file; over the columns it scrolls them, both at once, because they
+// share one offset and a line must stay facing its counterpart. Sideways
+// notches — shift+wheel on most terminals, a trackpad's other axis — move the
+// shared horizontal offset, exactly as ← and → do.
+//
+// The list moves one file per notch rather than wheelStep: an entry is two or
+// three rows tall, so one file is already a wheel notch's worth of movement,
+// and each step re-reads a file from git.
+func (m *Model) diffWheel(msg tea.MouseMsg) {
+	if msg.Y >= m.height-statusHeight { // the status bar, below the view
+		return
+	}
+	switch msg.Button {
+	case tea.MouseButtonWheelLeft:
+		m.diff.scrollX(-diffHScrollStep)
+	case tea.MouseButtonWheelRight:
+		m.diff.scrollX(diffHScrollStep)
+	case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+		step := wheelStep
+		files := 1
+		if msg.Button == tea.MouseButtonWheelUp {
+			step, files = -step, -files
+		}
+		if msg.X < modalStyle.GetBorderLeftSize()+modalStyle.GetPaddingLeft()+diffListWidth {
+			m.diff.move(files)
+			return
+		}
+		m.diff.scroll(step, m.diffRows())
+	}
 }
 
 // paneAt returns the terminal whose pane covers screen cell (x, y) and the

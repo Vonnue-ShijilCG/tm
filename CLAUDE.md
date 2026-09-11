@@ -122,11 +122,21 @@ Colour rules, both learned the hard way:
 full-screen modal framed like the help screen (`modalStyle`, sized to
 `m.width` rather than the narrower main pane). It shows the changes in the
 focused terminal's directory, or the selected project's checkout when opened
-from the sidebar, and like the help screen it consumes every key. `tab` moves
-focus between the file list and the diff; `j`/`k` and the arrows act on
-whichever half has focus; `←`/`→` move both columns together, `diffHScrollStep`
-(8) cells at a time along one shared offset;
-`n`/`N` jump between runs of changed rows; `r` re-reads; `esc` closes.
+from the sidebar, and like the help screen it consumes every key.
+
+**The wheel scrolls the columns; the keys move the file list.** There is no
+focus to move between halves and no key that scrolls the diff a row at a
+time: `handleMouse` hands every wheel event to `diffWheel` while the view is
+open, and the pointer's column decides what moves — over the file list a
+notch changes the selected file (one file, not `wheelStep`: an entry is two
+or three rows tall and each step re-reads a file from git), over the columns
+it scrolls them by `wheelStep`, both at once along the one shared `top`.
+Sideways notches move the shared `left`, like `←`/`→`. `j`/`k` and the arrows
+move the file list, always; `n`/`N` jump between runs of changed rows, which
+a wheel cannot do in a thousand-line file; `r` re-reads; `esc` closes. The
+wheel is the one binding a user cannot discover by pressing things, so
+`diffHelp` leads with it and `DiffScroll` is a keyless binding carrying its
+help text, like `Scroll` for the panes.
 Nothing is read on a timer: the list on open and on `r`, a file when it is
 selected, so content cannot shift while it is being read. `diffRows` and
 `View` must measure the same frame, which is why `modalStyle` has a name.

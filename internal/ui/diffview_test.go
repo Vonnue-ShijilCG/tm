@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -620,6 +619,32 @@ func bigFile(t *testing.T, root string, changed ...int) {
 	}
 }
 
+// gitModelWithTerminal is gitModel with one terminal open and focused, so a
+// pane exists under the changes view to aim the pointer at.
+func gitModelWithTerminal(t *testing.T) (Model, *[]*fakeSession) {
+	t.Helper()
+	m, spawned, _ := gitModel(t)
+	return makeTerminal(t, m, "n", "", "develop"), spawned
+}
+
+// wheelDiff delivers n wheel notches over the code columns, and wheelList n
+// over the file list. The two halves are told apart by the pointer's column,
+// so the x here is what decides which one moves.
+func wheelDiff(m Model, up bool, n int) Model {
+	return wheelAt(m, up, n, diffListWidth+10)
+}
+
+func wheelList(m Model, up bool, n int) Model {
+	return wheelAt(m, up, n, 3)
+}
+
+func wheelAt(m Model, up bool, n, x int) Model {
+	for i := 0; i < n; i++ {
+		m = wheel(m, up, x, 5)
+	}
+	return m
+}
+
 // firstCodeRow is the view line under the column labels, colours stripped.
 func firstCodeRow(t *testing.T, view string) string {
 	t.Helper()
@@ -633,23 +658,17 @@ func firstCodeRow(t *testing.T, view string) string {
 	return ""
 }
 
-func TestTabMovesFocusAndScrollingIsLockedAcrossColumns(t *testing.T) {
+// The wheel over the code columns scrolls them, and scrolls them together:
+// there is one offset, so a line never drifts away from its counterpart.
+func TestTheWheelOverTheColumnsScrollsBothOfThem(t *testing.T) {
 	m, _, root := gitModel(t)
 	bigFile(t, root, 150)
 
 	m = press(m, "d")
-	if !m.diff.listFocus {
-		t.Fatal("the file list should have focus when the view opens")
-	}
 
-	m = press(m, "tab")
-	if m.diff.listFocus {
-		t.Fatal("tab should move focus to the diff")
-	}
-
-	m = press(m, "down", "down", "down")
-	if m.diff.top != 3 {
-		t.Errorf("top = %d, want 3 after three downs", m.diff.top)
+	m = wheelDiff(m, false, 1)
+	if m.diff.top != wheelStep {
+		t.Errorf("top = %d, want %d after one wheel notch", m.diff.top, wheelStep)
 	}
 	// Both columns start at the same row, so the fourth line faces itself.
 	if row := firstCodeRow(t, m.View()); strings.Count(row, "4 line 4") != 2 {
@@ -660,6 +679,115 @@ func TestTabMovesFocusAndScrollingIsLockedAcrossColumns(t *testing.T) {
 	if m.diff.left != 2*diffHScrollStep {
 		t.Errorf("left = %d, want %d; both columns share one horizontal offset",
 			m.diff.left, 2*diffHScrollStep)
+	}
+
+	m = wheelDiff(m, true, 2) // back past the top, which clamps
+	if m.diff.top != 0 {
+		t.Errorf("top = %d, want 0: the wheel stops at the start of the file", m.diff.top)
+	}
+}
+
+// The wheel over the file list moves the selection, and the columns follow it
+// to that file: the list and the diff are never showing different files.
+func TestTheWheelOverTheListSelectsFiles(t *testing.T) {
+	m, _, root := gitModel(t)
+	for _, name := range []string{"a.txt", "b.txt", "c.txt"} {
+		if err := os.WriteFile(filepath.Join(root, "app", name), []byte(name+" body\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	m = press(m, "d")
+
+	m = wheelList(m, false, 2)
+	if m.diff.cursor != 2 {
+		t.Errorf("cursor = %d, want 2: one file per notch", m.diff.cursor)
+	}
+	if row := firstCodeRow(t, m.View()); !strings.Contains(row, "c.txt body") {
+		t.Errorf("the columns should show the selected file, got %q", row)
+	}
+
+	m = wheelList(m, true, 5) // past the first file, which clamps
+	if m.diff.cursor != 0 {
+		t.Errorf("cursor = %d, want 0: the selection stops at the first file", m.diff.cursor)
+	}
+}
+
+// The pointer decides: over the columns the wheel must not move the selection,
+// or reading down a long file would walk off the file being read.
+func TestTheWheelOverTheColumnsLeavesTheSelectionAlone(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 150)
+	if err := os.WriteFile(filepath.Join(root, "app", "z.txt"), []byte("z\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+	m = wheelDiff(m, false, 3)
+
+	if m.diff.cursor != 0 {
+		t.Errorf("cursor = %d, want 0: scrolling the diff must not change the file", m.diff.cursor)
+	}
+	if m.diff.top != 3*wheelStep {
+		t.Errorf("top = %d, want %d", m.diff.top, 3*wheelStep)
+	}
+}
+
+// Sideways notches — shift+wheel on most terminals — move the shared
+// horizontal offset, so the columns stay cut at the same cell.
+func TestTheSidewaysWheelScrollsBothColumns(t *testing.T) {
+	m, _, root := gitModel(t)
+	app := commitFile(t, root, "f.txt", "abcdefgh12345678\n")
+	if err := os.WriteFile(filepath.Join(app, "f.txt"), []byte("abcdefgh12345678 x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "d")
+	next, _ := m.Update(tea.MouseMsg{X: diffListWidth + 10, Y: 5, Button: tea.MouseButtonWheelRight, Action: tea.MouseActionPress})
+	m = next.(Model)
+	if m.diff.left != diffHScrollStep {
+		t.Errorf("left = %d, want %d after one notch right", m.diff.left, diffHScrollStep)
+	}
+	row := plainLine(m.View(), "12345678")
+	if strings.Count(row, "1 12345678") != 2 || strings.Contains(row, "abcdefgh") {
+		t.Errorf("both columns should be cut at the same cell, got %q", row)
+	}
+
+	next, _ = m.Update(tea.MouseMsg{X: diffListWidth + 10, Y: 5, Button: tea.MouseButtonWheelLeft, Action: tea.MouseActionPress})
+	if m = next.(Model); m.diff.left != 0 {
+		t.Errorf("left = %d, want 0 after one notch back", m.diff.left)
+	}
+}
+
+// The status bar is below the view, not part of it: a notch there is not a
+// scroll of whatever happens to be on the row above.
+func TestTheWheelOverTheStatusBarDoesNothing(t *testing.T) {
+	m, _, root := gitModel(t)
+	bigFile(t, root, 150)
+
+	m = press(m, "d")
+	m = wheelAt(m, false, 3, diffListWidth+10)
+	before := m.diff.top
+	m = wheel(m, false, diffListWidth+10, m.height-statusHeight)
+
+	if m.diff.top != before {
+		t.Errorf("top = %d, want %d: the status bar is not the view", m.diff.top, before)
+	}
+}
+
+// The changes view covers the terminals, so a notch over it belongs to the
+// view — never to the pane it happens to be drawn on top of.
+func TestTheWheelDoesNotReachAPaneWhileTheChangesViewIsOpen(t *testing.T) {
+	m, spawned := gitModelWithTerminal(t)
+	p, term := m.activeTerminal()
+	x, y := center(t, m, p, term)
+	(*spawned)[0].history = 100
+	m = press(m, "alt+d")
+
+	m = wheel(m, true, x, y)
+
+	if m.scroll[term] != 0 {
+		t.Errorf("the terminal scrolled back %d lines while the changes view was open", m.scroll[term])
 	}
 }
 
@@ -672,7 +800,7 @@ func TestHorizontalScrollCutsBothColumnsTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m = press(m, "d", "tab", "right")
+	m = press(m, "d", "right")
 
 	row := plainLine(m.View(), "12345678")
 	if strings.Count(row, "1 12345678") != 2 || strings.Contains(row, "abcdefgh") {
@@ -696,7 +824,7 @@ func TestNextChangeJumpsPastUnchangedLines(t *testing.T) {
 	m, _, root := gitModel(t)
 	bigFile(t, root, 150)
 
-	m = press(m, "d", "tab", "n")
+	m = press(m, "d", "n")
 
 	if want := 150 - diffJumpContext; m.diff.top != want {
 		t.Errorf("top = %d, want %d; n should jump to the change at row 150 with %d rows of context above it, not scroll one line",
@@ -712,7 +840,7 @@ func TestChangeJumpsVisitEachRunOnceAndReturnToTheFirst(t *testing.T) {
 	m, _, root := gitModel(t)
 	bigFile(t, root, 0, 50, 150)
 
-	m = press(m, "d", "tab")
+	m = press(m, "d")
 	for i, step := range []struct {
 		key  string
 		want int
@@ -744,7 +872,7 @@ func TestRefreshReReadsTheFileAndKeepsThePlace(t *testing.T) {
 		}
 	}
 
-	m = press(m, "d", "j", "tab", "down", "down")
+	m = wheelDiff(press(m, "d", "j"), false, 1)
 	if err := os.WriteFile(filepath.Join(app, "b.txt"), []byte(strings.Replace(sb.String(), "b5\n", "b5 REWRITTEN\n", 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -760,52 +888,39 @@ func TestRefreshReReadsTheFileAndKeepsThePlace(t *testing.T) {
 	if m.diff.cursor != 1 {
 		t.Errorf("cursor = %d, want 1: the selection should stay on b.txt", m.diff.cursor)
 	}
-	if m.diff.listFocus {
-		t.Error("r should leave focus where it was, on the diff")
-	}
-	if m.diff.top != 2 {
-		t.Errorf("top = %d, want 2: a re-read of the same file keeps the scroll position", m.diff.top)
+	if m.diff.top != wheelStep {
+		t.Errorf("top = %d, want %d: a re-read of the same file keeps the scroll position", m.diff.top, wheelStep)
 	}
 }
 
-// Focus is shown by the heading of the half that has it: FILES over the list,
-// the column labels over the code. Lip Gloss emits no colour under go test,
-// so the style choice is asserted against the style values, as the pane dot's
-// is, and the heading's placement against the text.
-func TestTheFocusedHalfIsMarkedInItsHeading(t *testing.T) {
+// The list's heading shares the row with the column labels, so the first file
+// lines up with the first code row.
+func TestTheListHeadingSitsOnTheColumnLabelsRow(t *testing.T) {
 	m, _, root := gitModel(t)
 	if err := os.WriteFile(filepath.Join(root, "app", "f.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	m = press(m, "d")
-	if files, head, work := m.diff.headingStyles(); !reflect.DeepEqual(files, selectedStyle) ||
-		!reflect.DeepEqual(head, delStyle) || !reflect.DeepEqual(work, addStyle) {
-		t.Error("with the list focused FILES takes the focus colour and the labels keep their own")
-	}
-	// The heading shares the row with the column labels, so the first file
-	// lines up with the first code row.
+
 	if row := plainLine(m.View(), "WORKING TREE"); !strings.Contains(row, "FILES") {
 		t.Errorf("FILES should head the list on the labels' row, got %q", row)
 	}
-
-	m = press(m, "tab")
-	if files, head, work := m.diff.headingStyles(); !reflect.DeepEqual(files, hintStyle) ||
-		!reflect.DeepEqual(head, selectedStyle) || !reflect.DeepEqual(work, selectedStyle) {
-		t.Error("with the diff focused both labels take the focus colour and FILES is dimmed")
-	}
 }
 
-// j/k mean different things on each side of tab, so the status bar says what
-// they do for the half that has focus.
-func TestTheStatusBarFollowsTheFocusedHalf(t *testing.T) {
+// The wheel is the only way to scroll the columns a row at a time, and unlike
+// a key it cannot be found by pressing things, so the status bar must name it.
+func TestTheStatusBarNamesTheWheel(t *testing.T) {
 	m, _, _ := gitModel(t)
 
-	m = press(m, "d", "tab")
+	m = press(m, "d")
 
 	status := m.viewStatus()
-	if strings.Contains(status, "next file") || !strings.Contains(status, "next change") {
-		t.Errorf("with the diff focused the status bar should offer the diff's keys, not the list's:\n%s", status)
+	if !strings.Contains(status, "wheel") {
+		t.Errorf("the changes view's status bar should name the wheel:\n%s", status)
+	}
+	if !strings.Contains(status, "next file") {
+		t.Errorf("j/k move the file list, and the status bar should say so:\n%s", status)
 	}
 	if strings.Contains(status, "\n") {
 		t.Errorf("status bar wraps:\n%s", status)
@@ -853,10 +968,7 @@ func TestScrollingStopsAtTheEndOfTheFile(t *testing.T) {
 	m, _, root := gitModel(t)
 	bigFile(t, root, 150)
 
-	m = press(m, "d", "tab")
-	for i := 0; i < 300; i++ {
-		m = press(m, "down")
-	}
+	m = wheelDiff(press(m, "d"), false, 100)
 
 	if want := 200 - codeRows(m); m.diff.top != want {
 		t.Errorf("top = %d, want %d: the last row of the file sits on the last row of the view", m.diff.top, want)
@@ -877,7 +989,7 @@ func TestNextChangeOnAFreshViewReachesAChangeNearTheTop(t *testing.T) {
 	m, _, root := gitModel(t)
 	bigFile(t, root, 2, 5)
 
-	m = press(m, "d", "tab", "n")
+	m = press(m, "d", "n")
 	if m.diff.top != 0 {
 		t.Errorf("top = %d, want 0: the first n lands on the change on row 2, which is already on screen", m.diff.top)
 	}
@@ -894,7 +1006,7 @@ func TestJumpsContinueFromAClampedLanding(t *testing.T) {
 	m, _, root := gitModel(t)
 	bigFile(t, root, 0, 2, 5)
 
-	m = press(m, "d", "tab")
+	m = press(m, "d")
 	for i, want := range []int{0, 0, 5 - diffJumpContext} { // rows 0, 2 (both clamped to top 0), then 5
 		m = press(m, "n")
 		if m.diff.top != want {
@@ -908,14 +1020,14 @@ func TestJumpsContinueFromAClampedLanding(t *testing.T) {
 // and the one above the screen is the previous one.
 func TestScrollingByHandMovesTheJumpOrigin(t *testing.T) {
 	m, _, root := gitModel(t)
-	bigFile(t, root, 0, 50, 150)
+	// Row 49 so the wheel, which moves three rows a notch, can land the top
+	// row exactly on a change: that is the case this test is about.
+	bigFile(t, root, 0, 49, 150)
 
-	m = press(m, "d", "tab", "n", "n", "n") // at the change on row 150
-	for i := 0; i < 150-diffJumpContext-50; i++ {
-		m = press(m, "up")
-	}
-	if m.diff.top != 50 {
-		t.Fatalf("top = %d, want 50 after scrolling up: the change on row 50 on the top row", m.diff.top)
+	m = press(m, "d", "n", "n", "n") // at the change on row 150
+	m = wheelDiff(m, true, (150-diffJumpContext-49)/wheelStep)
+	if m.diff.top != 49 {
+		t.Fatalf("top = %d, want 49 after scrolling up: the change on row 49 on the top row", m.diff.top)
 	}
 
 	m = press(m, "N")
@@ -930,10 +1042,7 @@ func TestScrollingByHandMovesTheJumpOrigin(t *testing.T) {
 func TestEnlargingTheWindowKeepsTheFileEndOnTheLastRow(t *testing.T) {
 	m, _, root := gitModel(t)
 	bigFile(t, root, 150)
-	m = press(m, "d", "tab")
-	for i := 0; i < 300; i++ {
-		m = press(m, "down")
-	}
+	m = wheelDiff(press(m, "d"), false, 100)
 
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
 	m = next.(Model)
@@ -951,7 +1060,7 @@ func TestAJumpNearTheEndStopsAtTheEndOfTheFile(t *testing.T) {
 	m, _, root := gitModel(t)
 	bigFile(t, root, 199)
 
-	m = press(m, "d", "tab", "n")
+	m = press(m, "d", "n")
 
 	if want := 200 - codeRows(m); m.diff.top != want {
 		t.Errorf("top = %d, want %d: the change on the last line is shown with the file's end on the last row", m.diff.top, want)
@@ -965,7 +1074,8 @@ func TestSelectingAnotherFileStartsAtItsTop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m = press(m, "d", "tab", "down", "down", "right", "tab", "j")
+	m = press(wheelDiff(press(m, "d"), false, 1), "right")
+	m = press(m, "j")
 
 	if m.diff.top != 0 || m.diff.left != 0 {
 		t.Errorf("top, left = %d, %d; another file should open at its start", m.diff.top, m.diff.left)
@@ -982,10 +1092,7 @@ func TestRefreshClampsWhenTheFileShrinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m = press(m, "d", "tab")
-	for i := 0; i < 100; i++ {
-		m = press(m, "down")
-	}
+	m = wheelDiff(press(m, "d"), false, 50)
 	if err := os.WriteFile(path, []byte("line 1 SHORT\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -1011,7 +1118,7 @@ func TestRefreshStartsTheLineOverWhenItsLongestLineShrank(t *testing.T) {
 	if err := os.WriteFile(path, []byte(long+"\nsecond\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	m = press(m, "d", "tab", "right", "right", "right", "right") // left 32 of 40
+	m = press(m, "d", "right", "right", "right", "right") // left 32 of 40
 
 	if err := os.WriteFile(path, []byte(long+"\nSECOND\n"), 0o644); err != nil { // the long line is still there
 		t.Fatal(err)

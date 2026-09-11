@@ -27,11 +27,10 @@ type diffView struct {
 	rows    []diff.Row // the selected file, aligned; nil until loaded
 	loadErr string     // problem reading the selected file
 
-	top       int  // first visible row of the diff
-	left      int  // horizontal offset, shared by both columns
-	widest    int  // cells in the widest row text on either side; left stops there
-	change    int  // row of the change the last jump landed on; -1 once the view has moved by other means
-	listFocus bool // true when j/k move the file list rather than the diff
+	top    int // first visible row of the diff
+	left   int // horizontal offset, shared by both columns
+	widest int // cells in the widest row text on either side; left stops there
+	change int // row of the change the last jump landed on; -1 once the view has moved by other means
 }
 
 const (
@@ -55,7 +54,7 @@ const (
 // repository, or a git that fails, is reported in the view rather than
 // preventing it from opening.
 func newDiffView(dir, title string) *diffView {
-	d := &diffView{dir: dir, title: title, listFocus: true}
+	d := &diffView{dir: dir, title: title}
 	d.read()
 	d.load()
 	return d
@@ -286,8 +285,7 @@ func (d *diffView) body(width, height int) []string {
 // panes renders the committed and current versions side by side, one string
 // per row and at most height of them, starting at row top. Both columns are
 // the same width and show the same rows, so a line always faces its
-// counterpart. The column labels take the focus colour when the diff has
-// focus, as the list heading does when the list has it.
+// counterpart, and one offset scrolls them together.
 func (d *diffView) panes(width, height int) []string {
 	if d.loadErr != "" {
 		// The error can embed a path the OS echoed back, so it is file-derived
@@ -295,9 +293,8 @@ func (d *diffView) panes(width, height int) []string {
 		return []string{hintStyle.Render(ansi.Truncate(stripControlChars(d.loadErr), max(width, 1), "…"))}
 	}
 	half := (width - 1) / 2
-	_, headStyle, workStyle := d.headingStyles()
-	labels := pad(headStyle.Render("HEAD")+hintStyle.Render("  committed"), half) + textStyle.Render(" ") +
-		workStyle.Render("WORKING TREE") + hintStyle.Render("  yours now")
+	labels := pad(delStyle.Render("HEAD")+hintStyle.Render("  committed"), half) + textStyle.Render(" ") +
+		addStyle.Render("WORKING TREE") + hintStyle.Render("  yours now")
 	lines := []string{ansi.Truncate(labels, max(width, 1), "")}
 	for i := d.top; i < len(d.rows) && len(lines) < height; i++ {
 		r := d.rows[i]
@@ -337,17 +334,6 @@ func plainText(text string) string {
 	return stripControlChars(strings.ReplaceAll(text, "\t", "    "))
 }
 
-// headingStyles is what the list heading and the two column labels are drawn
-// in. The half that has focus takes the focus colour; the other keeps its own,
-// so the labels only lose their added/removed colours while the list is the
-// one being moved.
-func (d *diffView) headingStyles() (files, head, work lipgloss.Style) {
-	if d.listFocus {
-		return selectedStyle, delStyle, addStyle
-	}
-	return hintStyle, selectedStyle, selectedStyle
-}
-
 // pad fills s to width cells with grounded spaces, so a short line leaves no
 // bare cells where the terminal's own background would show through.
 func pad(s string, width int) string {
@@ -384,11 +370,9 @@ func (d *diffView) header(width int) string {
 
 // list renders a heading and the changed files in at most height lines.
 // Entries are dropped from the top only when the selected one would otherwise
-// not fit, so the selection is always on screen. The heading takes the focus
-// colour when the list has focus; it shares a row with the column labels, so
-// the first file and the first code row line up.
+// not fit, so the selection is always on screen. The heading shares a row with
+// the column labels, so the first file and the first code row line up.
 func (d *diffView) list(width, height int) []string {
-	heading, _, _ := d.headingStyles()
 	height-- // the heading's row
 	entries := make([][]string, len(d.files))
 	used := 0 // lines from the first entry through the selected one
@@ -410,7 +394,7 @@ func (d *diffView) list(width, height int) []string {
 		}
 		lines = append(lines, e...)
 	}
-	return append([]string{"  " + heading.Render("FILES")}, lines...)
+	return append([]string{"  " + selectedStyle.Render("FILES")}, lines...)
 }
 
 // entry is one file: basename first with the directory beneath, so a long

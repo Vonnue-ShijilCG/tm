@@ -566,15 +566,14 @@ func sessionRows(r rect) int {
 
 // updateDiff handles a key while the changes view is open. Like the help
 // screen it consumes every key, so nothing reaches a terminal underneath.
-// Up and down go to whichever half has focus; the rest act on the diff.
+// Up and down move the file list, always: the columns are scrolled with the
+// wheel (see diffWheel), which leaves the keys one job each.
 func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	height := m.diffRows()
 	d := m.diff
 	switch {
 	case key.Matches(msg, keys.DiffClose):
 		m.diff = nil
-	case key.Matches(msg, keys.DiffTab):
-		d.listFocus = !d.listFocus
 	case key.Matches(msg, keys.DiffRefresh):
 		d.refresh()
 		d.scroll(0, height) // the file may have got shorter
@@ -587,17 +586,9 @@ func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.DiffRight):
 		d.scrollX(diffHScrollStep)
 	case key.Matches(msg, keys.DiffDown):
-		if d.listFocus {
-			d.move(1)
-		} else {
-			d.scroll(1, height)
-		}
+		d.move(1)
 	case key.Matches(msg, keys.DiffUp):
-		if d.listFocus {
-			d.move(-1)
-		} else {
-			d.scroll(-1, height)
-		}
+		d.move(-1)
 	}
 	return m, nil
 }
@@ -1346,7 +1337,7 @@ func (m Model) viewStatus() string {
 	case m.help:
 		bindings = []key.Binding{keys.HelpClose}
 	case m.diff != nil:
-		bindings = keys.diffHelp(m.diff.listFocus)
+		bindings = keys.diffHelp()
 	case m.panel != nil:
 		bindings = keys.managerHelp()
 	case m.form != nil:

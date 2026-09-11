@@ -73,12 +73,13 @@ type keyMap struct {
 
 	// Uncommitted changes view. Diff opens it from the sidebar, DiffTerm from
 	// a terminal (an Alt chord, like every other terminal-mode key). Inside
-	// the view DiffTab moves focus between the file list and the diff, and
-	// DiffDown/DiffUp act on whichever has it: j/k and the arrows stay
-	// synonyms here as everywhere else in tm.
+	// the view the keys only ever move the file list: the two code columns
+	// are scrolled with the wheel (DiffScroll), which is why there is no key
+	// that moves them a row at a time and no focus to move between halves.
+	// DiffNextChange and DiffPrevChange remain, because a wheel cannot find
+	// the one edit in a thousand-line file.
 	Diff           key.Binding
 	DiffTerm       key.Binding
-	DiffTab        key.Binding
 	DiffDown       key.Binding
 	DiffUp         key.Binding
 	DiffLeft       key.Binding
@@ -87,6 +88,7 @@ type keyMap struct {
 	DiffPrevChange key.Binding
 	DiffRefresh    key.Binding
 	DiffClose      key.Binding
+	DiffScroll     key.Binding // not a key: the wheel, listed for the help screen
 
 	// Help screen.
 	HelpClose key.Binding
@@ -148,7 +150,6 @@ var keys = keyMap{
 
 	Diff:           key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "open from sidebar")),
 	DiffTerm:       key.NewBinding(key.WithKeys("alt+d"), key.WithHelp("alt+d", "open from terminal")),
-	DiffTab:        key.NewBinding(key.WithKeys("tab"), key.WithHelp("tab", "list / diff")),
 	DiffDown:       key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j / ↓", "next file")),
 	DiffUp:         key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k / ↑", "prev file")),
 	DiffLeft:       key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "scroll left")),
@@ -157,6 +158,7 @@ var keys = keyMap{
 	DiffPrevChange: key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev change")),
 	DiffRefresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "re-read")),
 	DiffClose:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
+	DiffScroll:     key.NewBinding(key.WithHelp("wheel", "scroll the diff")),
 
 	HelpClose: key.NewBinding(key.WithKeys("esc", "s", "q"), key.WithHelp("esc / q", "close help")),
 
@@ -180,7 +182,7 @@ func helpSections() []helpSection {
 		{"SIDEBAR", []key.Binding{k.Down, k.Up, k.Top, k.Bottom, k.Select, k.New, k.SplitSide, k.SplitStack, k.Focus, k.Zoom, k.Manage, k.Help, k.Quit}},
 		{"TERMINAL", []key.Binding{k.Sidebar, k.NextTerm, k.PrevTerm, k.NewTerm, k.ManageTerm, k.HideTerm, k.DeleteTerm}},
 		{"PANES", []key.Binding{k.PaneSide, k.PaneStack, k.PaneLeft, k.PaneRight, k.PaneUp, k.PaneDown, k.PaneGrow, k.PaneShrink, k.PaneZoom}},
-		{"CHANGES", []key.Binding{k.Diff, k.DiffTerm, k.DiffTab, k.DiffDown, k.DiffUp, k.DiffLeft, k.DiffRight, k.DiffNextChange, k.DiffPrevChange, k.DiffRefresh, k.DiffClose}},
+		{"CHANGES", []key.Binding{k.Diff, k.DiffTerm, k.DiffScroll, k.DiffDown, k.DiffUp, k.DiffLeft, k.DiffRight, k.DiffNextChange, k.DiffPrevChange, k.DiffRefresh, k.DiffClose}},
 		{"NEW TERMINAL", []key.Binding{k.FormNext, k.FormPrev, k.FormSubmit, k.FormCancel}},
 		{"MANAGE TERMINALS", []key.Binding{k.MgDown, k.MgUp, k.MgShow, k.MgHide, k.MgNew, k.MgOpenAll, k.MgDelete, k.MgClose}},
 		{"CONFIRM", []key.Binding{k.Confirm, k.Cancel}},
@@ -206,11 +208,8 @@ func (k keyMap) managerHelp() []key.Binding {
 	return []key.Binding{k.MgShow, k.MgHide, k.MgNew, k.MgOpenAll, k.MgDelete, k.MgClose}
 }
 
-// diffHelp depends on which half has focus: j/k move the list on one side of
-// tab and scroll the diff on the other, so "next file" would be wrong there.
-func (k keyMap) diffHelp(listFocus bool) []key.Binding {
-	if listFocus {
-		return []key.Binding{k.DiffDown, k.DiffUp, k.DiffTab, k.DiffNextChange, k.DiffClose}
-	}
-	return []key.Binding{k.DiffTab, k.DiffNextChange, k.DiffPrevChange, k.DiffRefresh, k.DiffClose}
+// diffHelp leads with the wheel: it is the only way to scroll the columns a
+// row at a time, and unlike a key it cannot be discovered by pressing things.
+func (k keyMap) diffHelp() []key.Binding {
+	return []key.Binding{k.DiffScroll, k.DiffDown, k.DiffUp, k.DiffNextChange, k.DiffRefresh, k.DiffClose}
 }

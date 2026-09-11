@@ -21,7 +21,7 @@ Workspace
 - A terminal can remember a command, so reopening a workspace brings back your
   dev server or agent session instead of an empty shell.
 - Hide a running terminal and bring it back later.
-- Mouse wheel scrolls a terminal's history.
+- Mouse wheel scrolls a terminal's history, and the diff in the changes view.
 - Every terminal is drawn as its own card on one dark ground, so a four-way
   split reads as four panes rather than one wall of text.
 - See what changed without leaving tm: `d` shows a project's uncommitted
@@ -59,11 +59,11 @@ tm
 - `d` on a project, or `alt+d` inside a terminal, shows the uncommitted
   changes in that directory: the changed files on the left — new, untracked
   ones included — and the selected file shown twice in full, committed
-  against current, aligned line for line. `tab` moves between the list and
-  the diff, `j`/`k` and the arrows move within whichever has focus, `←`/`→`
-  scroll both columns together, `n`/`N` jump between changes, `r` re-reads
-  from git, `Esc` closes. Long lines are cut rather than wrapped so the two
-  sides stay in step.
+  against current, aligned line for line. The wheel scrolls: over the columns
+  it moves both of them together, over the list it picks the file. `j`/`k`
+  and the arrows move the file list, `←`/`→` scroll both columns sideways,
+  `n`/`N` jump between changes, `r` re-reads from git, `Esc` closes. Long
+  lines are cut rather than wrapped so the two sides stay in step.
 - `alt+s` returns to the sidebar, `s` shows every shortcut, `q` quits. Plain
   `Esc` goes to the program, so it interrupts Claude Code and leaves Vim's
   insert mode as usual.
