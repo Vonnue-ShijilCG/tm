@@ -1,6 +1,6 @@
 # Uncommitted changes viewer — Implementation Plan
 
-> **Historical document.** The code superseded this plan in several places (the `git` package's `ShowHEAD`/`DiffHEAD` signatures and output handling, the modal frame style, the body layout). `CLAUDE.md` describes what shipped; where the two disagree, `CLAUDE.md` and the code are right.
+> **Historical document.** The code superseded this plan in several places (the `git` package's `ShowHEAD`/`DiffHEAD` signatures and output handling, the modal frame style, the body layout). Most of all, the `Tab` focus split this plan argues for is gone: the mouse wheel scrolls the columns, the keys move the file list, and `listFocus`/`DiffTab` no longer exist. `CLAUDE.md` describes what shipped; where the two disagree, `CLAUDE.md` and the code are right.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
