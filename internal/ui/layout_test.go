@@ -26,9 +26,11 @@ func TestInsertSideAndStackProduceAdjacentRects(t *testing.T) {
 	var root *pane
 	root = root.insert(nil, ts[0], splitSide) // first pane
 	root = root.insert(ts[0], ts[1], splitSide)
-	rs := layoutOf(root, 101, 20)
+	// 102 = 50 + paneGap + 50: two equal halves with the two-column gap
+	// between them, so the assertion below is exact rather than within a cell.
+	rs := layoutOf(root, 102, 20)
 	a, b := rs[ts[0]], rs[ts[1]]
-	if a.w+b.w+1 != 101 || a.h != 20 || b.h != 20 || b.x != a.x+a.w+1 {
+	if a.w+b.w+paneGap != 102 || a.h != 20 || b.h != 20 || b.x != a.x+a.w+paneGap {
 		t.Errorf("side split rects wrong: a=%+v b=%+v", a, b)
 	}
 	if a.w != 50 || b.w != 50 {
@@ -36,9 +38,9 @@ func TestInsertSideAndStackProduceAdjacentRects(t *testing.T) {
 	}
 
 	root = root.insert(ts[1], ts[2], splitStack) // stack inside the right pane
-	rs = layoutOf(root, 101, 20)
+	rs = layoutOf(root, 102, 20)
 	b, c := rs[ts[1]], rs[ts[2]]
-	if b.x != c.x || b.w != c.w || b.h+c.h+1 != 20 || c.y != b.y+b.h+1 {
+	if b.x != c.x || b.w != c.w || b.h+c.h+1 != 20 || c.y != b.y+b.h+1 { // stacked cards keep a one-row gap
 		t.Errorf("stack split rects wrong: b=%+v c=%+v", b, c)
 	}
 	if got := root.leaves(); !reflect.DeepEqual(got, ts) {
@@ -46,7 +48,7 @@ func TestInsertSideAndStackProduceAdjacentRects(t *testing.T) {
 	}
 	// Every rect stays inside the area and none overlap.
 	for x, r := range rs {
-		if r.x < 0 || r.y < 0 || r.x+r.w > 101 || r.y+r.h > 20 {
+		if r.x < 0 || r.y < 0 || r.x+r.w > 102 || r.y+r.h > 20 {
 			t.Errorf("rect out of bounds for %d: %+v", x.Num, r)
 		}
 		for y, s := range rs {
@@ -89,12 +91,12 @@ func TestResizeMovesDividerWithinBounds(t *testing.T) {
 	if !root.resize(ts[0], resizeStep) {
 		t.Fatal("resize should report a change")
 	}
-	rs := layoutOf(root, 101, 20)
+	rs := layoutOf(root, 102, 20) // 100 cells of card plus the two-column gap
 	if rs[ts[0]].w != 60 || rs[ts[1]].w != 40 {
 		t.Errorf("after growing a: %d/%d, want 60/40", rs[ts[0]].w, rs[ts[1]].w)
 	}
 	root.resize(ts[1], resizeStep) // shrinking a back
-	rs = layoutOf(root, 101, 20)
+	rs = layoutOf(root, 102, 20)
 	if rs[ts[0]].w != 50 {
 		t.Errorf("growing b should shrink a back to 50, got %d", rs[ts[0]].w)
 	}
@@ -120,10 +122,20 @@ func TestMinimumSizesAndSplitGuards(t *testing.T) {
 	if rs[ts[0]].w < minPaneCols || rs[ts[1]].w < minPaneCols {
 		t.Errorf("panes should keep the minimum width: %+v %+v", rs[ts[0]], rs[ts[1]])
 	}
-	// Thresholds are 2*minPaneCols+1 and 2*minPaneRows+1: 29 and 11 with the
-	// card-aware minimums.
-	if canSplit(rect{0, 0, 28, 10}, splitSide) || !canSplit(rect{0, 0, 29, 10}, splitSide) {
+	// Thresholds are 2*minPaneCols+paneGap and 2*minPaneRows+1: 30 and 11
+	// with the card-aware minimums, the two-column gap side by side and the
+	// one-row gap stacked.
+	if canSplit(rect{0, 0, 29, 10}, splitSide) || !canSplit(rect{0, 0, 30, 10}, splitSide) {
 		t.Error("canSplit side thresholds wrong")
+	}
+	// At exactly the threshold both halves are exactly the minimum: the gap
+	// splitSize leaves is the one rects places, so neither half is short.
+	// Were splitSize still to reserve one cell, the second half would come
+	// out a column narrower than the minimum canSplit promised it.
+	root = leaf(ts[0]).insert(ts[0], ts[1], splitSide)
+	rs = layoutOf(root, 2*minPaneCols+paneGap, 10)
+	if rs[ts[0]].w != minPaneCols || rs[ts[1]].w != minPaneCols {
+		t.Errorf("at the threshold both halves should be %d wide: %+v %+v", minPaneCols, rs[ts[0]], rs[ts[1]])
 	}
 	if canSplit(rect{0, 0, 80, 10}, splitStack) || !canSplit(rect{0, 0, 80, 11}, splitStack) {
 		t.Error("canSplit stack thresholds wrong")

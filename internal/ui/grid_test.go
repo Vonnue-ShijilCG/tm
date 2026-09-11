@@ -93,15 +93,18 @@ func TestAutomaticGridGeometryOneToSix(t *testing.T) {
 		area := m.mainArea()
 		rs := m.paneRects(p)
 		g, _ := gridOf(root)
-		// Columns share the width evenly (within a cell) and each column's
-		// panes share its height evenly; every column spans the full height.
+		// Columns share the width evenly (within a gap: a column chain rounds
+		// each split's share of the space left after one gap, so with a
+		// two-column gap three columns can come out k+1, k, k-1) and each
+		// column's panes share its height evenly; every column spans the
+		// full height.
 		colW := rs[g[0][0]].w
 		for _, col := range g {
 			top, bottom := rs[col[0]], rs[col[len(col)-1]]
 			if top.y != 0 || bottom.y+bottom.h != area.h {
 				t.Errorf("%d terminals: column does not span the height: %+v .. %+v", n, top, bottom)
 			}
-			if d := rs[col[0]].w - colW; d < -1 || d > 1 {
+			if d := rs[col[0]].w - colW; d < -paneGap || d > paneGap {
 				t.Errorf("%d terminals: column widths differ: %d vs %d", n, rs[col[0]].w, colW)
 			}
 			for _, term := range col {
@@ -120,7 +123,7 @@ func TestAutomaticGridGeometryOneToSix(t *testing.T) {
 			}
 		case 2:
 			a, b := rs[p.Terminals[0]], rs[p.Terminals[1]]
-			if a.h != area.h || b.h != area.h || a.w+b.w+1 != area.w || a.w-b.w > 1 || b.w-a.w > 1 {
+			if a.h != area.h || b.h != area.h || a.w+b.w+paneGap != area.w || a.w-b.w > 1 || b.w-a.w > 1 {
 				t.Errorf("two terminals should split the width evenly: %+v %+v", a, b)
 			}
 		case 3:
@@ -173,12 +176,26 @@ func TestGridOrientationFollowsWindowShape(t *testing.T) {
 	}
 }
 
+// TestChooseColsCountsTheGapBetweenColumns: chooseCols judges whether a
+// column count fits by cellSize, which must take the same gap out of the
+// width that rects will. One column short of two cards and the two-column
+// gap, two columns cannot hold cards even though their shape would score
+// better than one tall column's; one column more and they can.
+func TestChooseColsCountsTheGapBetweenColumns(t *testing.T) {
+	if got := chooseCols(2, rect{0, 0, 2*minPaneCols + paneGap - 1, 11}); got != 1 {
+		t.Errorf("one column short of two cards and a gap: chooseCols = %d, want 1", got)
+	}
+	if got := chooseCols(2, rect{0, 0, 2*minPaneCols + paneGap, 11}); got != 2 {
+		t.Errorf("exactly two cards and a gap: chooseCols = %d, want 2", got)
+	}
+}
+
 func TestGridOnTinyWindowFallsBackWithoutLosingTerminals(t *testing.T) {
 	// height raised from 30 (area 20x27) to 40 (area 20x37): with cards'
 	// card-aware minPaneRows, 30 no longer leaves room to split every pane
 	// without swapping one out, which starved alt+j of a terminal it should
 	// still reach; 40 keeps the "too narrow for two columns" intent (width
-	// is still 20, well under 2*minPaneCols+1) without also being too short.
+	// is still 20, well under 2*minPaneCols+paneGap) without also being too short.
 	m, spawned, p := gridModel(t, 4, 50, 40) // area 20x37: too narrow for two columns
 	checkTiling(t, m, p)
 	if len(p.Terminals) != 4 {
@@ -416,7 +433,7 @@ func TestAsymmetricSavedLayoutRestoresExactly(t *testing.T) {
 	area := m2.mainArea()
 	rs := m2.paneRects(p2)
 	a, b := rs[p2.Terminals[0]], rs[p2.Terminals[1]]
-	if want := splitSize(area.w, saved, minPaneCols); a.w != want || b.w != area.w-want-1 {
+	if want := splitSize(area.w, paneGap, saved, minPaneCols); a.w != want || b.w != area.w-want-paneGap {
 		t.Errorf("30/70 geometry wrong: %+v %+v (area %+v)", a, b, area)
 	}
 	if automatic(root) {

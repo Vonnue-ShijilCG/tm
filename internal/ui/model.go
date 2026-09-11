@@ -1076,7 +1076,7 @@ func (m Model) View() string {
 	}
 	mainPane := framed(style, focused, m.width-sidebarWidth-paneGutter, paneHeight).Render(m.viewMain())
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, gap(1, paneHeight), mainPane)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, gap(paneGutter, paneHeight), mainPane)
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.viewStatus())
 }
 
@@ -1176,12 +1176,12 @@ func (m Model) renderPane(p *workspace.Project, n *pane, r rect, active *workspa
 		return m.renderLeaf(p, n.term, r, n.term == active && m.focus == focusMain)
 	}
 	if n.dir == splitSide {
-		wa := splitSize(r.w, n.ratio, minPaneCols)
+		wa := splitSize(r.w, paneGap, n.ratio, minPaneCols)
 		left := m.renderPane(p, n.a, rect{r.x, r.y, wa, r.h}, active)
-		right := m.renderPane(p, n.b, rect{r.x + wa + 1, r.y, r.w - wa - 1, r.h}, active)
-		return lipgloss.JoinHorizontal(lipgloss.Top, left, gap(1, r.h), right)
+		right := m.renderPane(p, n.b, rect{r.x + wa + paneGap, r.y, r.w - wa - paneGap, r.h}, active)
+		return lipgloss.JoinHorizontal(lipgloss.Top, left, gap(paneGap, r.h), right)
 	}
-	ha := splitSize(r.h, n.ratio, minPaneRows)
+	ha := splitSize(r.h, 1, n.ratio, minPaneRows)
 	top := m.renderPane(p, n.a, rect{r.x, r.y, r.w, ha}, active)
 	bottom := m.renderPane(p, n.b, rect{r.x, r.y + ha + 1, r.w, r.h - ha - 1}, active)
 	return lipgloss.JoinVertical(lipgloss.Left, top, gap(r.w, 1), bottom)

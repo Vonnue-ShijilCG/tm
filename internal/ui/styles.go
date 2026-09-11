@@ -8,9 +8,18 @@ import (
 
 const sidebarWidth = 28
 
-// paneGutter is the blank column between the sidebar and the first card, so the
-// sidebar stands clear of the terminals the way the cards stand clear of each other.
-const paneGutter = 1
+// paneGap is the blank columns between two cards side by side. A character
+// cell is about twice as tall as it is wide, so one row between stacked cards
+// is already as thick as two columns: two here makes the two gaps match on
+// screen rather than in cells. rects reserves this width and renderPane draws
+// it; both read this constant so the geometry the wheel is hit-tested against
+// cannot drift from what is painted.
+const paneGap = 2
+
+// paneGutter is the blank columns between the sidebar and the first card, so
+// the sidebar stands clear of the terminals the way the cards stand clear of
+// each other: the same width, so it reads as the same kind of space.
+const paneGutter = paneGap
 
 var (
 	// Every colour here is an exact hex value, never an ANSI-256 index. An

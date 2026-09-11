@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -27,7 +28,7 @@ func TestAltVCreatesSideBySidePanes(t *testing.T) {
 	rs := m.paneRects(p)
 	a, b := rs[p.Terminals[0]], rs[p.Terminals[1]]
 	area := m.mainArea()
-	if a.y != b.y || a.h != area.h || b.h != area.h || a.w+b.w+1 != area.w || b.x != a.x+a.w+1 {
+	if a.y != b.y || a.h != area.h || b.h != area.h || a.w+b.w+paneGap != area.w || b.x != a.x+a.w+paneGap {
 		t.Errorf("panes should sit side by side across the area %+v: a=%+v b=%+v", area, a, b)
 	}
 	for i, s := range *spawned {
@@ -204,7 +205,7 @@ func TestResizeGrowsAndShrinksFocusedPane(t *testing.T) {
 	if s := (*spawned)[1]; s.cols != sessionCols(rect{w: after}) {
 		t.Errorf("session should be resized with its pane: %d vs %d", s.cols, sessionCols(rect{w: after}))
 	}
-	otherWant := sessionCols(rect{w: m.mainArea().w - after - 1})
+	otherWant := sessionCols(rect{w: m.mainArea().w - after - paneGap})
 	if s := (*spawned)[0]; s.cols != otherWant {
 		t.Errorf("the other session should shrink to %d, got %d", otherWant, s.cols)
 	}
@@ -238,8 +239,8 @@ func TestWindowResizeRecomputesPanes(t *testing.T) {
 			}
 			total += r.w
 		}
-		if total+1 != area.w {
-			t.Errorf("%dx%d: panes + divider should tile the width: %d vs %d", size[0], size[1], total+1, area.w)
+		if total+paneGap != area.w {
+			t.Errorf("%dx%d: panes + gap should tile the width: %d vs %d", size[0], size[1], total+paneGap, area.w)
 		}
 		view := m.View()
 		if lines := strings.Count(view, "\n") + 1; lines != size[1] {
@@ -257,7 +258,9 @@ func TestWindowResizeRecomputesPanes(t *testing.T) {
 func TestAltJKCycleVisibleTerminalsOnly(t *testing.T) {
 	m, spawned, p := twoPanes(t)
 	// A third terminal squeezed into a pane too small to split takes over that pane.
-	next, _ := m.Update(tea.WindowSizeMsg{Width: 60, Height: 9}) // area 30x6: too small to split either way
+	// area 32x6: 15-column panes, too small to split either way, and just
+	// wide enough that a header still shows " ● Terminal 1" untruncated.
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 62, Height: 9})
 	m = next.(Model)
 	m = press(m, "alt+n", "enter")
 	if len(m.layouts[p].leaves()) != 2 || !m.layouts[p].contains(p.Terminals[2]) || m.layouts[p].contains(p.Terminals[1]) {
@@ -278,7 +281,7 @@ func TestAltJKCycleVisibleTerminalsOnly(t *testing.T) {
 	if p.ActiveTerminal() != p.Terminals[0] || len(m.layouts[p].leaves()) != 2 || m.layouts[p].contains(p.Terminals[1]) {
 		t.Errorf("hidden terminal must never be swapped in by navigation: %v", m.layouts[p].leaves())
 	}
-	if !strings.Contains(m.View(), " "+statusDot+" Terminal 1") { // panes are ~14 cols wide here: check the header
+	if !strings.Contains(m.View(), " "+statusDot+" Terminal 1") { // panes are 15 cols wide here: check the header
 		t.Errorf("focused visible terminal should be rendered:\n%s", m.View())
 	}
 	// The manager is the explicit way back.
@@ -380,6 +383,35 @@ func TestEachTerminalIsItsOwnCard(t *testing.T) {
 			t.Errorf("session sized %dx%d, want %dx%d (pane %dx%d minus its own border and header)",
 				s.cols, s.rows, wantCols, wantRows, r.w, r.h)
 		}
+	}
+}
+
+// TestCardsAreDrawnWhereTheirRectsPlaceThem: rects decides where a card is
+// (and so where the wheel finds it); renderPane decides where it is drawn.
+// The two share paneGap and paneGutter, and this pins them together: the
+// top-left corner of every card in the rendered view sits at the column its
+// screen rect names, paneGap columns after the card before it. A gap drawn
+// narrower than the one reserved would pass every width check — the main
+// area is padded out to the window — while shifting the second card under
+// the wrong wheel target.
+func TestCardsAreDrawnWhereTheirRectsPlaceThem(t *testing.T) {
+	m, _, p := twoPanes(t)
+	var got []int
+	for i, r := range []rune(stripANSI(strings.Split(m.View(), "\n")[0])) {
+		if r == '╭' {
+			got = append(got, i)
+		}
+	}
+	want := []int{0} // the sidebar's own corner
+	for _, r := range m.paneScreenRects(p) {
+		want = append(want, r.x)
+	}
+	slices.Sort(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("card corners drawn at columns %v, rects place them at %v", got, want)
+	}
+	if len(got) == 3 && got[2]-got[1] != m.paneRects(p)[p.Terminals[0]].w+paneGap {
+		t.Errorf("cards %d columns apart, want the first card's width plus a %d-column gap", got[2]-got[1], paneGap)
 	}
 }
 

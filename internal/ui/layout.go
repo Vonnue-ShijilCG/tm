@@ -121,9 +121,10 @@ func (n *pane) swap(old, nt *workspace.Terminal) {
 	n.b.swap(old, nt)
 }
 
-// rects lays the tree out inside r. One cell between siblings is reserved
-// for a divider; each child gets at least the minimum size when r allows.
-// Sizes never go negative, even in an area too small for a divider.
+// rects lays the tree out inside r. A gap between siblings is reserved —
+// paneGap columns side by side, one row stacked; each child gets at least
+// the minimum size when r allows. Sizes never go negative, even in an area
+// too small for a gap.
 func (n *pane) rects(r rect, out map[*workspace.Terminal]rect) {
 	if n == nil {
 		return
@@ -133,20 +134,21 @@ func (n *pane) rects(r rect, out map[*workspace.Terminal]rect) {
 		return
 	}
 	if n.dir == splitSide {
-		wa := splitSize(r.w, n.ratio, minPaneCols)
+		wa := splitSize(r.w, paneGap, n.ratio, minPaneCols)
 		n.a.rects(rect{r.x, r.y, wa, r.h}, out)
-		n.b.rects(rect{r.x + wa + 1, r.y, max(r.w-wa-1, 0), r.h}, out)
+		n.b.rects(rect{r.x + wa + paneGap, r.y, max(r.w-wa-paneGap, 0), r.h}, out)
 		return
 	}
-	ha := splitSize(r.h, n.ratio, minPaneRows)
+	ha := splitSize(r.h, 1, n.ratio, minPaneRows)
 	n.a.rects(rect{r.x, r.y, r.w, ha}, out)
 	n.b.rects(rect{r.x, r.y + ha + 1, r.w, max(r.h-ha-1, 0)}, out)
 }
 
 // splitSize returns the first child's extent along an axis of total cells,
-// leaving one cell for the divider and honouring the minimum where possible.
-func splitSize(total int, ratio float64, minimum int) int {
-	avail := total - 1
+// leaving gap cells between the children and honouring the minimum where
+// possible.
+func splitSize(total, gap int, ratio float64, minimum int) int {
+	avail := total - gap
 	first := int(float64(avail)*ratio + 0.5)
 	if avail >= 2*minimum {
 		first = max(minimum, min(first, avail-minimum))
@@ -160,7 +162,7 @@ func splitSize(total int, ratio float64, minimum int) int {
 // keeping both halves usable.
 func canSplit(r rect, dir splitDir) bool {
 	if dir == splitSide {
-		return r.w >= 2*minPaneCols+1
+		return r.w >= 2*minPaneCols+paneGap
 	}
 	return r.h >= 2*minPaneRows+1
 }
