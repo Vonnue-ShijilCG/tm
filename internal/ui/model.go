@@ -1231,16 +1231,19 @@ func running(t *workspace.Terminal) bool {
 const statusDot = "●"
 
 // paneHeader is a pane's title row: a status dot, the terminal's label, and
-// the branch it is on. It is no longer a filled bar — the card's border is
-// the pane's edge now, so the header only has to be readable. The dot and
-// the label are bright; the branch is dim — focus is carried by the dot's
-// colour alone, so the label stays bright whether or not the pane has focus.
-// The space after the dot is grounded like every other run: it follows the
-// dot's own styled run, whose reset dropped the ground.
+// the branch it is on, drawn as a band across the top of the card on its own
+// slightly lighter ground so it reads as a title rather than as the first
+// row of output. The dot and the label are bright; the branch is dim — focus
+// is carried by the dot's colour alone, so the label stays bright whether or
+// not the pane has focus. Every run carries the band, the spaces included:
+// each styled run's closing reset drops the background, so a space left
+// unstyled after the dot would show as a notch of card ground in the strip.
+// The outer style paints the padding out to the card's width.
 func paneHeader(label, branch string, width int, focused bool, running bool) string {
 	dot := dotStyle(focused, running)
-	line := " " + dot.Render(statusDot) + textStyle.Render(" ") + titleStyle.Render(label) + hintStyle.Render(branch)
-	return lipgloss.NewStyle().Width(width).MaxWidth(width).Background(ground).
+	line := headerStyle.Render(" ") + dot.Render(statusDot) + headerStyle.Render(" ") +
+		headerLabelStyle.Render(label) + headerBranchStyle.Render(branch)
+	return headerStyle.Width(width).MaxWidth(width).
 		Render(ansi.Truncate(line, width, "…"))
 }
 

@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -138,6 +140,106 @@ func TestBareRunsSeesTextAfterAReset(t *testing.T) {
 	}
 }
 
+// cellBackgrounds returns, for every visible cell of a single line of s, the
+// SGR background armed while it was drawn — "48;2;r;g;b" for a TrueColor
+// background, "" for none. It is the finer-grained sibling of bareRuns: not
+// just whether a cell has a background, but which one, so a header cell
+// left on the card's ground reads as the wrong colour and not as painted.
+func cellBackgrounds(s string) []string {
+	var cells []string
+	bg := ""
+	rs := []rune(s)
+	for i := 0; i < len(rs); {
+		switch c := rs[i]; {
+		case c == '\x1b' && i+1 < len(rs) && rs[i+1] == '[':
+			j := i + 2
+			for j < len(rs) && (rs[j] < 0x40 || rs[j] > 0x7e) {
+				j++
+			}
+			if j < len(rs) && rs[j] == 'm' {
+				bg = applyBackground(string(rs[i+2:j]), bg)
+			}
+			i = j + 1
+		case c == '\x1b':
+			i += 2
+		case c < 0x20 || c == 0x7f:
+			i++
+		default:
+			cells = append(cells, bg)
+			i++
+		}
+	}
+	return cells
+}
+
+// applyBackground is applySGR's counterpart that keeps the colour: it returns
+// the background armed after params, given the one armed before.
+func applyBackground(params, bg string) string {
+	if params == "" {
+		return ""
+	}
+	parts := strings.Split(params, ";")
+	for i := 0; i < len(parts); i++ {
+		n, _ := strconv.Atoi(parts[i])
+		switch {
+		case parts[i] == "" || n == 0 || n == 49:
+			bg = ""
+		case n == 38 || n == 58: // foreground and underline colours: skip their arguments
+			if i+1 < len(parts) {
+				switch parts[i+1] {
+				case "2":
+					i += 4
+				case "5":
+					i += 2
+				}
+			}
+		case n == 48:
+			end := i + 1
+			if i+1 < len(parts) {
+				switch parts[i+1] {
+				case "2":
+					end = i + 5
+				case "5":
+					end = i + 3
+				}
+			}
+			end = min(end, len(parts))
+			bg = strings.Join(parts[i:end], ";")
+			i = end - 1
+		case (n >= 40 && n <= 47) || (n >= 100 && n <= 107):
+			bg = parts[i]
+		}
+	}
+	return bg
+}
+
+// trueColorBackground is the SGR a TrueColor renderer emits for a hex colour.
+func trueColorBackground(t *testing.T, c lipgloss.Color) string {
+	t.Helper()
+	hex := strings.TrimPrefix(string(c), "#")
+	if len(hex) != 6 {
+		t.Fatalf("not a six-digit hex colour: %q", c)
+	}
+	var rgb [3]int64
+	for i := range rgb {
+		v, err := strconv.ParseInt(hex[2*i:2*i+2], 16, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rgb[i] = v
+	}
+	return fmt.Sprintf("48;2;%d;%d;%d", rgb[0], rgb[1], rgb[2])
+}
+
+func TestCellBackgroundsTracksTheColourUnderEachCell(t *testing.T) {
+	s := "\x1b[38;2;1;2;3;48;2;7;17;43m●\x1b[0m \x1b[1;48;2;16;30;58mab\x1b[49mc\x1b[44md"
+	got := cellBackgrounds(s)
+	want := []string{"48;2;7;17;43", "", "48;2;16;30;58", "48;2;16;30;58", "", "44"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("cellBackgrounds = %q, want %q", got, want)
+	}
+}
+
 // bare fails the test for every screen that leaves a cell unpainted, naming
 // the runs so the report says which text lost its ground.
 func bare(t *testing.T, screens map[string]string) {
@@ -166,6 +268,72 @@ func TestPaneHeaderAndStatusBarPaintEveryCell(t *testing.T) {
 		"status bar with notice": noticedStatus,
 		"whole view, terminal":   m.View(),
 	})
+}
+
+// TestPaneHeaderIsABandAcrossTheCard: the header has its own ground, one
+// step lighter than the card body, and every one of its cells carries it —
+// the leading space, the dot, the space after it, the label, the branch and
+// the padding out to the card's edge. A run that kept the card's ground
+// would pass the bare check above (it is painted) while showing on screen
+// as a notch cut out of the band; this is the test that sees the notch.
+func TestPaneHeaderIsABandAcrossTheCard(t *testing.T) {
+	withTrueColor(t)
+	want := trueColorBackground(t, band)
+	if ground := trueColorBackground(t, ground); want == ground {
+		t.Fatalf("the band must differ from the ground to read as a header, both are %s", want)
+	}
+	headers := map[string]struct {
+		s     string
+		width int
+	}{
+		"focused, running": {paneHeader("Terminal 1", " · main", 40, true, true), 40},
+		"exited":           {paneHeader("claude", "", 30, false, false), 30},
+		"truncated":        {paneHeader("a rather long command line", " · feature/x", 16, false, true), 16},
+	}
+	for name, h := range headers {
+		cells := cellBackgrounds(h.s)
+		if len(cells) != h.width {
+			t.Errorf("%s: header is %d cells wide, want %d", name, len(cells), h.width)
+		}
+		for i, bg := range cells {
+			if bg != want {
+				t.Errorf("%s: cell %d is on %q, want the band %q", name, i, bg, want)
+				break
+			}
+		}
+	}
+
+	// In a rendered card the band runs from just inside the left border to
+	// just inside the right one, with the borders themselves on the ground.
+	m, spawned := newTestModel(t)
+	m = press(m, "j", "enter")
+	(*spawned)[0].grounded = true
+	for _, line := range strings.Split(m.View(), "\n") {
+		text := []rune(stripANSI(line))
+		dot := slices.Index(text, []rune(statusDot)[0])
+		if dot < 0 {
+			continue
+		}
+		left := dot - 1 // the header's leading space; the card border is the cell before it
+		right := left + slices.Index(text[left:], '│')
+		if right <= left {
+			t.Fatalf("no right border after the header: %q", string(text))
+		}
+		cells := cellBackgrounds(line)
+		for i := left; i < right; i++ {
+			if cells[i] != want {
+				t.Errorf("header cell %d (%q) is on %q, want the band %q", i, text[i], cells[i], want)
+				break
+			}
+		}
+		for _, i := range []int{left - 1, right} {
+			if cells[i] != trueColorBackground(t, ground) {
+				t.Errorf("border cell %d (%q) is on %q, want the ground", i, text[i], cells[i])
+			}
+		}
+		return
+	}
+	t.Fatal("no pane header in the view")
 }
 
 func TestSidebarSplitsAndManagerPaintEveryCell(t *testing.T) {

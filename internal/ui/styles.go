@@ -42,6 +42,14 @@ var (
 	// pane's own output read as one surface rather than three.
 	ground = lipgloss.Color(terminal.PaneGround)
 
+	// band is the pane header's own ground, two steps lighter than the card
+	// body. On the same ground as the output below it the header read as the
+	// first row of text; a slightly lighter strip across the top of the card
+	// makes it a title row. One step up (#101e3a) was a band only on a bright
+	// display; this one reads as a band and stays well under edge, so the
+	// header is chrome and not a highlight competing with the focused border.
+	band = lipgloss.Color("#142440")
+
 	// Thin and rounded: with every pane on its own ground and its own frame,
 	// separation comes from the card edges and the gaps between them, not
 	// from the weight of a line.
@@ -96,11 +104,19 @@ var (
 
 	hintStyle = lipgloss.NewStyle().Foreground(dim).Background(ground)
 
+	// The pane header's runs, every one on band: the header is a filled strip,
+	// so a run left on the card's ground would show as a notch cut out of it.
+	// headerStyle is the strip itself and the spaces in it; headerLabelStyle
+	// and headerBranchStyle are titleStyle and hintStyle moved onto the band.
+	headerStyle       = lipgloss.NewStyle().Background(band)
+	headerLabelStyle  = titleStyle.Background(band)
+	headerBranchStyle = hintStyle.Background(band)
+
 	// A pane's status dot: blue while it has focus, green while its process
-	// runs, dim once it has exited.
-	dotFocused = lipgloss.NewStyle().Foreground(accent).Background(ground)
-	dotRunning = lipgloss.NewStyle().Foreground(added).Background(ground)
-	dotExited  = lipgloss.NewStyle().Foreground(dim).Background(ground)
+	// runs, dim once it has exited. It sits in the header, so on band.
+	dotFocused = lipgloss.NewStyle().Foreground(accent).Background(band)
+	dotRunning = lipgloss.NewStyle().Foreground(added).Background(band)
+	dotExited  = lipgloss.NewStyle().Foreground(dim).Background(band)
 
 	errorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#f87171")).Background(ground)
 
