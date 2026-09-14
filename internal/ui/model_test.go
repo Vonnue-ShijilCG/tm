@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -63,8 +64,34 @@ func press(m Model, keys ...string) Model {
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(k)}
 		}
-		next, _ := m.Update(msg)
-		m = next.(Model)
+		next, cmd := m.Update(msg)
+		m = settle(next.(Model), cmd)
+	}
+	return m
+}
+
+// settle runs the commands the changes view issues to read git off the event
+// loop and feeds their results back, the way the program's own loop does, so a
+// test can press a key and then assert on what is shown.
+//
+// It only waits while that view is open. Every other command a key produces is
+// a terminal watcher, which blocks until its terminal speaks and would never
+// return for a fake session; abandoning its goroutine is harmless, since the
+// message it would eventually carry is discarded either way.
+func settle(m Model, cmd tea.Cmd) Model {
+	for i := 0; cmd != nil && m.diff != nil && i < 8; i++ {
+		done := make(chan tea.Msg, 1)
+		go func(c tea.Cmd) { done <- c() }(cmd)
+		select {
+		case msg := <-done:
+			if msg == nil { // the request was superseded; nothing to apply
+				return m
+			}
+			next, nextCmd := m.Update(msg)
+			m, cmd = next.(Model), nextCmd
+		case <-time.After(10 * time.Second):
+			return m
+		}
 	}
 	return m
 }

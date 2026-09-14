@@ -25,16 +25,15 @@ const scrollMark = "↑"
 // handleMouse routes wheel events to whatever is under the pointer: the
 // changes view when it is open, else the terminal pane. Every other mouse
 // event is ignored.
-func (m *Model) handleMouse(msg tea.MouseMsg) {
+func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	if msg.Action != tea.MouseActionPress {
-		return
+		return nil
 	}
 	if m.diff != nil {
-		m.diffWheel(msg)
-		return
+		return m.diffWheel(msg)
 	}
 	if m.help || m.form != nil || m.panel != nil {
-		return
+		return nil
 	}
 	var up bool
 	switch msg.Button {
@@ -42,22 +41,22 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 		up = true
 	case tea.MouseButtonWheelDown:
 	default:
-		return
+		return nil
 	}
 	p := m.selectedProject()
 	if p == nil {
-		return
+		return nil
 	}
 	t, r := m.paneAt(p, msg.X, msg.Y)
 	if t == nil {
-		return
+		return nil
 	}
 	if m.scroll == nil {
 		m.scroll = map[*workspace.Terminal]int{}
 	}
 	if t.Session.MouseTracking() { // the program handles the wheel itself (Claude Code, htop, Vim with mouse)
 		t.Session.SendWheel(up, msg.X-r.x, msg.Y-r.y-paneHeaderHeight)
-		return
+		return nil
 	}
 	if t.Session.IsAltScreen() {
 		code := uv.KeyDown
@@ -67,7 +66,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 		for i := 0; i < wheelStep; i++ {
 			t.Session.SendKey(uv.KeyPressEvent{Code: code})
 		}
-		return
+		return nil
 	}
 	off := m.scroll[t]
 	if up {
@@ -77,9 +76,10 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 	}
 	if off == 0 {
 		delete(m.scroll, t)
-		return
+		return nil
 	}
 	m.scroll[t] = off
+	return nil
 }
 
 // diffWheel scrolls the changes view. The pointer picks what moves: over the
@@ -92,9 +92,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 // The list moves one file per notch rather than wheelStep: an entry is two or
 // three rows tall, so one file is already a wheel notch's worth of movement,
 // and each step re-reads a file from git.
-func (m *Model) diffWheel(msg tea.MouseMsg) {
+func (m *Model) diffWheel(msg tea.MouseMsg) tea.Cmd {
 	if msg.Y >= m.height-statusHeight { // the status bar, below the view
-		return
+		return nil
 	}
 	switch msg.Button {
 	case tea.MouseButtonWheelLeft:
@@ -108,11 +108,11 @@ func (m *Model) diffWheel(msg tea.MouseMsg) {
 			step, files = -step, -files
 		}
 		if msg.X < modalStyle.GetBorderLeftSize()+modalStyle.GetPaddingLeft()+diffListWidth {
-			m.diff.move(files)
-			return
+			return m.diff.move(files)
 		}
 		m.diff.scroll(step, m.diffRows())
 	}
+	return nil
 }
 
 // paneAt returns the terminal whose pane covers screen cell (x, y) and the

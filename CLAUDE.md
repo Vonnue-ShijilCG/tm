@@ -173,6 +173,29 @@ Nothing is read on a timer: the list on open and on `r`, a file when it is
 selected, so content cannot shift while it is being read. `diffRows` and
 `View` must measure the same frame, which is why `modalStyle` has a name.
 
+**git runs off the event loop.** This is the only part of tm that would
+otherwise block a key handler: `git status` plus `numstat` measured 16 ms on a
+mid-sized repository, and `git show` plus `git diff` 12 ms **on every `j`**.
+`readCmd` and `loadCmd` are `tea.Cmd`s; the view opens saying `Reading …` and
+fills in when `diffListMsg` and `diffFileMsg` land. `readFile` is a pure
+function of a directory and a `git.FileChange` precisely so it can run there.
+
+Two counters, `listSeq` and `fileSeq`, decide whether an answer is still
+wanted; they are atomic because the commands run while `Update` writes the
+view. A command carries the value it was issued with and its result is
+dropped when the counter has moved on — which is what makes a held-down key
+safe, and what lets a read outlive the view that asked for it. `loadCmd` also
+checks the counter *before* running git, after waiting `diffLoadDelay`
+(60 ms), so a key repeat spawns no process for the files it passes over; the
+check after git is the one that matters for correctness, since the read a
+landed file list asks for has no delay to be superseded during.
+
+A refresh spans both reads, so what it wants restored lives in `keep`: the
+selected path, matched again in the new list, and the scroll position that
+comes back with it. `keep` is cleared when the file lands, and also when the
+new list is empty and no file will land — otherwise a refresh's plan would
+move whatever loaded next.
+
 **The untracked-file trap.** Every form of `git diff` — plain, `--cached`,
 `HEAD` — ignores untracked files, so a file an agent just created is invisible
 to all of them. `git.Changes` therefore consults `git status --porcelain=v1 -z

@@ -143,7 +143,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.MouseMsg:
-		m.handleMouse(msg)
+		return m, m.handleMouse(msg)
 
 	case tea.KeyMsg:
 		if m.help {
@@ -165,6 +165,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateTerminal(msg, p, t)
 		}
 		return m.updateSidebar(msg)
+
+	case diffListMsg:
+		// A result for a request the view has moved past, or for a view that
+		// has since closed, is not what is on screen: dropping it is what
+		// makes a held-down key safe.
+		if m.diff != nil && msg.seq == m.diff.listSeq.Load() {
+			return m, m.diff.applyList(msg)
+		}
+
+	case diffFileMsg:
+		if m.diff != nil && msg.seq == m.diff.fileSeq.Load() {
+			m.diff.applyFile(msg)
+			m.diff.scroll(0, m.diffRows()) // a re-read file may have got shorter
+		}
 
 	case terminalOutputMsg:
 		// Re-arm only if this terminal is still registered with that session.
@@ -214,7 +228,7 @@ func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace
 	case key.Matches(msg, keys.ManageTerm):
 		m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get) // p is the focused terminal's project; focus is kept for esc
 	case key.Matches(msg, keys.DiffTerm):
-		m.openDiff(p, t)
+		return m, m.openDiff(p, t)
 	case key.Matches(msg, keys.PaneSide):
 		m.openForm(p, splitSide, focusMain)
 	case key.Matches(msg, keys.PaneStack):
@@ -576,8 +590,7 @@ func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.DiffClose):
 		m.diff = nil
 	case key.Matches(msg, keys.DiffRefresh):
-		d.refresh()
-		d.scroll(0, height) // the file may have got shorter
+		return m, d.refresh()
 	case key.Matches(msg, keys.DiffNextChange):
 		d.jumpChange(1, height)
 	case key.Matches(msg, keys.DiffPrevChange):
@@ -587,9 +600,9 @@ func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.DiffRight):
 		d.scrollX(diffHScrollStep)
 	case key.Matches(msg, keys.DiffDown):
-		d.move(1)
+		return m, d.move(1)
 	case key.Matches(msg, keys.DiffUp):
-		d.move(-1)
+		return m, d.move(-1)
 	}
 	return m, nil
 }
@@ -603,7 +616,7 @@ func (m Model) diffRows() int {
 
 // openDiff shows the uncommitted changes of wherever the user's attention is:
 // the focused terminal's directory when t is set, else p's own checkout.
-func (m *Model) openDiff(p *workspace.Project, t *workspace.Terminal) {
+func (m *Model) openDiff(p *workspace.Project, t *workspace.Terminal) tea.Cmd {
 	dir, title := p.Path, p.Name
 	if t != nil {
 		dir = t.Dir(p)
@@ -611,7 +624,9 @@ func (m *Model) openDiff(p *workspace.Project, t *workspace.Terminal) {
 	if branch := m.branches.get(dir); branch != "" {
 		title += "  " + worktreeMark + branch
 	}
-	m.diff = newDiffView(dir, title)
+	var cmd tea.Cmd
+	m.diff, cmd = newDiffView(dir, title)
+	return cmd
 }
 
 // updateSidebar handles navigation and program-level keys.
@@ -661,7 +676,7 @@ func (m Model) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, keys.Diff):
 		if last >= 0 {
-			m.openDiff(m.ws.Projects[m.cursor], nil)
+			return m, m.openDiff(m.ws.Projects[m.cursor], nil)
 		}
 	case key.Matches(msg, keys.Help):
 		m.help = true

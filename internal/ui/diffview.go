@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 
@@ -31,7 +34,44 @@ type diffView struct {
 	left   int // horizontal offset, shared by both columns
 	widest int // cells in the widest row text on either side; left stops there
 	change int // row of the change the last jump landed on; -1 once the view has moved by other means
+
+	listing bool // the file list is being read
+	reading bool // the selected file is being read
+
+	// listSeq and fileSeq count requests. A command carries the value it was
+	// issued with and drops its result once the counter has moved past it —
+	// and, for a file, does not spawn git at all. They are atomic because the
+	// commands run off the event loop while Update writes the view.
+	listSeq *atomic.Int64
+	fileSeq *atomic.Int64
+
+	keep *keepPlace // set by a refresh: where to put the view back when the results land
 }
+
+// keepPlace is what a refresh remembers across the two reads it triggers. The
+// selection follows its path rather than its index, so the file being watched
+// stays selected however the list around it grew or shrank; its scroll
+// position comes back with it.
+type keepPlace struct {
+	path      string
+	top, left int
+	found     bool // the path was still in the list, so top and left still mean something
+}
+
+// Results of the two reads, delivered to Update like any other message.
+type (
+	diffListMsg struct {
+		seq   int64
+		files []git.FileChange
+		err   string
+	}
+	diffFileMsg struct {
+		seq     int64
+		rows    []diff.Row
+		widest  int
+		loadErr string
+	}
+)
 
 const (
 	diffListWidth   = 32
@@ -50,23 +90,69 @@ const (
 	diffJumpContext = 2
 )
 
-// newDiffView reads the changes in dir. A directory that is not a git
-// repository, or a git that fails, is reported in the view rather than
-// preventing it from opening.
-func newDiffView(dir, title string) *diffView {
-	d := &diffView{dir: dir, title: title}
-	d.read()
-	d.load()
-	return d
+// diffLoadDelay holds a file read back so a held-down j does not spawn two
+// git processes for every file it passes over. The read that survives is the
+// one for the file the cursor settled on; the rest never run.
+const diffLoadDelay = 60 * time.Millisecond
+
+// newDiffView opens on dir and returns the command that reads it. The view
+// appears at once and fills in when git answers: every other key handler in
+// tm returns immediately, and `git status` on a large repository takes long
+// enough to be felt as a freeze. A directory that is not a git repository, or
+// a git that fails, is reported in the view rather than preventing it from
+// opening.
+func newDiffView(dir, title string) (*diffView, tea.Cmd) {
+	d := &diffView{dir: dir, title: title, change: -1, listSeq: &atomic.Int64{}, fileSeq: &atomic.Int64{}}
+	return d, d.readCmd()
 }
 
-// read lists the directory's changes from scratch, selecting the first.
-func (d *diffView) read() {
-	d.files, d.err, d.cursor = nil, "", 0
-	if files, err := git.Changes(d.dir); err != nil {
-		d.err = err.Error()
-	} else {
-		d.files = files
+// readCmd lists the directory's changes from scratch.
+func (d *diffView) readCmd() tea.Cmd {
+	d.listing, d.err = true, ""
+	dir, counter := d.dir, d.listSeq
+	seq := counter.Add(1)
+	return func() tea.Msg {
+		files, err := git.Changes(dir)
+		if counter.Load() != seq {
+			return nil // the view moved on, or closed
+		}
+		if err != nil {
+			return diffListMsg{seq: seq, err: err.Error()}
+		}
+		return diffListMsg{seq: seq, files: files}
+	}
+}
+
+// applyList takes a readCmd's answer and asks for the file it selects.
+func (d *diffView) applyList(msg diffListMsg) tea.Cmd {
+	d.listing, d.files, d.err, d.cursor = false, msg.files, msg.err, 0
+	if k := d.keep; k != nil {
+		for i, f := range d.files {
+			if f.Path == k.path {
+				d.cursor, k.found = i, true
+				break
+			}
+		}
+	}
+	return d.loadCmd(0)
+}
+
+// applyFile takes a loadCmd's answer. A refresh puts the view back where it
+// was, but only while the offset still shows something: a line that shrank
+// past it would leave both columns blank — from the one key whose job is to
+// show what changed. The caller clamps top, since the file may have got
+// shorter.
+func (d *diffView) applyFile(msg diffFileMsg) {
+	d.reading, d.rows, d.widest, d.loadErr = false, msg.rows, msg.widest, msg.loadErr
+	d.top, d.left, d.change = 0, 0, -1
+	if k := d.keep; k != nil {
+		if k.found {
+			d.top = k.top
+			if k.left < d.widest {
+				d.left = k.left
+			}
+		}
+		d.keep = nil
 	}
 }
 
@@ -78,26 +164,12 @@ func (d *diffView) read() {
 // since the file may have got shorter; the sideways offset is kept only while
 // it still shows something, because a line that shrank past it would leave
 // both columns blank — from the one key whose job is to show what changed.
-func (d *diffView) refresh() {
-	path, top, left := "", d.top, d.left
+func (d *diffView) refresh() tea.Cmd {
+	d.keep = &keepPlace{top: d.top, left: d.left}
 	if len(d.files) > 0 {
-		path = d.files[d.cursor].Path
+		d.keep.path = d.files[d.cursor].Path
 	}
-	d.read()
-	found := false
-	for i, f := range d.files {
-		if f.Path == path {
-			d.cursor, found = i, true
-			break
-		}
-	}
-	d.load()
-	if found {
-		d.top = top
-		if left < d.widest {
-			d.left = left
-		}
-	}
+	return d.readCmd()
 }
 
 // scroll moves the diff vertically, clamping so the view cannot run past
@@ -144,33 +216,60 @@ func (d *diffView) jumpChange(dir, height int) {
 	}
 }
 
-// move changes the selected file, clamping at both ends, and loads the file
+// move changes the selected file, clamping at both ends, and asks for the file
 // it lands on so the columns always show the selection.
-func (d *diffView) move(delta int) {
+func (d *diffView) move(delta int) tea.Cmd {
 	if len(d.files) == 0 {
-		return
+		return nil
 	}
 	next := min(max(d.cursor+delta, 0), len(d.files)-1)
 	if next == d.cursor {
-		return
+		return nil
 	}
 	d.cursor = next
-	d.load()
+	return d.loadCmd(diffLoadDelay)
 }
 
-// load reads the selected file's committed and working versions and aligns
-// them, starting at the top of the file. A file with no committed version —
-// one just created — aligns against an empty left side, which renders as all
-// additions.
-func (d *diffView) load() {
+// loadCmd asks for the selected file's committed and working versions. delay
+// holds the read back so a held-down j does not spawn two git processes for
+// every file it passes over: after waiting, a command that finds the cursor
+// has moved on returns without running git at all.
+func (d *diffView) loadCmd(delay time.Duration) tea.Cmd {
 	d.rows, d.loadErr, d.top, d.left, d.widest, d.change = nil, "", 0, 0, 0, -1
+	counter := d.fileSeq
+	seq := counter.Add(1)
 	if len(d.files) == 0 {
-		return
+		// No file will land, so nothing is left to restore a place into; a
+		// refresh's plan must not survive to move the next file that loads.
+		d.reading, d.keep = false, nil
+		return nil
 	}
-	f := d.files[d.cursor]
+	d.reading = true
+	dir, f := d.dir, d.files[d.cursor]
+	return func() tea.Msg {
+		if delay > 0 {
+			time.Sleep(delay)
+			if counter.Load() != seq {
+				return nil // the cursor moved on; no git for a file nobody is looking at
+			}
+		}
+		msg := readFile(dir, f)
+		if counter.Load() != seq {
+			return nil
+		}
+		msg.seq = seq
+		return msg
+	}
+}
+
+// readFile reads one file's committed and working versions and aligns them.
+// It touches nothing on the view, because it runs off the event loop.
+//
+// A file with no committed version — one just created — aligns against an
+// empty left side, which renders as all additions.
+func readFile(dir string, f git.FileChange) diffFileMsg {
 	if f.Binary {
-		d.loadErr = "binary file"
-		return
+		return diffFileMsg{loadErr: "binary file"}
 	}
 	// A renamed file's committed content lives at the path it came FROM; the
 	// destination has nothing in HEAD. Without this a move would render as a
@@ -179,10 +278,9 @@ func (d *diffView) load() {
 	if f.OldPath != "" {
 		from = f.OldPath
 	}
-	old, found, err := git.ShowHEAD(d.dir, from)
+	old, found, err := git.ShowHEAD(dir, from)
 	if err != nil {
-		d.loadErr = err.Error()
-		return
+		return diffFileMsg{loadErr: err.Error()}
 	}
 	// ShowHEAD folds every git error into "not in HEAD". Only a new file is
 	// allowed that answer: for any other, aligning against an empty left side
@@ -193,18 +291,15 @@ func (d *diffView) load() {
 			// deletion, but HEAD never had it. Nothing failed; there is
 			// simply nothing on either side, and an empty pane under the
 			// two labels would read as an empty file.
-			d.loadErr = "in neither HEAD nor the working tree: staged as new, then removed"
-		} else {
-			d.loadErr = fmt.Sprintf("cannot read %s from HEAD", from)
+			return diffFileMsg{loadErr: "in neither HEAD nor the working tree: staged as new, then removed"}
 		}
-		return
+		return diffFileMsg{loadErr: fmt.Sprintf("cannot read %s from HEAD", from)}
 	}
 	fresh := ""
 	if f.Kind != git.Deleted {
-		data, err := os.ReadFile(filepath.Join(d.dir, f.Path))
+		data, err := os.ReadFile(filepath.Join(dir, f.Path))
 		if err != nil {
-			d.loadErr = err.Error()
-			return
+			return diffFileMsg{loadErr: err.Error()}
 		}
 		fresh = string(data)
 	}
@@ -212,10 +307,9 @@ func (d *diffView) load() {
 	// sides are inside the pathspec. With the destination alone it reports a
 	// whole-file addition, which would contradict the committed content
 	// ShowHEAD just returned and misalign the two columns.
-	unified, err := git.DiffHEAD(d.dir, f.Path, f.OldPath)
+	unified, err := git.DiffHEAD(dir, f.Path, f.OldPath)
 	if err != nil {
-		d.loadErr = err.Error()
-		return
+		return diffFileMsg{loadErr: err.Error()}
 	}
 	hunks := diff.ParseHunks(unified)
 	// An untracked file has no diff at all — git diff HEAD ignores it — so
@@ -225,10 +319,11 @@ func (d *diffView) load() {
 	if f.Kind == git.Added && len(hunks) == 0 {
 		hunks = []diff.Hunk{{OldStart: 0, OldCount: 0, NewStart: 1, NewCount: len(lines)}}
 	}
-	d.rows = diff.Align(splitLines(old), lines, hunks)
-	for _, r := range d.rows {
-		d.widest = max(d.widest, lipgloss.Width(plainText(r.OldText)), lipgloss.Width(plainText(r.NewText)))
+	msg := diffFileMsg{rows: diff.Align(splitLines(old), lines, hunks)}
+	for _, r := range msg.rows {
+		msg.widest = max(msg.widest, lipgloss.Width(plainText(r.OldText)), lipgloss.Width(plainText(r.NewText)))
 	}
+	return msg
 }
 
 // splitLines splits file content into lines without a trailing empty element.
@@ -251,6 +346,8 @@ func (d *diffView) view(width, height int) string {
 		// like every other repository-derived string here.
 		first, _, _ := strings.Cut(d.err, "\n")
 		lines = append(lines, " "+errorStyle.Render(ansi.Truncate(stripControlChars(first), width-1, "…")))
+	case d.listing:
+		lines = append(lines, " "+hintStyle.Render(ansi.Truncate("Reading "+d.dir+"…", width-1, "…")))
 	case len(d.files) == 0:
 		lines = append(lines, " "+hintStyle.Render(ansi.Truncate("No uncommitted changes in "+d.dir, width-1, "…")))
 	default:
@@ -296,6 +393,11 @@ func (d *diffView) panes(width, height int) []string {
 	labels := pad(delStyle.Render("HEAD")+hintStyle.Render("  committed"), half) + textStyle.Render(" ") +
 		addStyle.Render("WORKING TREE") + hintStyle.Render("  yours now")
 	lines := []string{ansi.Truncate(labels, max(width, 1), "")}
+	if d.reading {
+		// Under the labels rather than instead of them: the columns keep
+		// their headings, so only the code area changes while git answers.
+		return append(lines, hintStyle.Render(" reading…"))
+	}
 	for i := d.top; i < len(d.rows) && len(lines) < height; i++ {
 		r := d.rows[i]
 		lines = append(lines, side(r.OldNum, r.OldText, r.Changed, delStyle, half, d.left)+textStyle.Render(" ")+

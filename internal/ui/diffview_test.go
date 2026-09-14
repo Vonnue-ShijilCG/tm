@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -532,12 +533,10 @@ func TestAModifiedFileMissingFromHEADIsReportedNotShownAsNew(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(app, "ghost.txt"), []byte("x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d := &diffView{dir: app, files: []git.FileChange{{Path: "ghost.txt", Kind: git.Modified}}}
+	got := readFile(app, git.FileChange{Path: "ghost.txt", Kind: git.Modified})
 
-	d.load()
-
-	if d.loadErr == "" || d.rows != nil {
-		t.Errorf("loadErr %q, rows %+v; want an error and no rows", d.loadErr, d.rows)
+	if got.loadErr == "" || got.rows != nil {
+		t.Errorf("loadErr %q, rows %+v; want an error and no rows", got.loadErr, got.rows)
 	}
 }
 
@@ -1136,5 +1135,150 @@ func TestRefreshStartsTheLineOverWhenItsLongestLineShrank(t *testing.T) {
 	m = press(m, "r")
 	if row := firstCodeRow(t, m.View()); !strings.Contains(row, "1 yyyy") {
 		t.Errorf("after the long line shrank the re-read file should be shown from its start, got %q", row)
+	}
+}
+
+// keyMsg builds the message a keypress delivers, for tests that need to see
+// the model between a key and the command it returned.
+func keyMsg(s string) tea.KeyMsg { return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)} }
+
+// The view must appear on the keypress, not when git answers: `git status` on
+// a large repository takes long enough to be felt, and every other key handler
+// in tm returns immediately.
+func TestTheChangesViewOpensBeforeGitAnswers(t *testing.T) {
+	m, _, root := gitModel(t)
+	if err := os.WriteFile(filepath.Join(root, "app", "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	next, cmd := m.Update(keyMsg("d"))
+	m = next.(Model)
+
+	if m.diff == nil {
+		t.Fatal("d should open the view on the keypress")
+	}
+	if cmd == nil {
+		t.Fatal("opening the view should return the command that reads git")
+	}
+	if !m.diff.listing {
+		t.Error("the view should say it is reading until the list lands")
+	}
+	if view := m.View(); !strings.Contains(view, "Reading") {
+		t.Errorf("the view should show that it is reading:\n%s", ansi.Strip(view))
+	}
+
+	m = settle(m, cmd)
+
+	if m.diff.listing {
+		t.Error("the list landed; the view should not still be reading")
+	}
+	if !strings.Contains(m.View(), "f.txt") {
+		t.Errorf("the file should be listed once git answered:\n%s", ansi.Strip(m.View()))
+	}
+}
+
+// Holding j down must not read every file it passes over. Each press
+// supersedes the last, and the read that survives is the one for the file the
+// cursor settled on — the rest return without spawning git at all.
+func TestPassingOverFilesReadsOnlyTheOneTheCursorSettlesOn(t *testing.T) {
+	m, _, root := gitModel(t)
+	for _, name := range []string{"a.txt", "b.txt", "c.txt", "d.txt"} {
+		if err := os.WriteFile(filepath.Join(root, "app", name), []byte(name+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m = press(m, "d")
+
+	// Three moves arriving together, the way a key repeat does: collect the
+	// commands without letting any of them finish first.
+	var cmds []tea.Cmd
+	for i := 0; i < 3; i++ {
+		next, cmd := m.Update(keyMsg("j"))
+		m = next.(Model)
+		cmds = append(cmds, cmd)
+	}
+	reads := 0
+	for _, c := range cmds {
+		if c == nil {
+			t.Fatal("a move should return a read command")
+		}
+		if c() != nil {
+			reads++
+		}
+	}
+
+	if reads != 1 {
+		t.Errorf("%d of the 3 files passed over were read, want 1: only the file landed on", reads)
+	}
+	if m.diff.cursor != 3 {
+		t.Errorf("cursor = %d, want 3 after three moves", m.diff.cursor)
+	}
+}
+
+// A result for a request the view has moved past belongs to a file that is no
+// longer selected; applying it would show one file's diff under another's name.
+func TestAStaleReadIsDropped(t *testing.T) {
+	m, _, root := gitModel(t)
+	if err := os.WriteFile(filepath.Join(root, "app", "f.txt"), []byte("keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = press(m, "d")
+	files, rows := m.diff.files, m.diff.rows
+
+	stale := m.diff.listSeq.Load() - 1
+	next, _ := m.Update(diffListMsg{seq: stale, err: "from a read nobody is waiting for"})
+	m = next.(Model)
+	next, _ = m.Update(diffFileMsg{seq: m.diff.fileSeq.Load() - 1, loadErr: "likewise"})
+	m = next.(Model)
+
+	if m.diff.err != "" || m.diff.loadErr != "" {
+		t.Errorf("a stale result was applied: err %q, loadErr %q", m.diff.err, m.diff.loadErr)
+	}
+	if len(m.diff.files) != len(files) || len(m.diff.rows) != len(rows) {
+		t.Errorf("a stale result replaced what is on screen: %d files, %d rows", len(m.diff.files), len(m.diff.rows))
+	}
+}
+
+// A read finishing after the view closed has nowhere to go. Esc is pressed
+// while git is still running often enough that this must not panic.
+func TestAReadThatLandsAfterTheViewClosedIsIgnored(t *testing.T) {
+	m, _, root := gitModel(t)
+	if err := os.WriteFile(filepath.Join(root, "app", "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m = press(m, "d")
+	seq := m.diff.listSeq.Load()
+	m = press(m, "esc")
+	if m.diff != nil {
+		t.Fatal("esc should have closed the view")
+	}
+
+	next, _ := m.Update(diffListMsg{seq: seq, files: []git.FileChange{{Path: "f.txt"}}})
+	m = next.(Model)
+	next, _ = m.Update(diffFileMsg{seq: seq})
+
+	if m = next.(Model); m.diff != nil {
+		t.Error("a late result must not reopen the view")
+	}
+}
+
+// The read a landed file list asks for has no delay to be superseded during,
+// so the check after git is the only thing standing between a slow read and
+// the file the user has since moved to. Without it the diff of one file would
+// appear under another's name.
+func TestAReadSupersededWhileGitRunsIsThrownAway(t *testing.T) {
+	_, _, root := gitModel(t)
+	app := filepath.Join(root, "app")
+	if err := os.WriteFile(filepath.Join(app, "f.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d := &diffView{dir: app, listSeq: &atomic.Int64{}, fileSeq: &atomic.Int64{},
+		files: []git.FileChange{{Path: "f.txt", Kind: git.Added, Added: 1}}}
+
+	cmd := d.loadCmd(0) // no delay: this is the read that follows a file list
+	d.fileSeq.Add(1)    // the cursor moves while git is still running
+
+	if msg := cmd(); msg != nil {
+		t.Errorf("a superseded read returned %+v, want nothing", msg)
 	}
 }

@@ -16,8 +16,8 @@ func wheel(m Model, up bool, x, y int) Model {
 	if up {
 		b = tea.MouseButtonWheelUp
 	}
-	next, _ := m.Update(tea.MouseMsg{X: x, Y: y, Button: b, Action: tea.MouseActionPress})
-	return next.(Model)
+	next, cmd := m.Update(tea.MouseMsg{X: x, Y: y, Button: b, Action: tea.MouseActionPress})
+	return settle(next.(Model), cmd)
 }
 
 // center returns a screen cell inside t's pane body (below the header).
