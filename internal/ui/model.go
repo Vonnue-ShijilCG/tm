@@ -4,6 +4,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -991,7 +992,22 @@ func (m *Model) placeBalanced(p *workspace.Project, nt *workspace.Terminal) bool
 	return true
 }
 
-// watchTerminal blocks until the terminal has new output or exits.
+// outputWindow is how long watchTerminal keeps collecting after the first
+// signal before it wakes the UI. Bubble Tea rebuilds the whole window on
+// every message it delivers, while the renderer ships at most sixty frames a
+// second, so a message per PTY read is work thrown away: a program printing
+// steadily woke the UI about 350 times a second, and roughly five in six of
+// those frames were built and discarded. One window is one frame's worth of
+// output, so a burst of any size costs one rebuild.
+//
+// The wake is deliberately on the trailing edge. The cost is that an isolated
+// keystroke's echo appears one window later, which is the renderer's own
+// frame time and below what a typist can see; the gain is that the steady
+// case cannot outrun the screen.
+const outputWindow = 16 * time.Millisecond
+
+// watchTerminal blocks until the terminal has new output or exits, then
+// collects further output for one window so a burst wakes the UI once.
 func watchTerminal(t *workspace.Terminal) tea.Cmd {
 	s := t.Session
 	return func() tea.Msg {
@@ -999,7 +1015,21 @@ func watchTerminal(t *workspace.Terminal) tea.Cmd {
 		case <-s.Done():
 			return terminalExitedMsg{id: t.ID, err: s.Err()}
 		case <-s.Output():
-			return terminalOutputMsg{id: t.ID, s: s}
+		}
+		// The screen is read once, when the message lands, so ten signals
+		// and one describe the same work. Exit still wins the moment it
+		// happens: the pane goes away, and waiting out the window first
+		// would only delay saying so.
+		window := time.NewTimer(outputWindow)
+		defer window.Stop()
+		for {
+			select {
+			case <-s.Done():
+				return terminalExitedMsg{id: t.ID, err: s.Err()}
+			case <-s.Output():
+			case <-window.C:
+				return terminalOutputMsg{id: t.ID, s: s}
+			}
 		}
 	}
 }

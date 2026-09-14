@@ -33,7 +33,7 @@ cmd/tm  →  ui  →  workspace  →  { project, git, config, state }
 - **`project`**: `Discover(root)` — every direct subdirectory with a `.git` entry.
 - **`git`**: thin wrapper over the `git` CLI (branches, worktrees, dirty check, and in `git/changes.go` the uncommitted-changes queries `Changes`, `ShowHEAD`, `DiffHEAD`). `git.Head(dir)` reads `.git/HEAD` directly without spawning a process; the UI uses it via a 1s TTL cache (`ui/branches.go`) because rendering happens on every output event.
 - **`diff`**: `ParseHunks` and `Align`, pure functions over strings — the one real algorithm behind the changes view, kept free of git and Bubble Tea so it can be tested on its own (see Uncommitted changes view).
-- **`terminal`**: `Start(Config)` runs a command in a PTY and mirrors output into a `vt.Emulator`. Exposes `Output()`/`Done()` channels; the UI's per-terminal watcher command turns those into Bubble Tea messages.
+- **`terminal`**: `Start(Config)` runs a command in a PTY and mirrors output into a `vt.Emulator`. Exposes `Output()`/`Done()` channels; the UI's per-terminal watcher command turns those into Bubble Tea messages. Output is coalesced twice over: `Session.notify` drops a signal when one is already pending, and `watchTerminal` then collects for `outputWindow` before waking the UI (see Render cadence).
 - **`workspace`**: the runtime tree `Workspace → Project → Terminal`. Owns terminal creation (with the per-project limit), worktree creation/removal, hidden/saved bookkeeping and the state snapshot. A terminal's `Command` is written into its shell by `startTerminal`, the single choke point every start path goes through, so `terminal.Spawner` never learns about commands. It depends only on the `Session` interface and a `Spawner` func, so tests inject fakes and never open a PTY.
 - **`state`**: the JSON file format (`Version = 3`). Stores only metadata: names, branches, commands, workspace-relative worktree paths, an index-based layout tree. Paths are relative to the
 root by design, which is why the form refuses a worktree outside the workspace rather than
@@ -76,6 +76,23 @@ Creating a worktree on a branch that does not already exist requires `Options.Ba
 ### Scrollback
 
 The Bubble Tea program runs with mouse reporting on (`tea.WithMouseCellMotion()`), used only for the wheel. `ui/scroll.go` hit-tests the pointer against `paneScreenRects` (pane rects translated by the sidebar width and main-pane border) and keeps a per-terminal offset in `Model.scroll`. Rendering calls `Session.RenderScrolled` when the offset is non-zero; typing, `applyLayout` (resizes) and `dropPane` clear it. A program that enabled mouse tracking (Claude Code, htop, Vim with mouse) gets the wheel forwarded through `Session.SendWheel` in its own protocol; alt-screen programs without mouse tracking get arrow keys; everything else scrolls tm's own history view. Scroll positions are never persisted.
+
+### Render cadence
+
+Bubble Tea calls `Model.View` after **every** message it delivers; the 60 fps
+cap belongs to the renderer's write to the terminal, not to `View`. `View`
+rebuilds the whole window — measured at ~1.9 ms and ~400 KB for four panes in
+a 160x48 window, before the panes' own `Session.Render` (~0.5 ms each at
+120x40) — so one message per PTY read is work built and thrown away.
+
+`watchTerminal` therefore waits out `outputWindow` (16 ms, one frame) after
+the first signal, collecting whatever else arrives, and wakes the UI once. A
+program printing steadily fell from ~350 wakes a second to ~55, at the
+renderer's own ceiling. The wake is on the trailing edge, so an isolated
+keystroke's echo appears one window later — the renderer's own frame time,
+and below what a typist can see. An exit is the exception and never waits:
+the pane goes away when it lands, so holding it back would only postpone
+saying the terminal is gone.
 
 ### Appearance
 
