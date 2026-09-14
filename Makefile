@@ -45,3 +45,6 @@ check: fmt-check vet test race
 ## clean: remove build output
 clean:
 	rm -rf bin/ tm
+
+screenshots: ## regenerate the README images from a scripted tm run
+	go run ./tools/screenshot

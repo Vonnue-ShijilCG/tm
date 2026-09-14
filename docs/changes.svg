@@ -1,0 +1,124 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="540" viewBox="0 0 840 540" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14">
+<rect width="840" height="540" fill="#07112b"/>
+<text x="0.00" y="13.50" fill="#3b82f6" textLength="840.00" lengthAdjust="spacing" xml:space="preserve">╭──────────────────────────────────────────────────────────────────────────────────────────────────╮</text>
+<text x="0.00" y="31.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="8.40" y="31.50" fill="#c9d1d9" textLength="428.40" lengthAdjust="spacing" xml:space="preserve">  Uncommitted changes  api  ⎇ feature/checkout-flow</text>
+<text x="688.80" y="31.50" fill="#8b98b0" textLength="126.00" lengthAdjust="spacing" xml:space="preserve">2 files  +4  -0</text>
+<text x="831.60" y="31.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="49.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="831.60" y="49.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="67.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="33.60" y="67.50" fill="#3b82f6" textLength="42.00" lengthAdjust="spacing" xml:space="preserve">FILES</text>
+<text x="285.60" y="67.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="310.80" y="67.50" fill="#f28b82" textLength="33.60" lengthAdjust="spacing" xml:space="preserve">HEAD</text>
+<text x="344.40" y="67.50" fill="#8b98b0" textLength="92.40" lengthAdjust="spacing" xml:space="preserve">  committed</text>
+<text x="571.20" y="67.50" fill="#49de80" textLength="100.80" lengthAdjust="spacing" xml:space="preserve">WORKING TREE</text>
+<text x="672.00" y="67.50" fill="#8b98b0" textLength="92.40" lengthAdjust="spacing" xml:space="preserve">  yours now</text>
+<text x="831.60" y="67.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="85.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="8.40" y="85.50" fill="#c9d1d9" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> ›</text>
+<text x="33.60" y="85.50" fill="#3b82f6" textLength="75.60" lengthAdjust="spacing" xml:space="preserve">server.go</text>
+<text x="285.60" y="85.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="310.80" y="85.50" fill="#8b98b0" textLength="33.60" lengthAdjust="spacing" xml:space="preserve">   1</text>
+<text x="344.40" y="85.50" fill="#c9d1d9" textLength="117.60" lengthAdjust="spacing" xml:space="preserve"> func main() {</text>
+<text x="571.20" y="85.50" fill="#8b98b0" textLength="33.60" lengthAdjust="spacing" xml:space="preserve">   1</text>
+<text x="604.80" y="85.50" fill="#c9d1d9" textLength="117.60" lengthAdjust="spacing" xml:space="preserve"> func main() {</text>
+<text x="831.60" y="85.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="103.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="50.40" y="103.50" fill="#49de80" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">+1</text>
+<text x="75.60" y="103.50" fill="#f28b82" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">-0</text>
+<text x="285.60" y="103.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="310.80" y="103.50" fill="#8b98b0" textLength="33.60" lengthAdjust="spacing" xml:space="preserve">   2</text>
+<text x="344.40" y="103.50" fill="#c9d1d9" textLength="168.00" lengthAdjust="spacing" xml:space="preserve">     listen(":8080")</text>
+<text x="571.20" y="103.50" fill="#8b98b0" textLength="33.60" lengthAdjust="spacing" xml:space="preserve">   2</text>
+<text x="604.80" y="103.50" fill="#c9d1d9" textLength="168.00" lengthAdjust="spacing" xml:space="preserve">     listen(":8080")</text>
+<text x="831.60" y="103.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="121.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="8.40" y="121.50" fill="#c9d1d9" textLength="92.40" lengthAdjust="spacing" xml:space="preserve">   notes.md</text>
+<text x="285.60" y="121.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="571.20" y="121.50" fill="#8b98b0" textLength="33.60" lengthAdjust="spacing" xml:space="preserve">   3</text>
+<text x="604.80" y="121.50" fill="#49de80" textLength="210.00" lengthAdjust="spacing" xml:space="preserve">     log.Println("ready")</text>
+<text x="831.60" y="121.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="139.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="50.40" y="139.50" fill="#49de80" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">+3</text>
+<text x="67.20" y="139.50" fill="#8b98b0" textLength="84.00" lengthAdjust="spacing" xml:space="preserve">  new file</text>
+<text x="285.60" y="139.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="310.80" y="139.50" fill="#8b98b0" textLength="33.60" lengthAdjust="spacing" xml:space="preserve">   3</text>
+<text x="344.40" y="139.50" fill="#c9d1d9" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> }</text>
+<text x="571.20" y="139.50" fill="#8b98b0" textLength="33.60" lengthAdjust="spacing" xml:space="preserve">   4</text>
+<text x="604.80" y="139.50" fill="#c9d1d9" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> }</text>
+<text x="831.60" y="139.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="157.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="157.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="157.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="175.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="175.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="175.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="193.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="193.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="193.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="211.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="211.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="211.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="229.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="229.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="229.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="247.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="247.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="247.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="265.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="265.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="265.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="283.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="283.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="283.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="301.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="301.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="301.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="319.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="319.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="319.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="337.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="337.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="337.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="355.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="355.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="355.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="373.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="373.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="373.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="391.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="391.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="391.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="409.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="409.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="409.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="427.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="427.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="427.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="445.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="445.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="445.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="463.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="463.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="463.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="481.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="481.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="481.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="499.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="285.60" y="499.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve"> │</text>
+<text x="831.60" y="499.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="517.50" fill="#3b82f6" textLength="840.00" lengthAdjust="spacing" xml:space="preserve">╰──────────────────────────────────────────────────────────────────────────────────────────────────╯</text>
+<text x="50.40" y="535.50" fill="#c9d1d9" textLength="42.00" lengthAdjust="spacing" xml:space="preserve">wheel</text>
+<text x="100.80" y="535.50" fill="#8b98b0" textLength="109.20" lengthAdjust="spacing" xml:space="preserve">scroll diff │</text>
+<text x="218.40" y="535.50" fill="#c9d1d9" textLength="42.00" lengthAdjust="spacing" xml:space="preserve">j / ↓</text>
+<text x="268.80" y="535.50" fill="#8b98b0" textLength="92.40" lengthAdjust="spacing" xml:space="preserve">next file │</text>
+<text x="369.60" y="535.50" fill="#c9d1d9" textLength="42.00" lengthAdjust="spacing" xml:space="preserve">k / ↑</text>
+<text x="420.00" y="535.50" fill="#8b98b0" textLength="92.40" lengthAdjust="spacing" xml:space="preserve">prev file │</text>
+<text x="520.80" y="535.50" fill="#c9d1d9" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">n</text>
+<text x="537.60" y="535.50" fill="#8b98b0" textLength="109.20" lengthAdjust="spacing" xml:space="preserve">next change │</text>
+<text x="655.20" y="535.50" fill="#c9d1d9" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">r</text>
+<text x="672.00" y="535.50" fill="#8b98b0" textLength="75.60" lengthAdjust="spacing" xml:space="preserve">re-read │</text>
+<text x="756.00" y="535.50" fill="#c9d1d9" textLength="25.20" lengthAdjust="spacing" xml:space="preserve">esc</text>
+<text x="789.60" y="535.50" fill="#8b98b0" textLength="42.00" lengthAdjust="spacing" xml:space="preserve">close</text>
+</svg>

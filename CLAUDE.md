@@ -340,6 +340,38 @@ to spare for repeating them.
 
 `alt+s`, not `alt+esc`, returns to the sidebar: GNOME binds Alt+Esc to "switch windows directly", so the window manager takes it before tm ever sees it. Check what the desktop already claims before binding an Alt chord.
 
+## The first minute
+
+Two things decide whether somebody ever sees any of the above.
+
+**`cmd/tm` explains an empty workspace.** Every other developer tool is run
+inside a project, so running tm inside one is what everybody tries first;
+`explainNoProjects` says what tm expected instead and, when the directory
+above holds repositories, that `cd .. && tm` would have worked. Colour
+sequences are only written when stdout is a terminal, so a piped tm does not
+put escape bytes in front of its own error.
+
+**The README's pictures are generated.** `tools/screenshot` drives a real tm
+in a PTY against a throwaway workspace of invented repositories and branches,
+feeds the output through the same `vt.Emulator` the panes use, and writes the
+cell grid as SVG; `make screenshots` regenerates both. Three things it has to
+get right, each learned by getting it wrong:
+
+- **Drain the emulator.** `emu.Write` of a query blocks until the answer it
+  wants to send has been read, so the capture copies `emu` back into the PTY.
+  That also means tm's startup questions are answered by a real terminal
+  emulator rather than a hand-written table of replies.
+- **`COLORTERM=truecolor`**, or Lip Gloss quantises tm's exact hex to 256
+  slots and the image is not the colours tm chose.
+- **`textLength` on every run**, or the text is laid out at whatever advance
+  the reader's monospace font has and drifts off the backgrounds drawn under
+  it.
+
+**Releases carry binaries.** `.github/workflows/release.yml` builds static
+linux/amd64 and linux/arm64 on a tag push. The asset names carry no version,
+which is what lets `/releases/latest/download/tm_linux_amd64.tar.gz` — the
+one-line install in the README — resolve.
+
 ## Testing conventions
 
 - The `workspace` and `ui` packages have a `TestMain` that sets `XDG_CONFIG_HOME` to an empty temp dir so the developer's own `config.toml` cannot affect the default limit; the packages that never read config have none.

@@ -1,0 +1,121 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="840" height="540" viewBox="0 0 840 540" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="14">
+<rect width="840" height="540" fill="#07112b"/>
+<text x="0.00" y="13.50" fill="#2f4066" textLength="840.00" lengthAdjust="spacing" xml:space="preserve">╭──────────────────────────╮╭──────────────────────────────────────────────────────────────────────╮</text>
+<rect x="243.60" y="18.00" width="588.00" height="18.00" fill="#142440"/>
+<text x="0.00" y="31.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="8.40" y="31.50" fill="#c9d1d9" textLength="75.60" lengthAdjust="spacing" xml:space="preserve"> Projects</text>
+<text x="226.80" y="31.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="252.00" y="31.50" fill="#49de80" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">●</text>
+<text x="260.40" y="31.50" fill="#c9d1d9" textLength="50.40" lengthAdjust="spacing" xml:space="preserve"> ./dev</text>
+<text x="310.80" y="31.50" fill="#8b98b0" textLength="201.60" lengthAdjust="spacing" xml:space="preserve"> · feature/checkout-flow</text>
+<text x="831.60" y="31.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="49.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="49.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="49.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="67.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="16.80" y="67.50" fill="#3b82f6" textLength="42.00" lengthAdjust="spacing" xml:space="preserve">● api</text>
+<text x="226.80" y="67.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="67.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="85.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="8.40" y="85.50" fill="#c9d1d9" textLength="58.80" lengthAdjust="spacing" xml:space="preserve">   docs</text>
+<text x="226.80" y="85.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="85.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="103.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="8.40" y="103.50" fill="#c9d1d9" textLength="50.40" lengthAdjust="spacing" xml:space="preserve">   web</text>
+<text x="226.80" y="103.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="103.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="121.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="121.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="121.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="139.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="139.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="139.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="157.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="157.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="157.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="175.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="175.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="175.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="193.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="193.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="193.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="211.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="211.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="211.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="229.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="229.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="229.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="247.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="247.50" fill="#2f4066" textLength="16.80" lengthAdjust="spacing" xml:space="preserve">││</text>
+<text x="831.60" y="247.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="265.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="265.50" fill="#2f4066" textLength="613.20" lengthAdjust="spacing" xml:space="preserve">│╰──────────────────────────────────────────────────────────────────────╯</text>
+<text x="0.00" y="283.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="283.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="283.50" fill="#3b82f6" textLength="604.80" lengthAdjust="spacing" xml:space="preserve">╭──────────────────────────────────────────────────────────────────────╮</text>
+<rect x="243.60" y="288.00" width="588.00" height="18.00" fill="#142440"/>
+<text x="0.00" y="301.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="301.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="301.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="252.00" y="301.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">●</text>
+<text x="260.40" y="301.50" fill="#c9d1d9" textLength="67.20" lengthAdjust="spacing" xml:space="preserve"> ./tests</text>
+<text x="327.60" y="301.50" fill="#8b98b0" textLength="201.60" lengthAdjust="spacing" xml:space="preserve"> · feature/checkout-flow</text>
+<text x="831.60" y="301.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="319.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="319.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="319.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="243.60" y="319.50" fill="#c9d1d9" textLength="75.60" lengthAdjust="spacing" xml:space="preserve">$ ./tests</text>
+<text x="831.60" y="319.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="337.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="337.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="337.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="243.60" y="337.50" fill="#c9d1d9" textLength="168.00" lengthAdjust="spacing" xml:space="preserve">PASS  server_test.go</text>
+<text x="831.60" y="337.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="355.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="355.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="355.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="243.60" y="355.50" fill="#c9d1d9" textLength="168.00" lengthAdjust="spacing" xml:space="preserve">PASS  routes_test.go</text>
+<text x="831.60" y="355.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="373.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="373.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="373.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="831.60" y="373.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="391.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="391.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="391.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="243.60" y="391.50" fill="#c9d1d9" textLength="67.20" lengthAdjust="spacing" xml:space="preserve">2 passed</text>
+<text x="831.60" y="391.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="409.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="409.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="409.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="831.60" y="409.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="427.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="427.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="427.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="831.60" y="427.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="445.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="445.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="445.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="831.60" y="445.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="463.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="463.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="463.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="831.60" y="463.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="481.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="481.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="481.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="831.60" y="481.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="499.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="226.80" y="499.50" fill="#2f4066" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="235.20" y="499.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="831.60" y="499.50" fill="#3b82f6" textLength="8.40" lengthAdjust="spacing" xml:space="preserve">│</text>
+<text x="0.00" y="517.50" fill="#2f4066" textLength="235.20" lengthAdjust="spacing" xml:space="preserve">╰──────────────────────────╯</text>
+<text x="235.20" y="517.50" fill="#3b82f6" textLength="604.80" lengthAdjust="spacing" xml:space="preserve">╰──────────────────────────────────────────────────────────────────────╯</text>
+<text x="8.40" y="535.50" fill="#8b98b0" textLength="310.80" lengthAdjust="spacing" xml:space="preserve">api · ./tests · feature/checkout-flow</text>
+<text x="319.20" y="535.50" fill="#c9d1d9" textLength="50.40" lengthAdjust="spacing" xml:space="preserve"> alt+s</text>
+<text x="378.00" y="535.50" fill="#8b98b0" textLength="100.80" lengthAdjust="spacing" xml:space="preserve">to sidebar │</text>
+<text x="487.20" y="535.50" fill="#c9d1d9" textLength="42.00" lengthAdjust="spacing" xml:space="preserve">alt+j</text>
+<text x="537.60" y="535.50" fill="#8b98b0" textLength="126.00" lengthAdjust="spacing" xml:space="preserve">next terminal │</text>
+<text x="672.00" y="535.50" fill="#c9d1d9" textLength="42.00" lengthAdjust="spacing" xml:space="preserve">alt+x</text>
+<text x="722.40" y="535.50" fill="#8b98b0" textLength="109.20" lengthAdjust="spacing" xml:space="preserve">hide terminal</text>
+</svg>

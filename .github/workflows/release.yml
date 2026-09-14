@@ -1,0 +1,53 @@
+name: Release
+
+# Attaches binaries to a release so tm can be installed without a Go toolchain.
+# `go install` needs Go; a tarball needs nothing, which is the difference
+# between someone trying tm and someone closing the tab.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write # to upload assets onto the release for this tag
+
+jobs:
+  binaries:
+    name: Build and attach binaries
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # tm is Linux-only, so these are the two architectures worth shipping.
+      # CGO is off so each is a static binary that does not care which libc
+      # the machine has.
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            GOOS=linux GOARCH="$arch" go build -trimpath \
+              -ldflags "-s -w" -o "dist/tm" ./cmd/tm
+            # The version is not in the file name on purpose: it is what lets
+            # /releases/latest/download/tm_linux_<arch>.tar.gz resolve, which
+            # is the one-line install in the README. The release the asset
+            # hangs under says which version it is.
+            tar -czf "dist/tm_linux_${arch}.tar.gz" \
+              -C dist tm -C "$GITHUB_WORKSPACE" LICENSE README.md
+            rm dist/tm
+          done
+          cd dist && sha256sum *.tar.gz > checksums.txt
+          cat checksums.txt
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
