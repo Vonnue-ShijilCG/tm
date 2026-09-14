@@ -524,3 +524,68 @@ func TestPaneHeaderShowsAStatusDotAndTheBranch(t *testing.T) {
 		t.Errorf("the header should show the branch:\n%s", view)
 	}
 }
+
+// renderCounts is how many times each pane's screen has been painted.
+func renderCounts(spawned *[]*fakeSession) []int {
+	n := make([]int, len(*spawned))
+	for i, f := range *spawned {
+		n[i] = f.renders
+	}
+	return n
+}
+
+// Bubble Tea rebuilds the whole window whenever any terminal speaks, and
+// painting one card costs about a third of a millisecond. Repainting a pane
+// whose screen has not changed is therefore work thrown away on every frame —
+// with four panes, one busy terminal repainted the other three for nothing.
+func TestAFrameRepaintsOnlyThePanesThatChanged(t *testing.T) {
+	m, spawned, _ := gridModel(t, 4, 160, 48)
+	m.View() // the first frame paints all four
+
+	before := renderCounts(spawned)
+	m.View()
+	after := renderCounts(spawned)
+
+	for i := range before {
+		if after[i] != before[i] {
+			t.Errorf("pane %d was repainted for an unchanged frame: %d then %d", i, before[i], after[i])
+		}
+	}
+
+	// One terminal produces output. Only that pane may be repainted.
+	(*spawned)[2].title = "now something else"
+	before = renderCounts(spawned)
+	m.View()
+	after = renderCounts(spawned)
+
+	for i := range before {
+		want := before[i]
+		if i == 2 {
+			want++
+		}
+		if after[i] != want {
+			t.Errorf("pane %d painted %d times, want %d: only the terminal that spoke changed", i, after[i]-before[i], want-before[i])
+		}
+	}
+}
+
+// The cache must not outlive the pane. A card kept for a terminal that has
+// gone is a leak, and one kept across a resize would be the wrong shape.
+func TestAResizedOrClosedPaneDoesNotServeItsOldCard(t *testing.T) {
+	m, spawned, p := gridModel(t, 2, 160, 48)
+	m.View()
+
+	before := renderCounts(spawned)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = next.(Model)
+	m.View()
+	if after := renderCounts(spawned); after[0] == before[0] {
+		t.Error("a resized pane served its old card, which is the wrong shape")
+	}
+
+	gone := p.Terminals[0]
+	m.dropPane(p, gone)
+	if _, ok := m.panes[gone]; ok {
+		t.Error("a dropped pane left its card behind")
+	}
+}

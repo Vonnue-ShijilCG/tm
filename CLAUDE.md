@@ -85,7 +85,7 @@ rebuilds the whole window — measured at ~1.9 ms and ~400 KB for four panes in
 a 160x48 window, before the panes' own `Session.Render` (~0.5 ms each at
 120x40) — so one message per PTY read is work built and thrown away.
 
-`watchTerminal` therefore waits out `outputWindow` (16 ms, one frame) after
+`watchTerminal` waits out `outputWindow` (16 ms, one frame) after
 the first signal, collecting whatever else arrives, and wakes the UI once. A
 program printing steadily fell from ~350 wakes a second to ~55, at the
 renderer's own ceiling. The wake is on the trailing edge, so an isolated
@@ -93,6 +93,23 @@ keystroke's echo appears one window later — the renderer's own frame time,
 and below what a typist can see. An exit is the exception and never waits:
 the pane goes away when it lands, so holding it back would only postpone
 saying the terminal is gone.
+
+A frame then repaints only the panes that changed. `renderLeaf` caches each
+terminal's finished card in `Model.panes` against a `paneKey` — every input it
+reads, including `Session.Version()`, which the session bumps on output and on
+resize. With six panes and one of them talking, a frame costs one screen paint
+instead of six. Two rules keep it honest: anything new that `renderLeaf`
+consults must join `paneKey`, or a stale card is served; and the version is
+read *before* the screen, never after, so a write landing between the two
+costs one extra repaint next frame rather than filing older content under a
+newer version. `dropPane` evicts, so a terminal that exits leaves no card
+behind.
+
+What is left in a frame is tm's own chrome: `framed` on the main area and the
+`JoinHorizontal` of sidebar and panes together account for most of it, and the
+sidebar is usually identical between frames. `diffview.body` shows the
+technique that would fix it — assembling rows by hand rather than asking Lip
+Gloss to re-pad a whole block.
 
 ### Appearance
 

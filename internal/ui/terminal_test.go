@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"testing"
 
@@ -23,6 +24,7 @@ type fakeSession struct {
 	mouse      bool // the fake program has enabled mouse tracking
 	wheels     []wheelCall
 	closed     bool
+	renders    int  // times Render was called, for the pane-cache tests
 	grounded   bool // Render paints its ground the way a real Session does, for tests that read every cell
 	output     chan struct{}
 	done       chan struct{}
@@ -37,6 +39,7 @@ func (f *fakeSession) SendKey(k uv.KeyPressEvent) { f.keys = append(f.keys, k) }
 func (f *fakeSession) SendText(t string)          { f.text = append(f.text, t) }
 func (f *fakeSession) Resize(c, r int)            { f.cols, f.rows = c, r }
 func (f *fakeSession) Render(bool) string {
+	f.renders++
 	screen := "SCREEN:" + f.dir + ":" + f.title
 	if f.grounded {
 		return textStyle.Render(screen)
@@ -45,6 +48,16 @@ func (f *fakeSession) Render(bool) string {
 }
 func (f *fakeSession) RenderScrolled(off int) string {
 	return fmt.Sprintf("SCROLLED:%d:%s", off, f.dir)
+}
+
+// Version must move whenever a test changes what Render would return, or the
+// pane cache serves the old card and the test reads a stale screen. Hashing
+// the fields Render reads keeps that true without every test remembering to
+// bump a counter.
+func (f *fakeSession) Version() uint64 {
+	h := fnv.New64a()
+	fmt.Fprint(h, f.dir, f.title, f.grounded, f.history, f.alt, f.closed)
+	return h.Sum64()
 }
 func (f *fakeSession) ScrollbackLen() int  { return f.history }
 func (f *fakeSession) IsAltScreen() bool   { return f.alt }

@@ -297,3 +297,29 @@ func TestMustParseHexTakesExactlySixDigits(t *testing.T) {
 		}()
 	}
 }
+
+// The UI caches a pane's rendered card against Version and repaints only when
+// it moves, so a version that stands still freezes the pane on screen while
+// the program keeps printing.
+func TestVersionMovesWhenTheScreenChanges(t *testing.T) {
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", "echo first; sleep 30"}, Dir: "/tmp", Cols: 40, Rows: 10})
+	waitFor(t, s, "first")
+
+	printed := s.Version()
+	if printed == 0 {
+		t.Fatal("output arrived but the version never moved")
+	}
+
+	// A resize changes the screen's shape before the program redraws a thing,
+	// so it has to move the version on its own.
+	s.Resize(60, 20)
+	if s.Version() == printed {
+		t.Error("a resize left the version where it was; the card would keep its old shape")
+	}
+
+	// Nothing happened in between, so a reader must see the same answer twice:
+	// a version that moved on every call would defeat the cache entirely.
+	if a, b := s.Version(), s.Version(); a != b {
+		t.Errorf("Version() = %d then %d with nothing in between", a, b)
+	}
+}

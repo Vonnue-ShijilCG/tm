@@ -30,6 +30,7 @@ type Session interface {
 	Resize(cols, rows int)
 	Render(showCursor bool) string
 	RenderScrolled(offset int) string // the screen scrolled back offset lines into history
+	Version() uint64                  // changes whenever Render might return something different
 	ScrollbackLen() int               // lines of history available to RenderScrolled
 	IsAltScreen() bool                // the program runs full-screen and keeps no history
 	MouseTracking() bool              // the program asked for mouse events and should get the wheel

@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
@@ -96,6 +97,8 @@ type Session struct {
 	output chan struct{} // signalled (buffered, coalescing) after new output
 	done   chan struct{} // closed once the process has exited
 	err    error         // exit error, valid after done is closed
+
+	version atomic.Uint64 // see Version: bumped whatever the screen may have become
 }
 
 // Start launches cfg.Command inside a new PTY of the given size.
@@ -204,7 +207,15 @@ func (s *Session) replyLoop() {
 	}
 }
 
+// Version counts the changes that could alter what Render returns. The UI
+// caches a pane's rendered string against it and repaints only when it moves,
+// so one busy terminal no longer repaints every other pane on the screen. It
+// is deliberately coarse: it counts writes, not differences, so a program
+// that rewrites the same screen still costs a repaint.
+func (s *Session) Version() uint64 { return s.version.Load() }
+
 func (s *Session) notify() {
+	s.version.Add(1)
 	select {
 	case s.output <- struct{}{}:
 	default: // a notification is already pending; it covers this update too
@@ -277,6 +288,7 @@ func (s *Session) SendText(text string) {
 // Resize changes both the PTY window size (so the child gets SIGWINCH)
 // and the emulated screen.
 func (s *Session) Resize(cols, rows int) {
+	s.version.Add(1) // the screen is a different shape even before the program redraws
 	if cols <= 0 || rows <= 0 {
 		return
 	}

@@ -67,6 +67,8 @@ type Model struct {
 
 	scroll map[*workspace.Terminal]int // lines scrolled back into history per pane; absent or 0 = live
 
+	panes map[*workspace.Terminal]paneRender // last rendered card per terminal; see renderLeaf
+
 	deleting     *workspace.Terminal          // alt+delete pressed: waiting for y to delete this terminal for good
 	deletePrompt string                       // the question shown while deleting is set
 	layouts      map[*workspace.Project]*pane // visible panes per project; nil root = none (running terminals not in the tree are hidden)
@@ -80,7 +82,7 @@ type Model struct {
 // New builds a Model for the given workspace root and its projects, and
 // restores saved terminal definitions from the workspace state file.
 func New(root string, projects []project.Project) Model {
-	m := Model{root: root, ws: workspace.New(root, projects, spawnShell), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}, scroll: map[*workspace.Terminal]int{}, branches: newBranchLookup()}
+	m := Model{root: root, ws: workspace.New(root, projects, spawnShell), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}, scroll: map[*workspace.Terminal]int{}, panes: map[*workspace.Terminal]paneRender{}, branches: newBranchLookup()}
 	if err := m.ws.Restore(); err != nil {
 		m.notice = "could not read saved state: " + err.Error()
 	}
@@ -513,6 +515,7 @@ func (m *Model) grownGrid(root *pane, nt *workspace.Terminal) *pane {
 // stays a grid. Manual layouts are only ever collapsed.
 func (m *Model) dropPane(p *workspace.Project, t *workspace.Terminal) {
 	delete(m.scroll, t)
+	delete(m.panes, t) // an exiting terminal must not leave its card behind
 	root := m.layouts[p]
 	if root == nil || !root.contains(t) {
 		return
@@ -1248,8 +1251,26 @@ func sandwich(a, mid, b string) []string {
 // cells including the card's border.
 func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, focused bool) string {
 	label, branch := m.paneHeaderParts(p, t)
+	// The version is read before the screen, never after: a write landing
+	// between the two leaves a card built from newer content filed under an
+	// older version, which costs one extra repaint next frame. Read the other
+	// way round it would file older content under the newer version and the
+	// card would stay wrong until something else changed.
+	key := paneKey{
+		version: t.Session.Version(),
+		w:       r.w,
+		h:       r.h,
+		focused: focused,
+		scroll:  m.scroll[t],
+		label:   label,
+		branch:  branch,
+		running: running(t),
+	}
+	if c, ok := m.panes[t]; ok && c.key == key {
+		return c.card
+	}
 	screen := t.Session.Render(focused)
-	if off := m.scroll[t]; off > 0 {
+	if off := key.scroll; off > 0 {
 		branch += fmt.Sprintf(" %s %d", scrollMark, off) // meta like the branch, not the label
 		screen = t.Session.RenderScrolled(off)
 	}
@@ -1263,7 +1284,32 @@ func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, f
 		}
 		lines = append(lines, ansi.Truncate(line, innerW, ""))
 	}
-	return framed(cardStyle, focused, r.w, r.h).Render(strings.Join(lines, "\n"))
+	card := framed(cardStyle, focused, r.w, r.h).Render(strings.Join(lines, "\n"))
+	if m.panes != nil { // a Model built without New caches nothing rather than panicking
+		m.panes[t] = paneRender{key: key, card: card}
+	}
+	return card
+}
+
+// paneRender is one terminal's card and everything it was built from. Drawing
+// a card costs about a third of a millisecond, and Bubble Tea rebuilds the
+// whole window whenever any terminal speaks, so without this a single busy
+// pane repainted every other pane on screen.
+type paneRender struct {
+	key  paneKey
+	card string
+}
+
+// paneKey is every input renderLeaf reads. Two cards built from equal keys are
+// the same string, so a key that misses an input would show a stale card:
+// anything new that renderLeaf consults belongs here.
+type paneKey struct {
+	version       uint64 // the session's screen
+	w, h          int
+	focused       bool
+	scroll        int
+	label, branch string
+	running       bool
 }
 
 // running reports whether t's process is still alive, without blocking: its
