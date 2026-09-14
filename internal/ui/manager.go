@@ -29,6 +29,7 @@ type manager struct {
 	notice  string // last result or error
 	loadErr string // git problem listing worktrees, e.g. not a repository
 	branch  func(dir string) string
+	unseen  func(*workspace.Terminal) bool // printed while off screen; see Model.unseen
 }
 
 // rowBranch is the Git context of a terminal row: the branch checked out
@@ -70,8 +71,8 @@ const (
 
 // newManager builds the manager for p. branch reports the branch checked
 // out in a directory ("" when unknown), so rows can show Git context.
-func newManager(ws *workspace.Workspace, p *workspace.Project, root *pane, branch func(dir string) string) *manager {
-	mg := &manager{project: p, branch: branch}
+func newManager(ws *workspace.Workspace, p *workspace.Project, root *pane, branch func(dir string) string, unseen func(*workspace.Terminal) bool) *manager {
+	mg := &manager{project: p, branch: branch, unseen: unseen}
 	mg.reload(ws, root)
 	return mg
 }
@@ -261,6 +262,11 @@ func (mg *manager) lines(i int, r managerRow, width int) []string {
 		program, state = programOf(t), "hidden"
 		if r.visible {
 			mark, state = "●", "visible"
+		} else if mg.unseen != nil && mg.unseen(t) {
+			// This is where a hidden terminal is looked for, and the only
+			// place its output can be reported: its pane is not on screen to
+			// carry a mark of its own.
+			state = "hidden · new output"
 		}
 	} else {
 		switch {

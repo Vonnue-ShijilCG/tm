@@ -165,6 +165,21 @@ Colour rules, both learned the hard way:
    reaches the emulator's window padding. The two layers are deliberate
    belt-and-braces: tmux filters OSC 11 unless `allow-passthrough` is on.
 
+### Output you cannot see
+
+`Model.unseen` marks terminals that printed while off screen — hidden with
+`alt+x`, zoomed out of view, or belonging to a project that is not the one
+being shown. `onScreen` is the test, and `renderLeaf` clears the mark as it
+draws, so "seen" means "drawn" and needs no key of its own.
+
+It is deliberately not shown on the pane itself: a pane you can see has its
+output in front of you, and marking every visible pane would say nothing. The
+two places it appears are the two places you look for a terminal that is not
+on screen — the sidebar's project marker, which turns amber (`stir`), and the
+Terminal Manager's row, which reads `hidden · new output`. The sidebar keeps
+the colour rather than adding a glyph because the marker is one cell wide and
+a project's row must not change width as its terminals come and go.
+
 ### Uncommitted changes view
 
 `d` (sidebar) and `alt+d` (terminal focus) open `ui/diffview.go`, a

@@ -69,6 +69,13 @@ type Model struct {
 
 	panes map[*workspace.Terminal]paneRender // last rendered card per terminal; see renderLeaf
 
+	// unseen marks terminals that printed while off screen — hidden with
+	// alt+x, zoomed out of view, or belonging to a project that is not the
+	// one being shown. A pane you can see needs no marker: its output is
+	// already in front of you, which is why renderLeaf clears the mark as it
+	// draws.
+	unseen map[*workspace.Terminal]bool
+
 	deleting     *workspace.Terminal          // alt+delete pressed: waiting for y to delete this terminal for good
 	deletePrompt string                       // the question shown while deleting is set
 	layouts      map[*workspace.Project]*pane // visible panes per project; nil root = none (running terminals not in the tree are hidden)
@@ -82,7 +89,7 @@ type Model struct {
 // New builds a Model for the given workspace root and its projects, and
 // restores saved terminal definitions from the workspace state file.
 func New(root string, projects []project.Project) Model {
-	m := Model{root: root, ws: workspace.New(root, projects, spawnShell), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}, scroll: map[*workspace.Terminal]int{}, panes: map[*workspace.Terminal]paneRender{}, branches: newBranchLookup()}
+	m := Model{root: root, ws: workspace.New(root, projects, spawnShell), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}, scroll: map[*workspace.Terminal]int{}, panes: map[*workspace.Terminal]paneRender{}, unseen: map[*workspace.Terminal]bool{}, branches: newBranchLookup()}
 	if err := m.ws.Restore(); err != nil {
 		m.notice = "could not read saved state: " + err.Error()
 	}
@@ -184,7 +191,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case terminalOutputMsg:
 		// Re-arm only if this terminal is still registered with that session.
-		if _, t := m.ws.Find(msg.id); t != nil && t.Session == msg.s {
+		if p, t := m.ws.Find(msg.id); t != nil && t.Session == msg.s {
+			if !m.onScreen(p, t) {
+				m.unseen[t] = true
+			}
 			return m, watchTerminal(t)
 		}
 
@@ -228,7 +238,7 @@ func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace
 	case key.Matches(msg, keys.NewTerm):
 		m.openForm(p, 0, focusMain)
 	case key.Matches(msg, keys.ManageTerm):
-		m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get) // p is the focused terminal's project; focus is kept for esc
+		m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get, m.printedOffScreen) // p is the focused terminal's project; focus is kept for esc
 	case key.Matches(msg, keys.DiffTerm):
 		return m, m.openDiff(p, t)
 	case key.Matches(msg, keys.PaneSide):
@@ -675,7 +685,7 @@ func (m Model) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, keys.Manage):
 		if last >= 0 {
 			p := m.ws.Projects[m.cursor]
-			m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get)
+			m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get, m.printedOffScreen)
 		}
 	case key.Matches(msg, keys.Diff):
 		if last >= 0 {
@@ -1139,6 +1149,7 @@ func (m Model) viewSidebar() string {
 		case len(p.Saved) > 0:
 			marker = "○ "
 		}
+		stirred := m.stirring(p)
 		// Wrap rather than truncate: a project's name is how it is recognised,
 		// and the sidebar is narrow enough that real names do not fit.
 		wrapped := strings.Split(ansi.Wrap(p.Name, max(inner-2, 1), ""), "\n")
@@ -1158,7 +1169,16 @@ func (m Model) viewSidebar() string {
 			case i == m.selected:
 				style = selectedStyle
 			}
-			b.WriteString(style.Width(inner).MaxWidth(inner).Render(prefix + part))
+			// The marker is drawn separately only when it carries the amber,
+			// and then on the row's own background: a nested span that sets
+			// just a foreground ends with a reset, which would drop the
+			// sidebar's ground for the rest of the line.
+			if stirred && j == 0 && marker != "  " {
+				dot := lipgloss.NewStyle().Foreground(stir).Background(style.GetBackground()).Render(strings.TrimSpace(marker))
+				b.WriteString(style.Width(inner).MaxWidth(inner).Render(dot + style.Render(" "+part)))
+			} else {
+				b.WriteString(style.Width(inner).MaxWidth(inner).Render(prefix + part))
+			}
 			b.WriteByte('\n')
 		}
 	}
@@ -1266,6 +1286,7 @@ func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, f
 		branch:  branch,
 		running: running(t),
 	}
+	delete(m.unseen, t) // drawing a pane is what "seen" means
 	if c, ok := m.panes[t]; ok && c.key == key {
 		return c.card
 	}
@@ -1310,6 +1331,33 @@ type paneKey struct {
 	scroll        int
 	label, branch string
 	running       bool
+}
+
+// onScreen reports whether t has a pane in the arrangement being shown. Only
+// then is its output already in front of the user; anything else — a hidden
+// terminal, a pane zoomed out of view, another project's — prints where nobody
+// is looking, and is worth saying so.
+func (m Model) onScreen(p *workspace.Project, t *workspace.Terminal) bool {
+	if p != m.selectedProject() {
+		return false
+	}
+	if root := m.layouts[p]; root == nil || !root.contains(t) {
+		return false
+	}
+	return !m.zoom || t == p.ActiveTerminal()
+}
+
+// printedOffScreen is what the Terminal Manager asks about each hidden row.
+func (m Model) printedOffScreen(t *workspace.Terminal) bool { return m.unseen[t] }
+
+// stirring reports whether any of p's terminals has printed out of sight.
+func (m Model) stirring(p *workspace.Project) bool {
+	for _, t := range p.Terminals {
+		if m.unseen[t] {
+			return true
+		}
+	}
+	return false
 }
 
 // running reports whether t's process is still alive, without blocking: its

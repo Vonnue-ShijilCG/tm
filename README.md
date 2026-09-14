@@ -20,7 +20,9 @@ Workspace
   share a branch.
 - A terminal can remember a command, so reopening a workspace brings back your
   dev server or agent session instead of an empty shell.
-- Hide a running terminal and bring it back later.
+- Hide a running terminal and bring it back later. A terminal that prints while
+  it is off screen says so: the project's marker in the sidebar turns amber, and
+  the Terminal Manager's row reads `hidden · new output`.
 - Mouse wheel scrolls a terminal's history, and the diff in the changes view.
 - Every terminal is drawn as its own card on one dark ground, so a four-way
   split reads as four panes rather than one wall of text.

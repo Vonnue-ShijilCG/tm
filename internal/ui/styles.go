@@ -42,6 +42,10 @@ var (
 	dim    = lipgloss.Color("#8b98b0") // hints and the status bar
 	edge   = lipgloss.Color("#2f4066") // unfocused border: present, but quieter than accent
 	added  = lipgloss.Color("#4ade80") // a running terminal's status dot, and added lines in the changes view
+	// stir marks a terminal that printed something while off screen. Amber
+	// rather than a second glyph: the sidebar marker is one cell wide and a
+	// project's row must not change width as its terminals come and go.
+	stir = lipgloss.Color("#fbbf24")
 	// removed is deleted lines in the changes view: softer than errorStyle's
 	// red so a diff full of deletions does not read as a page of errors.
 	removed = lipgloss.Color("#f28b82")
