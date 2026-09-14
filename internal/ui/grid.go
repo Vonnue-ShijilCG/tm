@@ -72,7 +72,7 @@ func chooseCols(ts []*workspace.Terminal, r rect) int {
 // estimate for chooseCols's score; the real sizes come from rects.
 func cellSize(n, cols int, r rect) (w, h int) {
 	rows := (n + cols - 1) / cols
-	return (r.w - (cols-1)*paneGap) / cols, (r.h - (rows - 1)) / rows
+	return (r.w - (cols-1)*paneGap) / cols, (r.h - (rows-1)*paneRowGap) / rows
 }
 
 // gridFor fills cols columns with ts row by row: ts[i] goes to column i%cols.

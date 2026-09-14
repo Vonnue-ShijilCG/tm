@@ -26,11 +26,12 @@ func TestInsertSideAndStackProduceAdjacentRects(t *testing.T) {
 	var root *pane
 	root = root.insert(nil, ts[0], splitSide) // first pane
 	root = root.insert(ts[0], ts[1], splitSide)
-	// 102 = 50 + paneGap + 50: two equal halves with the two-column gap
-	// between them, so the assertion below is exact rather than within a cell.
-	rs := layoutOf(root, 102, 20)
+	// 100 + paneGap = 50 + paneGap + 50: two equal halves with the gap
+	// between them, so the assertion below is exact rather than within a
+	// cell, whatever the gap is set to.
+	rs := layoutOf(root, 100+paneGap, 20+paneRowGap)
 	a, b := rs[ts[0]], rs[ts[1]]
-	if a.w+b.w+paneGap != 102 || a.h != 20 || b.h != 20 || b.x != a.x+a.w+paneGap {
+	if a.w+b.w+paneGap != 100+paneGap || a.h != 20+paneRowGap || b.h != 20+paneRowGap || b.x != a.x+a.w+paneGap {
 		t.Errorf("side split rects wrong: a=%+v b=%+v", a, b)
 	}
 	if a.w != 50 || b.w != 50 {
@@ -38,9 +39,9 @@ func TestInsertSideAndStackProduceAdjacentRects(t *testing.T) {
 	}
 
 	root = root.insert(ts[1], ts[2], splitStack) // stack inside the right pane
-	rs = layoutOf(root, 102, 20)
+	rs = layoutOf(root, 100+paneGap, 20+paneRowGap)
 	b, c := rs[ts[1]], rs[ts[2]]
-	if b.x != c.x || b.w != c.w || b.h+c.h+1 != 20 || c.y != b.y+b.h+1 { // stacked cards keep a one-row gap
+	if b.x != c.x || b.w != c.w || b.h+c.h+paneRowGap != 20+paneRowGap || c.y != b.y+b.h+paneRowGap { // stacked cards keep paneRowGap between them
 		t.Errorf("stack split rects wrong: b=%+v c=%+v", b, c)
 	}
 	if got := root.leaves(); !reflect.DeepEqual(got, ts) {
@@ -48,7 +49,7 @@ func TestInsertSideAndStackProduceAdjacentRects(t *testing.T) {
 	}
 	// Every rect stays inside the area and none overlap.
 	for x, r := range rs {
-		if r.x < 0 || r.y < 0 || r.x+r.w > 102 || r.y+r.h > 20 {
+		if r.x < 0 || r.y < 0 || r.x+r.w > 100+paneGap || r.y+r.h > 20+paneRowGap {
 			t.Errorf("rect out of bounds for %d: %+v", x.Num, r)
 		}
 		for y, s := range rs {
@@ -91,12 +92,12 @@ func TestResizeMovesDividerWithinBounds(t *testing.T) {
 	if !root.resize(ts[0], resizeStep) {
 		t.Fatal("resize should report a change")
 	}
-	rs := layoutOf(root, 102, 20) // 100 cells of card plus the two-column gap
+	rs := layoutOf(root, 100+paneGap, 20) // 100 cells of card plus the gap
 	if rs[ts[0]].w != 60 || rs[ts[1]].w != 40 {
 		t.Errorf("after growing a: %d/%d, want 60/40", rs[ts[0]].w, rs[ts[1]].w)
 	}
 	root.resize(ts[1], resizeStep) // shrinking a back
-	rs = layoutOf(root, 102, 20)
+	rs = layoutOf(root, 100+paneGap, 20)
 	if rs[ts[0]].w != 50 {
 		t.Errorf("growing b should shrink a back to 50, got %d", rs[ts[0]].w)
 	}
@@ -122,10 +123,11 @@ func TestMinimumSizesAndSplitGuards(t *testing.T) {
 	if rs[ts[0]].w < minPaneCols || rs[ts[1]].w < minPaneCols {
 		t.Errorf("panes should keep the minimum width: %+v %+v", rs[ts[0]], rs[ts[1]])
 	}
-	// Thresholds are 2*minPaneCols+paneGap and 2*minPaneRows+1: 30 and 11
-	// with the card-aware minimums, the two-column gap side by side and the
-	// one-row gap stacked.
-	if canSplit(rect{0, 0, 29, 10}, splitSide) || !canSplit(rect{0, 0, 30, 10}, splitSide) {
+	// Thresholds are two cards plus the gap, in each direction. Written from
+	// the constants: the minimums carry the card border and the gaps are
+	// free to change, so a baked number here would only record today's.
+	if canSplit(rect{0, 0, 2*minPaneCols + paneGap - 1, 10}, splitSide) ||
+		!canSplit(rect{0, 0, 2*minPaneCols + paneGap, 10}, splitSide) {
 		t.Error("canSplit side thresholds wrong")
 	}
 	// At exactly the threshold both halves are exactly the minimum: the gap
@@ -137,7 +139,8 @@ func TestMinimumSizesAndSplitGuards(t *testing.T) {
 	if rs[ts[0]].w != minPaneCols || rs[ts[1]].w != minPaneCols {
 		t.Errorf("at the threshold both halves should be %d wide: %+v %+v", minPaneCols, rs[ts[0]], rs[ts[1]])
 	}
-	if canSplit(rect{0, 0, 80, 10}, splitStack) || !canSplit(rect{0, 0, 80, 11}, splitStack) {
+	if canSplit(rect{0, 0, 80, 2*minPaneRows + paneRowGap - 1}, splitStack) ||
+		!canSplit(rect{0, 0, 80, 2*minPaneRows + paneRowGap}, splitStack) {
 		t.Error("canSplit stack thresholds wrong")
 	}
 	if autoDir(rect{0, 0, 100, 20}) != splitSide || autoDir(rect{0, 0, 39, 20}) != splitStack {

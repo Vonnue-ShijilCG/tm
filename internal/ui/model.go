@@ -1067,7 +1067,7 @@ func (m Model) View() string {
 	}
 	mainPane := framed(style, focused, m.width-sidebarWidth-paneGutter, paneHeight).Render(m.viewMain())
 
-	body := lipgloss.JoinHorizontal(lipgloss.Top, sidebar, gap(paneGutter, paneHeight), mainPane)
+	body := lipgloss.JoinHorizontal(lipgloss.Top, sandwich(sidebar, gap(paneGutter, paneHeight), mainPane)...)
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.viewStatus())
 }
 
@@ -1170,18 +1170,33 @@ func (m Model) renderPane(p *workspace.Project, n *pane, r rect, active *workspa
 		wa := splitSize(r.w, paneGap, n.ratio, minPaneCols)
 		left := m.renderPane(p, n.a, rect{r.x, r.y, wa, r.h}, active)
 		right := m.renderPane(p, n.b, rect{r.x + wa + paneGap, r.y, r.w - wa - paneGap, r.h}, active)
-		return lipgloss.JoinHorizontal(lipgloss.Top, left, gap(paneGap, r.h), right)
+		return lipgloss.JoinHorizontal(lipgloss.Top, sandwich(left, gap(paneGap, r.h), right)...)
 	}
-	ha := splitSize(r.h, 1, n.ratio, minPaneRows)
+	ha := splitSize(r.h, paneRowGap, n.ratio, minPaneRows)
 	top := m.renderPane(p, n.a, rect{r.x, r.y, r.w, ha}, active)
-	bottom := m.renderPane(p, n.b, rect{r.x, r.y + ha + 1, r.w, r.h - ha - 1}, active)
-	return lipgloss.JoinVertical(lipgloss.Left, top, gap(r.w, 1), bottom)
+	bottom := m.renderPane(p, n.b, rect{r.x, r.y + ha + paneRowGap, r.w, r.h - ha - paneRowGap}, active)
+	return lipgloss.JoinVertical(lipgloss.Left, sandwich(top, gap(r.w, paneRowGap), bottom)...)
 }
 
 // gap is the empty space between two cards, painted so the ground shows
-// through rather than the host terminal's own background.
+// through rather than the host terminal's own background. A gap of no cells
+// is the empty string, never a blank block: Lip Gloss joins a block of no
+// width as a column of its own and one of no height as a row, either of
+// which would put back the space the gap was set to zero to remove.
 func gap(w, h int) string {
+	if w <= 0 || h <= 0 {
+		return ""
+	}
 	return lipgloss.NewStyle().Background(ground).Width(w).Height(h).Render("")
+}
+
+// sandwich is a and b with mid between them, or just a and b when mid is
+// empty, ready to hand to one of Lip Gloss's Join functions.
+func sandwich(a, mid, b string) []string {
+	if mid == "" {
+		return []string{a, b}
+	}
+	return []string{a, mid, b}
 }
 
 // renderLeaf draws one terminal as its own card, filling exactly r.w x r.h

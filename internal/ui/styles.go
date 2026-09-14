@@ -8,13 +8,23 @@ import (
 
 const sidebarWidth = 28
 
-// paneGap is the blank columns between two cards side by side. A character
-// cell is about twice as tall as it is wide, so one row between stacked cards
-// is already as thick as two columns: two here makes the two gaps match on
-// screen rather than in cells. rects reserves this width and renderPane draws
-// it; both read this constant so the geometry the wheel is hit-tested against
-// cannot drift from what is painted.
-const paneGap = 2
+// paneGap and paneRowGap are the blank cells between two cards, side by side
+// and stacked. They are zero: a card already carries its own rounded border,
+// so two of them meeting draw two lines with nothing between, which separates
+// them as plainly as blank space did and gives the terminals back the cells.
+//
+// They stay named, and stay a pair, because the two cannot be chosen
+// independently. A character cell is about twice as tall as it is wide, so
+// any non-zero pair that looks even on screen is two columns to one row —
+// 1 and 1 draws gaps that measure the same in cells and look unequal, which
+// is the state this pair was introduced to fix. Zero is the only other even
+// pair. rects reserves these and renderPane draws them; both read the
+// constants so the geometry the wheel is hit-tested against cannot drift
+// from what is painted.
+const (
+	paneGap    = 0
+	paneRowGap = 0
+)
 
 // paneGutter is the blank columns between the sidebar and the first card, so
 // the sidebar stands clear of the terminals the way the cards stand clear of

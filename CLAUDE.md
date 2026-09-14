@@ -81,10 +81,25 @@ The Bubble Tea program runs with mouse reporting on (`tea.WithMouseCellMotion()`
 
 Every terminal is drawn as its own rounded card on a shared ground
 (`terminal.PaneGround`, a hex string both the emulator and Lip Gloss read, so
-the two cannot drift). Cards are separated by blank gaps, not divider glyphs,
-and there is no frame around the pane area — each card carries its own border.
-`(*pane).rects` reserves one cell between split children, which is that gap;
-the card border grows inward from the rect, so pane arithmetic and mouse
+the two cannot drift). Cards are never separated by divider glyphs, and there
+is no frame around the pane area — each card carries its own border, and two
+cards meeting draw two lines with nothing between them.
+
+`paneGap` and `paneRowGap` (`ui/styles.go`) are the blank cells between
+siblings, side by side and stacked. **They are zero, and they are a pair
+because the two cannot be chosen independently.** A character cell is about
+twice as tall as it is wide, so the only non-zero pair that looks even on
+screen is two columns to one row; 1 and 1 measures the same in cells and
+looks lopsided, which is the complaint the pair was introduced to answer.
+Zero is the only other even pair. `(*pane).rects` reserves them and
+`renderPane` draws them, both from the constants, so the geometry the wheel
+is hit-tested against cannot drift from what is painted — and `gap` returns
+the empty string rather than a blank block at zero, because Lip Gloss joins
+a block of no width as a column of its own and one of no height as a row,
+which would put back the space the zero removed. The layout tests read the
+constants too: changing the pair is a one-line edit, not a test rewrite.
+
+The card border grows inward from the rect, so pane arithmetic and mouse
 hit-testing are unaffected by the card. `minPaneCols`/`minPaneRows` are written
 as visible arithmetic (`2 + 12`, `2 + 1 + 2`) because the leading 2 is the card
 border — a pane smaller than that renders a box with nothing inside it.

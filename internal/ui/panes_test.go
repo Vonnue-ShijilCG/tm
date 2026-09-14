@@ -58,7 +58,7 @@ func TestAltHCreatesStackedPanes(t *testing.T) {
 	rs := m.paneRects(p)
 	a, b := rs[p.Terminals[0]], rs[p.Terminals[1]]
 	area := m.mainArea()
-	if a.x != b.x || a.w != area.w || b.w != area.w || a.h+b.h+1 != area.h || b.y != a.y+a.h+1 {
+	if a.x != b.x || a.w != area.w || b.w != area.w || a.h+b.h+paneRowGap != area.h || b.y != a.y+a.h+paneRowGap {
 		t.Errorf("panes should be stacked over the area %+v: a=%+v b=%+v", area, a, b)
 	}
 }
@@ -445,14 +445,27 @@ func TestStackedTerminalsAreAlsoCards(t *testing.T) {
 	if len(tops) != 2 {
 		t.Fatalf("expected two card tops, found at rows %v:\n%s", tops, panes)
 	}
-	// A real gap row sits strictly between the two cards. If the gap were
-	// drawn at zero height, the second card's top border would sit right
-	// after the first card's bottom border with nothing blank between them.
-	if tops[1] <= tops[0]+1 {
-		t.Fatalf("second card starts immediately after the first, no gap row: tops=%v", tops)
+	// Exactly paneRowGap rows separate the two cards, and every one of them
+	// is blank. That is the assertion whatever the gap is set to: at zero the
+	// first card's bottom border is immediately followed by the second's top,
+	// with no stray row from a gap block drawn at no height; above zero the
+	// rows between are blank rather than a divider glyph.
+	bottom := -1
+	for i := tops[0]; i < tops[1]; i++ {
+		if strings.Contains(lines[i], "╰") {
+			bottom = i
+		}
 	}
-	if gapLine := stripANSI(lines[tops[1]-1]); strings.TrimSpace(gapLine) != "" {
-		t.Errorf("row between the stacked cards should be a blank gap, got %q:\n%s", gapLine, panes)
+	if bottom < 0 {
+		t.Fatalf("the first card has no bottom border above the second, tops=%v:\n%s", tops, panes)
+	}
+	if got := tops[1] - bottom - 1; got != paneRowGap {
+		t.Errorf("%d rows between the stacked cards, want paneRowGap = %d:\n%s", got, paneRowGap, panes)
+	}
+	for i := bottom + 1; i < tops[1]; i++ {
+		if gapLine := stripANSI(lines[i]); strings.TrimSpace(gapLine) != "" {
+			t.Errorf("row between the stacked cards should be blank, got %q:\n%s", gapLine, panes)
+		}
 	}
 
 	rects := m.paneRects(p)

@@ -179,14 +179,14 @@ func TestGridOrientationFollowsWindowShape(t *testing.T) {
 
 // TestChooseColsCountsTheGapBetweenColumns: chooseCols judges whether a
 // column count fits by what rects will actually give the grid, gaps and
-// the chain's uneven share included. One column short of two cards and
-// the two-column gap, two columns cannot hold cards even though their
-// shape would score better than one tall column's; one column more and
-// they can. Three columns need more than their ideal share: at 46 the
-// ideal is 14 each, but the chain gives 15, 14, 13 and the last column is
-// under the minimum, so 46 must not get three columns while 47 (15, 14,
-// 14) may. A height of 17 lets two columns fit either way, so the choice
-// is between fitting counts and not a tie of unfit ones.
+// the chain's uneven share included. One column short of two cards and the
+// gap, two columns cannot hold cards even though their shape would score
+// better than one tall column's; one column more and they can. Three
+// columns are checked either side of the width where they start to fit.
+// That width moves with the gap — a non-zero gap makes the chain divide
+// unevenly, which costs the narrowest column a cell — so the test finds it
+// rather than baking it in. A height of 17 lets two columns fit either way,
+// so the choice is between fitting counts and not a tie of unfit ones.
 func TestChooseColsCountsTheGapBetweenColumns(t *testing.T) {
 	if got := chooseCols(terms(2), rect{0, 0, 2*minPaneCols + paneGap - 1, 11}); got != 1 {
 		t.Errorf("one column short of two cards and a gap: chooseCols = %d, want 1", got)
@@ -194,11 +194,20 @@ func TestChooseColsCountsTheGapBetweenColumns(t *testing.T) {
 	if got := chooseCols(terms(2), rect{0, 0, 2*minPaneCols + paneGap, 11}); got != 2 {
 		t.Errorf("exactly two cards and a gap: chooseCols = %d, want 2", got)
 	}
-	if got := chooseCols(terms(5), rect{0, 0, 46, 17}); got == 3 {
-		t.Errorf("at 46 the chain's third column is %d wide: chooseCols must not pick 3", 46-15-paneGap-14-paneGap)
+	fit := 0 // the narrowest width whose three columns all clear the minimum
+	for w := 2 * minPaneCols; w < 4*minPaneCols && fit == 0; w++ {
+		if gridFor(terms(5), 3).tree().fits(rect{0, 0, w, 17}) {
+			fit = w
+		}
 	}
-	if got := chooseCols(terms(5), rect{0, 0, 47, 17}); got != 3 {
-		t.Errorf("at 47 three columns fit and are the squarer shape: chooseCols = %d, want 3", got)
+	if fit == 0 {
+		t.Fatal("three columns never fit: the search bounds are wrong")
+	}
+	if got := chooseCols(terms(5), rect{0, 0, fit - 1, 17}); got == 3 {
+		t.Errorf("at %d the chain leaves a column under the minimum: chooseCols must not pick 3", fit-1)
+	}
+	if got := chooseCols(terms(5), rect{0, 0, fit, 17}); got != 3 {
+		t.Errorf("at %d three columns fit and are the squarer shape: chooseCols = %d, want 3", fit, got)
 	}
 }
 

@@ -122,7 +122,7 @@ func (n *pane) swap(old, nt *workspace.Terminal) {
 }
 
 // rects lays the tree out inside r. A gap between siblings is reserved —
-// paneGap columns side by side, one row stacked; each child gets at least
+// paneGap columns side by side, paneRowGap stacked; each child gets at least
 // the minimum size when r allows. Sizes never go negative, even in an area
 // too small for a gap.
 func (n *pane) rects(r rect, out map[*workspace.Terminal]rect) {
@@ -139,9 +139,9 @@ func (n *pane) rects(r rect, out map[*workspace.Terminal]rect) {
 		n.b.rects(rect{r.x + wa + paneGap, r.y, max(r.w-wa-paneGap, 0), r.h}, out)
 		return
 	}
-	ha := splitSize(r.h, 1, n.ratio, minPaneRows)
+	ha := splitSize(r.h, paneRowGap, n.ratio, minPaneRows)
 	n.a.rects(rect{r.x, r.y, r.w, ha}, out)
-	n.b.rects(rect{r.x, r.y + ha + 1, r.w, max(r.h-ha-1, 0)}, out)
+	n.b.rects(rect{r.x, r.y + ha + paneRowGap, r.w, max(r.h-ha-paneRowGap, 0)}, out)
 }
 
 // splitSize returns the first child's extent along an axis of total cells,
@@ -164,7 +164,7 @@ func canSplit(r rect, dir splitDir) bool {
 	if dir == splitSide {
 		return r.w >= 2*minPaneCols+paneGap
 	}
-	return r.h >= 2*minPaneRows+1
+	return r.h >= 2*minPaneRows+paneRowGap
 }
 
 // autoDir picks the split direction that leaves the roomier panes. Cells
