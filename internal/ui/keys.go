@@ -90,6 +90,17 @@ type keyMap struct {
 	DiffClose      key.Binding
 	DiffScroll     key.Binding // not a key: the wheel, listed for the help screen
 
+	// Copy mode. Copy opens it on the focused terminal — an Alt chord, since
+	// terminal focus reserves nothing else — and inside it the keys are plain,
+	// because copy mode consumes every key like the other modal views. Moving
+	// the cursor reuses Up and Down rather than adding bindings of its own:
+	// they are the same keys meaning the same thing, and the help screen has
+	// no room for a line that would only repeat "j / ↓  next line".
+	Copy       key.Binding
+	CopySelect key.Binding
+	CopyYank   key.Binding
+	CopyClose  key.Binding
+
 	// Help screen.
 	HelpClose key.Binding
 
@@ -132,7 +143,7 @@ var keys = keyMap{
 	Zoom:       key.NewBinding(key.WithKeys("z"), key.WithHelp("z", "zoom terminal")),
 
 	FormNext:   key.NewBinding(key.WithKeys("tab", "down"), key.WithHelp("tab / ↓", "next field")),
-	FormPrev:   key.NewBinding(key.WithKeys("shift+tab", "up"), key.WithHelp("shift+tab / ↑", "prev field")),
+	FormPrev:   key.NewBinding(key.WithKeys("shift+tab", "up"), key.WithHelp("shift+tab", "prev field")),
 	FormSubmit: key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "create")),
 	FormCancel: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
 
@@ -148,8 +159,8 @@ var keys = keyMap{
 	Confirm: key.NewBinding(key.WithKeys("y"), key.WithHelp("y", "confirm")),
 	Cancel:  key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc/other", "cancel")),
 
-	Diff:           key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "open from sidebar")),
-	DiffTerm:       key.NewBinding(key.WithKeys("alt+d"), key.WithHelp("alt+d", "open from terminal")),
+	Diff:           key.NewBinding(key.WithKeys("d"), key.WithHelp("d", "from sidebar")),
+	DiffTerm:       key.NewBinding(key.WithKeys("alt+d"), key.WithHelp("alt+d", "from terminal")),
 	DiffDown:       key.NewBinding(key.WithKeys("j", "down"), key.WithHelp("j / ↓", "next file")),
 	DiffUp:         key.NewBinding(key.WithKeys("k", "up"), key.WithHelp("k / ↑", "prev file")),
 	DiffLeft:       key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "scroll left")),
@@ -158,11 +169,16 @@ var keys = keyMap{
 	DiffPrevChange: key.NewBinding(key.WithKeys("N"), key.WithHelp("N", "prev change")),
 	DiffRefresh:    key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "re-read")),
 	DiffClose:      key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
-	DiffScroll:     key.NewBinding(key.WithHelp("wheel", "scroll the diff")),
+	DiffScroll:     key.NewBinding(key.WithHelp("wheel", "scroll diff")),
+
+	Copy:       key.NewBinding(key.WithKeys("alt+c"), key.WithHelp("alt+c", "copy mode")),
+	CopySelect: key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "select lines")),
+	CopyYank:   key.NewBinding(key.WithKeys("y", "enter"), key.WithHelp("y", "copy, close")),
+	CopyClose:  key.NewBinding(key.WithKeys("esc", "q"), key.WithHelp("esc", "close")),
 
 	HelpClose: key.NewBinding(key.WithKeys("esc", "s", "q"), key.WithHelp("esc / q", "close help")),
 
-	Scroll: key.NewBinding(key.WithHelp("wheel", "scroll history")),
+	Scroll: key.NewBinding(key.WithHelp("wheel", "scroll back")),
 }
 
 // helpSection groups bindings by the context in which they apply.
@@ -172,10 +188,12 @@ type helpSection struct {
 }
 
 // helpSections lists every binding for the help screen, grouped by context.
-// The order also decides how viewHelp packs them into columns, and the screen
-// is exactly full at 80x24 and 100x30: CHANGES sits between PANES and NEW
-// TERMINAL because that is where its twelve rows fit without a column being
-// added at either size.
+// The order decides how viewHelp packs them into columns, and the screen has
+// no slack: CHANGES sits between PANES and NEW TERMINAL, and COPY between
+// CHANGES and NEW TERMINAL, because those are the places their rows fit
+// without squeezing a column narrow enough to truncate another section's
+// labels. Moving a section, or adding one, means checking the screen at 100x30
+// again.
 func helpSections() []helpSection {
 	k := keys
 	return []helpSection{
@@ -183,6 +201,7 @@ func helpSections() []helpSection {
 		{"TERMINAL", []key.Binding{k.Sidebar, k.NextTerm, k.PrevTerm, k.NewTerm, k.ManageTerm, k.HideTerm, k.DeleteTerm}},
 		{"PANES", []key.Binding{k.PaneSide, k.PaneStack, k.PaneLeft, k.PaneRight, k.PaneUp, k.PaneDown, k.PaneGrow, k.PaneShrink, k.PaneZoom}},
 		{"CHANGES", []key.Binding{k.Diff, k.DiffTerm, k.DiffScroll, k.DiffDown, k.DiffUp, k.DiffLeft, k.DiffRight, k.DiffNextChange, k.DiffPrevChange, k.DiffRefresh, k.DiffClose}},
+		{"COPY", []key.Binding{k.Copy, k.CopySelect, k.CopyYank, k.CopyClose}},
 		{"NEW TERMINAL", []key.Binding{k.FormNext, k.FormPrev, k.FormSubmit, k.FormCancel}},
 		{"MANAGE TERMINALS", []key.Binding{k.MgDown, k.MgUp, k.MgShow, k.MgHide, k.MgNew, k.MgOpenAll, k.MgDelete, k.MgClose}},
 		{"CONFIRM", []key.Binding{k.Confirm, k.Cancel}},
@@ -198,6 +217,10 @@ func (k keyMap) sidebarHelp() []key.Binding {
 
 func (k keyMap) terminalHelp() []key.Binding {
 	return []key.Binding{k.Sidebar, k.NextTerm, k.HideTerm}
+}
+
+func (k keyMap) copyHelp() []key.Binding {
+	return []key.Binding{k.Down, k.Up, k.CopySelect, k.CopyYank, k.CopyClose}
 }
 
 func (k keyMap) formHelp() []key.Binding {

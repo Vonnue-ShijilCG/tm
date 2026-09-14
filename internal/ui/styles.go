@@ -128,6 +128,12 @@ var (
 
 	// A pane's status dot: blue while it has focus, green while its process
 	// runs, dim once it has exited. It sits in the header, so on band.
+	// Copy mode marks the cursor row and the rest of the selection. Both
+	// paint a background, because a row that set only a foreground would end
+	// with a reset and drop the pane's ground for the width of the card.
+	copyCursorStyle   = lipgloss.NewStyle().Foreground(bright).Background(accent)
+	copySelectedStyle = lipgloss.NewStyle().Foreground(bright).Background(edge)
+
 	dotFocused = lipgloss.NewStyle().Foreground(accent).Background(band)
 	dotRunning = lipgloss.NewStyle().Foreground(added).Background(band)
 	dotExited  = lipgloss.NewStyle().Foreground(dim).Background(band)

@@ -20,8 +20,8 @@ func TestHelpOpensFromSidebarAndEscRestoresState(t *testing.T) {
 	view := m.View()
 	for _, want := range []string{"keyboard shortcuts", "SIDEBAR", "TERMINAL", "NEW TERMINAL", "MANAGE TERMINALS", "MOUSE", "HELP",
 		"alt+x", "shift+tab", "close help", "m ", "hide terminal", "show / restore", "delete forever", "open/resume",
-		"wheel", "scroll history", // the wheel is not a key binding but belongs on the shortcut screen
-		"tab / l", "g / home", "G / end", "esc / q", "tab / ↓", "shift+tab / ↑"} { // alternates are shown, not just the first key
+		"wheel", "scroll back", // the wheel is not a key binding but belongs on the shortcut screen
+		"tab / l", "g / home", "G / end", "esc / q", "tab / ↓", "k / ↑"} { // alternates are shown, not just the first key
 		if !strings.Contains(view, want) {
 			t.Errorf("help view missing %q:\n%s", want, view)
 		}
@@ -36,7 +36,11 @@ func TestHelpOpensFromSidebarAndEscRestoresState(t *testing.T) {
 	if v := small.(Model).View(); strings.Count(v, "\n")+1 > 24 {
 		t.Errorf("help view does not fit 80x24 (%d lines):\n%s", strings.Count(v, "\n")+1, v)
 	}
-	for _, want := range []string{"SIDEBAR", "MANAGE TERMINALS", "close help"} {
+	// At 80x24 the bindings no longer fit in four columns, so the screen packs
+	// five narrow ones and section titles are cut to their column. Every
+	// section is still there and identifiable, but only the full-size screen
+	// shows every label whole — see viewHelp.
+	for _, want := range []string{"SIDEBAR", "MANAGE", "close help"} {
 		if !strings.Contains(small.(Model).View(), want) {
 			t.Errorf("80x24 help view missing %q", want)
 		}

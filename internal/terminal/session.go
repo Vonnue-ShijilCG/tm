@@ -399,6 +399,39 @@ func (s *Session) IsAltScreen() bool {
 func (s *Session) RenderScrolled(offset int) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.compose(offset)
+}
+
+// Lines is the pane's rows as plain text — the same rows Render and
+// RenderScrolled draw, in the same order — with each line's trailing blanks
+// removed. Copy mode reads the screen through this, so what is copied is what
+// was on it, rather than the styled string with its escape sequences and card
+// border.
+func (s *Session) Lines(offset int) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.compose(offset)
+
+	w, h := s.buf.Bounds().Dx(), s.buf.Bounds().Dy()
+	lines := make([]string, h)
+	for y := 0; y < h; y++ {
+		var b strings.Builder
+		for x := 0; x < w; x++ {
+			if c := s.buf.CellAt(x, y); c != nil && c.Content != "" {
+				b.WriteString(c.Content)
+				x += max(c.Width, 1) - 1 // a wide cluster owns the cells after it
+			} else {
+				b.WriteByte(' ')
+			}
+		}
+		lines[y] = strings.TrimRight(b.String(), " ")
+	}
+	return lines
+}
+
+// compose fills the reused buffer with what the pane shows and returns it
+// rendered. The caller holds the lock.
+func (s *Session) compose(offset int) string {
 	if offset <= 0 || s.emu.IsAltScreen() {
 		return s.paint()
 	}

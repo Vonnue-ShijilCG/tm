@@ -23,6 +23,7 @@ func (f *fakeSession) Resize(c, r int)           { f.cols, f.rows = c, r }
 func (f *fakeSession) Render(bool) string        { return "" }
 func (f *fakeSession) RenderScrolled(int) string { return "" }
 func (f *fakeSession) Version() uint64           { return 0 }
+func (f *fakeSession) Lines(int) []string        { return nil }
 func (f *fakeSession) ScrollbackLen() int        { return 0 }
 func (f *fakeSession) IsAltScreen() bool         { return false }
 func (f *fakeSession) MouseTracking() bool       { return false }

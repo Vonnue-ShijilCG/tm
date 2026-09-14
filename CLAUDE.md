@@ -39,7 +39,7 @@ cmd/tm  →  ui  →  workspace  →  { project, git, config, state }
 root by design, which is why the form refuses a worktree outside the workspace rather than
 accepting one and dropping the terminal on save. Malformed layout nodes decode to empty nodes and are sanitised away rather than failing the load.
 - **`config`**: `$XDG_CONFIG_HOME/tm/config.toml` with `max_terminals`. Re-read on every creation attempt (`workspace.LimitSource`), so edits apply without restart; invalid values fall back to the default and carry a `Notice`.
-- **`ui`**: the Bubble Tea `Model` (`ui/model.go`), the new-terminal form, the per-project Terminal Manager (`ui/manager.go`), the uncommitted-changes view (`ui/diffview.go`), and the pane tree.
+- **`ui`**: the Bubble Tea `Model` (`ui/model.go`), the new-terminal form, the per-project Terminal Manager (`ui/manager.go`), the uncommitted-changes view (`ui/diffview.go`), copy mode (`ui/copymode.go`), and the pane tree.
 
 ### Three layout representations
 
@@ -278,6 +278,36 @@ expanded to four spaces *before* stripping: Truncate counts a tab as nothing
 while the terminal draws it wide, so a line cut with tabs in it shoves the
 other column along. `d.title` and `d.dir` are the deliberate exemptions: they
 name where tm runs, not what is inside the repository.
+
+### Copy mode
+
+`alt+c` freezes the focused pane and lets a selection be made in it
+(`ui/copymode.go`). It exists because panes are drawn side by side in one
+terminal buffer: a row of that buffer spans every pane, so the host terminal's
+own mouse selection drags in the card borders and the neighbouring pane's text.
+The rows here come from the emulator's grid through `Session.Lines`, so a copy
+is that pane's text and nothing else.
+
+**Selection is by whole lines.** A line is the unit an error message, a command
+and a path all arrive in, and it sidesteps the column arithmetic that wide
+runes and grapheme clusters would demand of every cursor move.
+
+**The rows are frozen when the mode opens**, so a program that keeps printing
+cannot move text out from under the cursor between choosing a line and copying
+it; the pane header says `COPY` so a screen that has stopped is explained.
+The pane is drawn straight rather than through the pane cache: its cursor and
+selection move on keys `paneKey` knows nothing about.
+
+**The clipboard is written with OSC 52** (`ansi.SetSystemClipboard` to
+`clipboard`, a variable so tests can read it). tm asks the terminal to do it
+rather than calling a clipboard tool, because that is the only thing that
+works over SSH — the escape travels back down the connection and lands in the
+clipboard of the machine in front of the user. Terminals may refuse it, many
+ship with it disabled, and there is no reply, so tm cannot report failure.
+
+Moving the cursor reuses `keys.Up`/`Down`/`Top`/`Bottom` rather than adding
+bindings: the same keys meaning the same thing, and the help screen has no row
+to spare for repeating them.
 
 ### Key handling policy
 

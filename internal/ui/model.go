@@ -59,6 +59,7 @@ type Model struct {
 	form     *newTermForm // open "new terminal" dialog, nil otherwise
 	panel    *manager     // open terminal manager, nil otherwise
 	diff     *diffView    // open uncommitted-changes view, nil otherwise
+	copy     *copyMode    // open copy-mode selection, nil otherwise
 	help     bool         // help screen shown over everything
 	notice   string       // one-line message in the status bar (state file problems)
 	quitting bool         // set once quit began; later exit messages must not rewrite state
@@ -164,6 +165,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.diff != nil {
 			return m.updateDiff(msg)
 		}
+		if m.copy != nil {
+			return m.updateCopy(msg)
+		}
 		if m.panel != nil {
 			return m.updateManager(msg)
 		}
@@ -241,6 +245,8 @@ func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace
 		m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get, m.printedOffScreen) // p is the focused terminal's project; focus is kept for esc
 	case key.Matches(msg, keys.DiffTerm):
 		return m, m.openDiff(p, t)
+	case key.Matches(msg, keys.Copy):
+		m.copy = newCopyMode(t, m.scroll[t])
 	case key.Matches(msg, keys.PaneSide):
 		m.openForm(p, splitSide, focusMain)
 	case key.Matches(msg, keys.PaneStack):
@@ -526,6 +532,9 @@ func (m *Model) grownGrid(root *pane, nt *workspace.Terminal) *pane {
 func (m *Model) dropPane(p *workspace.Project, t *workspace.Terminal) {
 	delete(m.scroll, t)
 	delete(m.panes, t) // an exiting terminal must not leave its card behind
+	if m.copy != nil && m.copy.term == t {
+		m.copy = nil // the pane the selection was in has gone
+	}
 	root := m.layouts[p]
 	if root == nil || !root.contains(t) {
 		return
@@ -616,6 +625,34 @@ func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, d.move(1)
 	case key.Matches(msg, keys.DiffUp):
 		return m, d.move(-1)
+	}
+	return m, nil
+}
+
+// updateCopy handles a key while copy mode is open. Like the help screen and
+// the changes view it consumes every key, so nothing reaches the program
+// underneath — which is what lets plain j and k mean something here while they
+// are PTY input everywhere else in terminal focus.
+func (m Model) updateCopy(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	c := m.copy
+	switch {
+	case key.Matches(msg, keys.CopyClose):
+		m.copy = nil
+	case key.Matches(msg, keys.CopyYank):
+		if what := c.copy(); what != "" {
+			m.notice = what
+		}
+		m.copy = nil
+	case key.Matches(msg, keys.CopySelect):
+		c.mark()
+	case key.Matches(msg, keys.Down):
+		c.move(1)
+	case key.Matches(msg, keys.Up):
+		c.move(-1)
+	case key.Matches(msg, keys.Top):
+		c.move(-len(c.lines))
+	case key.Matches(msg, keys.Bottom):
+		c.move(len(c.lines))
 	}
 	return m, nil
 }
@@ -1271,6 +1308,18 @@ func sandwich(a, mid, b string) []string {
 // cells including the card's border.
 func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, focused bool) string {
 	label, branch := m.paneHeaderParts(p, t)
+	delete(m.unseen, t) // drawing a pane is what "seen" means
+	if c := m.copy; c != nil && c.term == t {
+		// Copy mode is drawn straight, never cached: its cursor and selection
+		// move on keys paneKey knows nothing about, and it shows frozen rows
+		// rather than the live screen, so there is nothing for the cache to
+		// save. The card is built the same way, so the pane keeps its shape.
+		innerW := max(r.w-cardStyle.GetHorizontalBorderSize(), 1)
+		innerH := max(r.h-cardStyle.GetVerticalBorderSize(), 1)
+		rows := append([]string{paneHeader(label, branch+"  "+copyMark, innerW, focused, running(t))},
+			c.view(innerW, innerH-paneHeaderHeight)...)
+		return framed(cardStyle, focused, r.w, r.h).Render(strings.Join(rows, "\n"))
+	}
 	// The version is read before the screen, never after: a write landing
 	// between the two leaves a card built from newer content filed under an
 	// older version, which costs one extra repaint next frame. Read the other
@@ -1286,7 +1335,6 @@ func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, f
 		branch:  branch,
 		running: running(t),
 	}
-	delete(m.unseen, t) // drawing a pane is what "seen" means
 	if c, ok := m.panes[t]; ok && c.key == key {
 		return c.card
 	}
@@ -1492,6 +1540,8 @@ func (m Model) viewStatus() string {
 		bindings = []key.Binding{keys.HelpClose}
 	case m.diff != nil:
 		bindings = keys.diffHelp()
+	case m.copy != nil:
+		bindings = keys.copyHelp()
 	case m.panel != nil:
 		bindings = keys.managerHelp()
 	case m.form != nil:
