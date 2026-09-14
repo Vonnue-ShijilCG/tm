@@ -41,6 +41,31 @@ accepting one and dropping the terminal on save. Malformed layout nodes decode t
 - **`config`**: `$XDG_CONFIG_HOME/tm/config.toml` with `max_terminals`. Re-read on every creation attempt (`workspace.LimitSource`), so edits apply without restart; invalid values fall back to the default and carry a `Notice`.
 - **`ui`**: the Bubble Tea `Model` (`ui/model.go`), the new-terminal form, the per-project Terminal Manager (`ui/manager.go`), the uncommitted-changes view (`ui/diffview.go`), copy mode (`ui/copymode.go`), and the pane tree.
 
+### Lists longer than the window
+
+Lip Gloss pads a short block up to its height but never cuts a long one, so a
+list that ignores the height does not clip — it draws past the bottom of the
+window and pushes the status bar off the screen, taking the selected row with
+it. A workspace with 24 repositories rendered 30 lines in a 24-row terminal.
+
+`visibleEntries` (`ui/scrolllist.go`) is the one answer, shared by the sidebar,
+the Terminal Manager and the changes view's file list. An entry is a group of
+lines that belong together — a wrapped project name, a terminal's two rows, an
+unused-worktree heading and the row it introduces — and groups are never split
+across the edge. Entries are dropped from the top only when the selected one
+would otherwise not fit, so the selection is always on screen.
+
+Two rules for anything that draws into a frame:
+
+- **Budget what sits below the list first.** The manager's worktree path,
+  confirmation and notice are about the row the cursor is on; a question with
+  its answer scrolled off is worse than a shorter list.
+- **Truncate every line whose length you do not control.** `manager.fit` cuts
+  git's messages to one line and to the pane — `backend is not a git
+  repository: terminals here run in the project directory` is 77 cells, and
+  wrapped it cost the list its last row. The changes view does the same for
+  the same reason.
+
 ### Three layout representations
 
 The same arrangement exists in three shapes; keep conversions in sync when touching any of them:

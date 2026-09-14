@@ -105,7 +105,7 @@ func TestOutputFromAnotherProjectMarksItInTheSidebar(t *testing.T) {
 	// for it explicitly, the way the painting tests do.
 	withTrueColor(t)
 	want := lipgloss.NewStyle().Foreground(stir).Background(ground).Render("●")
-	if !strings.Contains(m.viewSidebar(), want) {
-		t.Errorf("the sidebar marker should carry the amber:\n%q", ansi.Strip(m.viewSidebar()))
+	if !strings.Contains(m.viewSidebar(m.height-statusHeight-sidebarStyle.GetVerticalFrameSize()), want) {
+		t.Errorf("the sidebar marker should carry the amber:\n%q", ansi.Strip(m.viewSidebar(m.height-statusHeight-sidebarStyle.GetVerticalFrameSize())))
 	}
 }

@@ -184,12 +184,21 @@ func (mg *manager) update(msg tea.KeyMsg, ws *workspace.Workspace) managerAction
 	return mgNone
 }
 
-func (mg *manager) view(width int) string {
+// view draws the manager in at most height rows. A project with more terminals
+// than the window has rows would otherwise draw past the bottom, taking the
+// status bar and the selected row with it; rows are dropped from the top only
+// when the selected one would not otherwise fit, as everywhere else in tm.
+// What sits below the list — the worktree path, a confirmation, a notice — is
+// budgeted first, because it is about the row the cursor is on and losing it
+// would leave a question on screen with no answer.
+func (mg *manager) view(width, height int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "\n %s\n %s\n\n", selectedStyle.Render(mg.project.Name), hintStyle.Render("Manage terminals"))
+	height -= 4 // the two title rows, the blank line under them, and the leading one
 
 	if mg.loadErr != "" {
-		b.WriteString(" " + hintStyle.Render(mg.loadErr) + "\n")
+		b.WriteString(fit(mg.loadErr, width) + "\n")
+		height--
 	}
 	terminals := 0
 	for _, r := range mg.rows {
@@ -198,26 +207,54 @@ func (mg *manager) view(width int) string {
 		}
 	}
 	if terminals == 0 {
-		b.WriteString(" " + hintStyle.Render("No terminals yet. Press n to create one.") + "\n")
-	}
-	for i, r := range mg.rows {
-		if i == terminals {
-			b.WriteString("\n " + hintStyle.Render("Unused worktrees (no terminal uses them)") + "\n")
-		}
-		for _, line := range mg.lines(i, r, width) {
-			b.WriteString(line + "\n")
-		}
-	}
-	if r := mg.selected(); r != nil && r.worktree != nil { // where the leftover lives is what cleanup needs to know
-		b.WriteString("\n " + hintStyle.Render("path  "+leftTruncate(r.worktree.Path, width-10)) + "\n")
+		b.WriteString(fit("No terminals yet. Press n to create one.", width) + "\n")
+		height--
 	}
 
-	if mg.confirm {
-		b.WriteString("\n " + errorStyle.Render(mg.prompt) + "\n " + errorStyle.Render("y confirm · any other key cancels") + "\n")
-	} else if mg.notice != "" {
-		b.WriteString("\n " + hintStyle.Render(mg.notice) + "\n")
+	// The footer is measured before the rows are, so the list gives up a row
+	// rather than the answer to the question the cursor is asking.
+	var footer []string
+	if r := mg.selected(); r != nil && r.worktree != nil { // where the leftover lives is what cleanup needs to know
+		footer = append(footer, "", " "+hintStyle.Render("path  "+leftTruncate(r.worktree.Path, width-10)))
 	}
-	return b.String()
+	if mg.confirm {
+		footer = append(footer, "",
+			" "+errorStyle.Render(ansi.Truncate(mg.prompt, max(width-1, 1), "…")),
+			" "+errorStyle.Render("y confirm · any other key cancels"))
+	} else if mg.notice != "" {
+		footer = append(footer, "", fit(mg.notice, width))
+	}
+	height -= len(footer)
+
+	// The worktree heading belongs to the first worktree row, so the two are
+	// dropped or kept together rather than leaving a heading over nothing.
+	entries := make([][]string, len(mg.rows))
+	for i, r := range mg.rows {
+		if i == terminals {
+			entries[i] = append(entries[i], "", " "+hintStyle.Render("Unused worktrees (no terminal uses them)"))
+		}
+		entries[i] = append(entries[i], mg.lines(i, r, width)...)
+	}
+	for _, line := range visibleEntries(entries, mg.cursor, height) {
+		b.WriteString(line + "\n")
+	}
+	for _, line := range footer {
+		b.WriteString(line + "\n")
+	}
+	// No trailing blank line: the frame pads the body up to its height, so a
+	// spare row at the end is a row the list could have used — and once the
+	// list fills the window, one the window does not have.
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// fit is a one-line hint that cannot be wider than the pane. Lip Gloss wraps
+// rather than clipping, so an untruncated line — git's "not a git repository"
+// runs to 77 cells — becomes two rows and pushes the last row of the list off
+// the window. Only the first line survives: some git errors run to several,
+// and one row is what the layout has budgeted.
+func fit(text string, width int) string {
+	first, _, _ := strings.Cut(text, "\n")
+	return " " + hintStyle.Render(ansi.Truncate(first, max(width-1, 1), "…"))
 }
 
 // lines renders one row. A terminal takes two lines: its identity, the

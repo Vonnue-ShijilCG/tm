@@ -10,7 +10,7 @@ import (
 func TestTheSelectedProjectRowFillsTheSidebar(t *testing.T) {
 	m, _ := newTestModel(t)
 
-	rows := strings.Split(m.viewSidebar(), "\n")
+	rows := strings.Split(m.viewSidebar(m.height-statusHeight-sidebarStyle.GetVerticalFrameSize()), "\n")
 	found := false
 	for _, row := range rows {
 		if !strings.Contains(row, m.ws.Projects[m.cursor].Name) {
@@ -32,7 +32,7 @@ func TestALongProjectNameWrapsRatherThanRunningOff(t *testing.T) {
 	long := "WEB-HB-Component-Library-With-A-Very-Long-Name"
 	m.ws.Projects[0].Name = long
 
-	out := m.viewSidebar()
+	out := m.viewSidebar(m.height - statusHeight - sidebarStyle.GetVerticalFrameSize())
 
 	for _, row := range strings.Split(out, "\n") {
 		if w := ansi.StringWidth(row); w > sidebarWidth-sidebarStyle.GetHorizontalFrameSize() {
@@ -65,7 +65,7 @@ func TestASelectedWrappedProjectIsHighlightedOnEveryLine(t *testing.T) {
 		t.Fatalf("setup: the name did not wrap at all (%d lines)", wantLines)
 	}
 
-	rows := strings.Split(m.viewSidebar(), "\n")
+	rows := strings.Split(m.viewSidebar(m.height-statusHeight-sidebarStyle.GetVerticalFrameSize()), "\n")
 	nameRows := rows[2 : 2+wantLines] // "Projects", a blank line, then the wrapped project
 
 	for _, row := range nameRows {

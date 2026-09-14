@@ -477,26 +477,10 @@ func (d *diffView) header(width int) string {
 func (d *diffView) list(width, height int) []string {
 	height-- // the heading's row
 	entries := make([][]string, len(d.files))
-	used := 0 // lines from the first entry through the selected one
 	for i, f := range d.files {
 		entries[i] = d.entry(f, i == d.cursor, width)
-		if i <= d.cursor {
-			used += len(entries[i])
-		}
 	}
-	start := 0
-	for used > height && start < d.cursor {
-		used -= len(entries[start])
-		start++
-	}
-	var lines []string
-	for _, e := range entries[start:] {
-		if len(lines)+len(e) > height {
-			break
-		}
-		lines = append(lines, e...)
-	}
-	return append([]string{"  " + selectedStyle.Render("FILES")}, lines...)
+	return append([]string{"  " + selectedStyle.Render("FILES")}, visibleEntries(entries, d.cursor, height)...)
 }
 
 // entry is one file: basename first with the directory beneath, so a long

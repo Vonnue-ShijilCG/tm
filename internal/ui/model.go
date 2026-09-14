@@ -1155,7 +1155,8 @@ func (m Model) View() string {
 			m.diff.view(m.width-modalStyle.GetHorizontalFrameSize(), paneHeight-modalStyle.GetVerticalFrameSize()))
 		return lipgloss.JoinVertical(lipgloss.Left, screen, m.viewStatus())
 	}
-	sidebar := framed(sidebarStyle, m.focus == focusSidebar, sidebarWidth, paneHeight).Render(m.viewSidebar())
+	sidebar := framed(sidebarStyle, m.focus == focusSidebar, sidebarWidth, paneHeight).Render(
+		m.viewSidebar(paneHeight - sidebarStyle.GetVerticalFrameSize()))
 	style, focused := mainAreaStyle, false
 	if m.panel != nil || m.form != nil {
 		style, focused = mainStyle, m.focus == focusMain
@@ -1166,10 +1167,15 @@ func (m Model) View() string {
 	return lipgloss.JoinVertical(lipgloss.Left, body, m.viewStatus())
 }
 
-func (m Model) viewSidebar() string {
+// viewSidebar lists the projects in at most height rows. A workspace with more
+// repositories than the terminal has rows would otherwise draw past the bottom
+// of the window — Lip Gloss pads a short block but never cuts a long one — and
+// take the status bar and the selected project off the screen with it.
+func (m Model) viewSidebar(height int) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Projects"))
 	b.WriteString("\n\n")
+	height -= 2 // the title and the blank line under it
 
 	if len(m.ws.Projects) == 0 {
 		b.WriteString(hintStyle.Render("No Git repositories\nfound in:\n" + m.root))
@@ -1177,6 +1183,7 @@ func (m Model) viewSidebar() string {
 	}
 
 	inner := sidebarWidth - sidebarStyle.GetHorizontalFrameSize()
+	entries := make([][]string, len(m.ws.Projects))
 	for i, p := range m.ws.Projects {
 		// ● running workspace, ○ workspace that Enter will restore, else blank.
 		marker := "  "
@@ -1212,20 +1219,20 @@ func (m Model) viewSidebar() string {
 			// sidebar's ground for the rest of the line.
 			if stirred && j == 0 && marker != "  " {
 				dot := lipgloss.NewStyle().Foreground(stir).Background(style.GetBackground()).Render(strings.TrimSpace(marker))
-				b.WriteString(style.Width(inner).MaxWidth(inner).Render(dot + style.Render(" "+part)))
+				entries[i] = append(entries[i], style.Width(inner).MaxWidth(inner).Render(dot+style.Render(" "+part)))
 			} else {
-				b.WriteString(style.Width(inner).MaxWidth(inner).Render(prefix + part))
+				entries[i] = append(entries[i], style.Width(inner).MaxWidth(inner).Render(prefix+part))
 			}
-			b.WriteByte('\n')
 		}
 	}
+	b.WriteString(strings.Join(visibleEntries(entries, m.cursor, height), "\n"))
 	return b.String()
 }
 
 func (m Model) viewMain() string {
 	innerWidth := m.width - sidebarWidth - paneGutter - mainStyle.GetHorizontalFrameSize()
 	if m.panel != nil {
-		return m.panel.view(innerWidth)
+		return m.panel.view(innerWidth, m.height-statusHeight-mainStyle.GetVerticalFrameSize())
 	}
 	if m.form != nil {
 		return m.form.view(innerWidth)
