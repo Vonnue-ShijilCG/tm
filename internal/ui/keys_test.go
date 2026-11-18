@@ -3,6 +3,7 @@ package ui
 import (
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	uv "github.com/charmbracelet/ultraviolet"
@@ -98,5 +99,27 @@ func TestSidebarLettersAreApplicationKeys(t *testing.T) {
 	}
 	if !strings.Contains(press(m, "s").View(), "zoom") {
 		t.Error("help must document zoom")
+	}
+}
+
+// Q stops everything only from the sidebar. In a terminal it is a capital
+// letter like any other, and goes to the program.
+func TestStopAllIsASidebarKey(t *testing.T) {
+	if got := keys.StopAll.Keys(); len(got) != 1 || got[0] != "Q" {
+		t.Fatalf("StopAll keys = %q, want just Q", got)
+	}
+	ts := startTestServer(t)
+	m := press(newAttachedModel(t, ts, t.TempDir()), "enter")
+	if m.focus != focusMain {
+		t.Fatal("setup: a terminal should have focus")
+	}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("Q")})
+	if cmd != nil {
+		if _, quit := cmd().(tea.QuitMsg); quit {
+			t.Fatal("Q in a terminal must not stop tm")
+		}
+	}
+	if ts.stopped(100 * time.Millisecond) {
+		t.Error("Q in a terminal stopped the server")
 	}
 }

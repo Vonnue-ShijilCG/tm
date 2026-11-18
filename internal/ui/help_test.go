@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -119,5 +120,45 @@ func TestStatusBarNeverExceedsTheWindowWidth(t *testing.T) {
 	m.width = hintsWidth / 2 // narrower than the hints alone; nothing else can fit either
 	if w := ansi.StringWidth(m.viewStatus()); w > m.width {
 		t.Errorf("status bar is %d cells wide, want at most the window's %d", w, m.width)
+	}
+}
+
+// With a server, q leaves the terminals running and Q is what ends them; the
+// help screen has to say so, because the same key now means something else.
+// Without one, nothing about the screen changes.
+func TestHelpScreenExplainsServerKeys(t *testing.T) {
+	ts := startTestServer(t)
+	attached := press(newAttachedModel(t, ts, t.TempDir()), "s")
+	plain, _ := newTestModel(t)
+	plain = press(plain, "s")
+
+	if got := keys.Leave.Help(); got.Key != "q/ctrl+c" || got.Desc != "leave (terminals keep running)" {
+		t.Errorf("Leave reads %q %q", got.Key, got.Desc)
+	}
+	// Drawn in two rows, the second under the first's description.
+	leave := regexp.MustCompile(`q/ctrl\+c +leave \(terminals .*\n│ +keep running\)`)
+	stop := regexp.MustCompile(`\bQ\s+stop all`)
+	quit := regexp.MustCompile(`q/ctrl\+c\s+quit`)
+
+	view := ansi.Strip(attached.View())
+	if !leave.MatchString(view) || !stop.MatchString(view) {
+		t.Errorf("help with a server should list leave and stop all:\n%s", view)
+	}
+	if quit.MatchString(view) {
+		t.Errorf("help with a server still says q quits:\n%s", view)
+	}
+
+	view = ansi.Strip(plain.View())
+	if !quit.MatchString(view) {
+		t.Errorf("help without a server should say q quits:\n%s", view)
+	}
+	if leave.MatchString(view) || stop.MatchString(view) || strings.Contains(view, "stop all") {
+		t.Errorf("help without a server lists server keys:\n%s", view)
+	}
+
+	for name, m := range map[string]Model{"attached": attached, "plain": plain} {
+		if lines := strings.Count(m.View(), "\n") + 1; lines > m.height {
+			t.Errorf("%s help is %d lines in a %d-row window", name, lines, m.height)
+		}
 	}
 }

@@ -83,6 +83,7 @@ type Model struct {
 	allVisible   map[*workspace.Project]*pane // last tree that showed every running terminal, so a hidden pane can return to its exact place
 	branches     *branchLookup                // checked-out branch per directory, for pane headers and the manager
 	pendingSplit splitDir                     // where the form's new terminal goes; 0 = auto
+	srv          *serverLink                  // the tm server holding the terminals; nil when they run here (see attach.go)
 
 	width, height int
 }
@@ -90,8 +91,26 @@ type Model struct {
 // New builds a Model for the given workspace root and its projects, and
 // restores saved terminal definitions from the workspace state file.
 func New(root string, projects []project.Project) Model {
-	m := Model{root: root, ws: workspace.New(root, projects, spawnShell), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}, scroll: map[*workspace.Terminal]int{}, panes: map[*workspace.Terminal]paneRender{}, unseen: map[*workspace.Terminal]bool{}, branches: newBranchLookup()}
-	if err := m.ws.Restore(); err != nil {
+	return NewWith(root, projects, Options{})
+}
+
+// NewWith is New with options: attached to a tm server when o.Client is
+// set (see attach.go), and with o.Forget's terminals dropped from the
+// restored state either way.
+func NewWith(root string, projects []project.Project, o Options) Model {
+	spawn := spawnShell
+	if o.Client != nil {
+		spawn = remoteSpawner(o.Client)
+	}
+	m := Model{root: root, ws: workspace.New(root, projects, spawn), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}, scroll: map[*workspace.Terminal]int{}, panes: map[*workspace.Terminal]paneRender{}, unseen: map[*workspace.Terminal]bool{}, branches: newBranchLookup()}
+	var err error
+	if o.Client != nil {
+		err = m.attach(o)
+	} else if err = m.ws.Restore(); err == nil && len(o.Forget) > 0 {
+		m.ws.Forget(o.Forget)
+		m.persist()
+	}
+	if err != nil {
 		m.notice = "could not read saved state: " + err.Error()
 	}
 	if l := m.ws.CurrentLimit(); l.Notice != "" { // an invalid max_terminals is reported at startup and again on each use
@@ -127,11 +146,15 @@ func (m *Model) openForm(p *workspace.Project, dir splitDir, back focus) {
 // Workspace.RecordLayout for when the saved layout is kept instead);
 // projects without keep whatever arrangement was restored from the file.
 func (m *Model) persist() {
+	if m.released() {
+		return // the server has a new owner, and it writes the state now
+	}
 	for _, p := range m.ws.Projects {
 		if t := p.ActiveTerminal(); t != nil {
 			m.ws.RecordLayout(p, layoutFromPane(m.layouts[p]), t.Key())
 		}
 	}
+	m.sendBlob()
 	if err := m.ws.Save(); err != nil {
 		m.notice = "could not save state: " + err.Error()
 		return
@@ -139,12 +162,13 @@ func (m *Model) persist() {
 	m.notice = ""
 }
 
-func (m Model) Init() tea.Cmd { return nil }
+func (m Model) Init() tea.Cmd { return m.serverInit() }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.arrangeAttached() // the first size lays out a reattached window
 		for _, p := range m.ws.Projects {
 			m.applyLayout(p)
 		}
@@ -202,9 +226,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, watchTerminal(t)
 		}
 
+	case serverGoneMsg:
+		return m.serverGone(msg)
+
 	case terminalExitedMsg:
-		if m.quitting {
-			return m, nil // sessions closed by quit; the saved state already has them
+		if m.quitting || m.lostWith(msg.err) {
+			return m, nil // sessions closed by quit, or a lost server: the saved state already has them
 		}
 		if p, t := m.ws.Remove(msg.id); t != nil {
 			p.Notice = fmt.Sprintf("terminal %d %s", t.Num, exitNotice(msg.err))
@@ -683,6 +710,12 @@ func (m *Model) openDiff(p *workspace.Project, t *workspace.Terminal) tea.Cmd {
 func (m Model) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	last := len(m.ws.Projects) - 1
 	switch {
+	case key.Matches(msg, keys.Quit) && m.srv != nil:
+		return m.leave()
+	case key.Matches(msg, keys.StopAll):
+		if m.srv != nil {
+			return m.stopAll()
+		}
 	case key.Matches(msg, keys.Quit):
 		m.quitting = true
 		m.persist()
@@ -1147,7 +1180,7 @@ func (m Model) View() string {
 	paneHeight := m.height - statusHeight
 	if m.help {
 		screen := framed(modalStyle, true, m.width, paneHeight).Render(
-			viewHelp(m.width-modalStyle.GetHorizontalFrameSize(), paneHeight-modalStyle.GetVerticalFrameSize()))
+			viewHelpFor(helpSectionsFor(m.srv != nil), m.width-modalStyle.GetHorizontalFrameSize(), paneHeight-modalStyle.GetVerticalFrameSize()))
 		return lipgloss.JoinVertical(lipgloss.Left, screen, m.viewStatus())
 	}
 	if m.diff != nil {

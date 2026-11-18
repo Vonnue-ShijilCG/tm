@@ -29,6 +29,10 @@ type keyMap struct {
 	Manage     key.Binding
 	Help       key.Binding
 	Quit       key.Binding
+	// With a tm server, q and ctrl+c leave instead (Leave is Quit's help
+	// text then; input still matches Quit) and Q ends every terminal.
+	Leave   key.Binding
+	StopAll key.Binding
 
 	// Terminal.
 	Sidebar    key.Binding
@@ -122,6 +126,8 @@ var keys = keyMap{
 	Manage:     key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "manage terminals")),
 	Help:       key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "help")),
 	Quit:       key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "quit")),
+	Leave:      key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "leave (terminals keep running)")),
+	StopAll:    key.NewBinding(key.WithKeys("Q"), key.WithHelp("Q", "stop all")),
 
 	Sidebar:    key.NewBinding(key.WithKeys("alt+s"), key.WithHelp("alt+s", "to sidebar")),
 	NextTerm:   key.NewBinding(key.WithKeys("alt+j"), key.WithHelp("alt+j", "next terminal")),
@@ -194,10 +200,24 @@ type helpSection struct {
 // without squeezing a column narrow enough to truncate another section's
 // labels. Moving a section, or adding one, means checking the screen at 100x30
 // again.
+//
+// helpSections is every binding, whichever screen shows it; helpSectionsFor
+// is the screen itself, which says what q does and lists Q only when a tm
+// server holds the terminals.
 func helpSections() []helpSection {
+	s := helpSectionsFor(false)
+	s[0].Bindings = append(s[0].Bindings, keys.Leave, keys.StopAll)
+	return s
+}
+
+func helpSectionsFor(server bool) []helpSection {
 	k := keys
+	quit := []key.Binding{k.Quit}
+	if server {
+		quit = []key.Binding{k.Leave, k.StopAll}
+	}
 	return []helpSection{
-		{"SIDEBAR", []key.Binding{k.Down, k.Up, k.Top, k.Bottom, k.Select, k.New, k.SplitSide, k.SplitStack, k.Focus, k.Zoom, k.Manage, k.Help, k.Quit}},
+		{"SIDEBAR", append([]key.Binding{k.Down, k.Up, k.Top, k.Bottom, k.Select, k.New, k.SplitSide, k.SplitStack, k.Focus, k.Zoom, k.Manage, k.Help}, quit...)},
 		{"TERMINAL", []key.Binding{k.Sidebar, k.NextTerm, k.PrevTerm, k.NewTerm, k.ManageTerm, k.HideTerm, k.DeleteTerm}},
 		{"PANES", []key.Binding{k.PaneSide, k.PaneStack, k.PaneLeft, k.PaneRight, k.PaneUp, k.PaneDown, k.PaneGrow, k.PaneShrink, k.PaneZoom}},
 		{"CHANGES", []key.Binding{k.Diff, k.DiffTerm, k.DiffScroll, k.DiffDown, k.DiffUp, k.DiffLeft, k.DiffRight, k.DiffNextChange, k.DiffPrevChange, k.DiffRefresh, k.DiffClose}},

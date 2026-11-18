@@ -16,15 +16,23 @@ import (
 // the set and every other column pays for it. At 100x30 that is the
 // difference between every label reading whole and every label truncated.
 //
-// Nothing here wraps. Lip Gloss wraps rather than clipping, so one over-long
-// row becomes two and the screen grows past the window — which is what a
-// narrow terminal used to do here. Rows and section titles are both cut.
+// Nothing here wraps behind the layout's back. Lip Gloss wraps rather than
+// clipping, so one over-long row becomes two and the screen grows past the
+// window — which is what a narrow terminal used to do here. Rows and section
+// titles are both cut. The one deliberate wrap is a description longer than
+// helpDescWidth, which descLines breaks into rows that every count of the
+// screen's height and width already includes.
 //
 // The screen has no slack left: at 80x24 the sections now need five columns,
 // and titles are cut to fit them. Another section would have to come with a
 // way to scroll or page this screen.
 func viewHelp(width, height int) string {
-	sections := helpSections()
+	return viewHelpFor(helpSectionsFor(false), width, height)
+}
+
+// viewHelpFor is viewHelp for the given sections: with a tm server, the
+// sidebar's quit keys read differently.
+func viewHelpFor(sections []helpSection, width, height int) string {
 	bodyHeight := max(height-2, 1) // title + blank line
 	columns := distribute(sections, bodyHeight)
 	gapWidth := 2
@@ -61,6 +69,35 @@ func viewHelp(width, height int) string {
 	return strings.Join(rows, "\n")
 }
 
+// helpDescWidth is the most a description takes on one row: the longest
+// one-line description, "manage terminals". A longer one continues on the
+// rows below it (descLines). Without that, the server's "leave (terminals
+// keep running)" would widen the sidebar's column by fourteen cells, which
+// at 100x30 the other columns would pay for with a truncated label each.
+const helpDescWidth = 16
+
+// descLines breaks desc at spaces into rows of at most helpDescWidth cells;
+// a single word longer than that keeps its row and is cut like any other.
+func descLines(desc string) []string {
+	if lipgloss.Width(desc) <= helpDescWidth {
+		return []string{desc}
+	}
+	var lines []string
+	cur := ""
+	for _, w := range strings.Fields(desc) {
+		switch {
+		case cur == "":
+			cur = w
+		case lipgloss.Width(cur+" "+w) > helpDescWidth:
+			lines = append(lines, cur)
+			cur = w
+		default:
+			cur += " " + w
+		}
+	}
+	return append(lines, cur)
+}
+
 // columnWidths sizes each column to its own content rather than dividing the
 // space equally. Sections differ in how long their labels are, and an equal
 // split is decided by the widest column in the set: with four columns at
@@ -76,7 +113,9 @@ func columnWidths(columns [][]helpSection, budget int) []int {
 		for _, s := range col {
 			widths[i] = max(widths[i], lipgloss.Width(s.Title))
 			for _, b := range s.Bindings {
-				widths[i] = max(widths[i], keyWidth+1+lipgloss.Width(b.Help().Desc))
+				for _, line := range descLines(b.Help().Desc) {
+					widths[i] = max(widths[i], keyWidth+1+lipgloss.Width(line))
+				}
 			}
 		}
 		total += widths[i]
@@ -130,8 +169,15 @@ func distribute(sections []helpSection, height int) [][]helpSection {
 	}
 }
 
-// sectionRows is the lines a section takes: its title plus its bindings.
-func sectionRows(s helpSection) int { return len(s.Bindings) + 1 }
+// sectionRows is the lines a section takes: its title plus its bindings,
+// each as many rows as its description wraps to.
+func sectionRows(s helpSection) int {
+	rows := 1
+	for _, b := range s.Bindings {
+		rows += len(descLines(b.Help().Desc))
+	}
+	return rows
+}
 
 // columnRows is the lines a column takes as renderSections lays it out: its
 // sections, with one blank line between each pair.
@@ -174,7 +220,13 @@ func renderSections(sections []helpSection, width, height int) string {
 		b.WriteString(selectedStyle.Render(ansi.Truncate(s.Title, width, "")) + "\n")
 		for _, binding := range s.Bindings {
 			h := binding.Help()
-			b.WriteString(ansi.Truncate(fmt.Sprintf("%-*s %s", keyWidth, h.Key, hintStyle.Render(h.Desc)), width, "…") + "\n")
+			for i, line := range descLines(h.Desc) {
+				k := h.Key
+				if i > 0 {
+					k = "" // a continuation sits under the description, not the key
+				}
+				b.WriteString(ansi.Truncate(fmt.Sprintf("%-*s %s", keyWidth, k, hintStyle.Render(line)), width, "…") + "\n")
+			}
 		}
 	}
 	return textStyle.Width(width).MaxWidth(width).Height(height).Render(strings.TrimRight(b.String(), "\n"))
