@@ -323,3 +323,17 @@ func TestVersionMovesWhenTheScreenChanges(t *testing.T) {
 		t.Errorf("Version() = %d then %d with nothing in between", a, b)
 	}
 }
+
+func TestStartUsesGivenEnv(t *testing.T) {
+	t.Setenv("TM_PROBE", "inherited")
+	s := start(t, Config{Command: "/bin/sh", Args: []string{"-c", `echo "probe=$TM_PROBE term=$TERM color=$COLORTERM"`}, Env: []string{"TM_PROBE=hello"}, Dir: t.TempDir(), Cols: 80, Rows: 5})
+	waitDone(t, s)
+
+	out := strings.Join(s.Lines(0), "\n")
+	if !strings.Contains(out, "probe=hello") {
+		t.Errorf("given Env not used:\n%s", out)
+	}
+	if !strings.Contains(out, "term=xterm-256color color=truecolor") {
+		t.Errorf("TERM/COLORTERM should still be appended:\n%s", out)
+	}
+}

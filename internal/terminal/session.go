@@ -42,6 +42,9 @@ type Config struct {
 	Dir     string   // working directory for the process
 	Cols    int      // initial terminal width in cells
 	Rows    int      // initial terminal height in cells
+	// Env, when non-nil, replaces os.Environ() as the process environment.
+	// TERM and COLORTERM are appended either way.
+	Env []string
 }
 
 // PaneGround is the ground every pane is drawn on, as a hex string. Panes
@@ -109,7 +112,11 @@ func Start(cfg Config) (*Session, error) {
 
 	cmd := exec.Command(cfg.Command, cfg.Args...)
 	cmd.Dir = cfg.Dir
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "COLORTERM=truecolor")
+	env := cfg.Env
+	if env == nil {
+		env = os.Environ()
+	}
+	cmd.Env = append(append([]string(nil), env...), "TERM=xterm-256color", "COLORTERM=truecolor")
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: uint16(cfg.Cols), Rows: uint16(cfg.Rows)})
 	if err != nil {

@@ -24,7 +24,8 @@ const DefaultMaxTerminals = 6
 
 // Config holds every setting with defaults already applied.
 type Config struct {
-	MaxTerminals int // max_terminals: running terminals allowed per project
+	MaxTerminals int  // max_terminals: running terminals allowed per project
+	Server       bool // server: run terminals in a background server that outlives the window
 }
 
 // Default is the configuration used when nothing is configured.
@@ -93,6 +94,16 @@ func Load(path string) (Config, error) {
 				continue
 			}
 			c.MaxTerminals = v
+		case "server":
+			switch value {
+			case "true":
+				c.Server = true
+			case "false":
+				c.Server = false
+			default:
+				problems = append(problems, fmt.Sprintf("server %q is not true or false; using false (%s:%d)", value, Display(path), n))
+				c.Server = false
+			}
 		}
 	}
 	if err := sc.Err(); err != nil {

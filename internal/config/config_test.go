@@ -115,3 +115,37 @@ func TestDefaultPathIsReadable(t *testing.T) {
 		t.Fatalf("default path: %+v, %v", c, err)
 	}
 }
+
+func TestServerFlagParses(t *testing.T) {
+	for content, want := range map[string]bool{
+		"server = true\n":                  true,
+		"server=true # keep terminals\n":   true,
+		"server = false\n":                 false,
+		"max_terminals = 4\n":              false,
+		"max_terminals = 4\nserver = true": true,
+	} {
+		c, err := Load(write(t, content))
+		if err != nil || c.Server != want {
+			t.Errorf("%q: got %+v, %v; want Server = %v", content, c, err, want)
+		}
+	}
+	if Default().Server {
+		t.Error("Default() should leave the server off")
+	}
+}
+
+func TestInvalidServerFlagFallsBackAndReports(t *testing.T) {
+	for _, content := range []string{"server = yes\n", "server = 1\n", "server = \"true\"\n", "server = True\n", "server =\n"} {
+		c, err := Load(write(t, content))
+		if c.Server {
+			t.Errorf("%q: Server = true, want fallback false", content)
+		}
+		if err == nil {
+			t.Errorf("%q: expected an error describing the problem", content)
+			continue
+		}
+		if !strings.Contains(err.Error(), "server") || !strings.Contains(err.Error(), "config.toml:1") {
+			t.Errorf("%q: error should name the key, file and line: %v", content, err)
+		}
+	}
+}
