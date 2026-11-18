@@ -60,6 +60,8 @@ type serverLink struct {
 	selected string
 	arranged bool
 
+	blobSelected string // the project named in the last blob sent
+
 	unplaced int // live sessions whose project is not in this workspace
 
 	gone bool   // the server let this client go; nothing may be written now
@@ -332,7 +334,8 @@ func (m *Model) arrangeAttached() {
 	}
 }
 
-// sendBlob hands the server what the next attach needs. Called by persist.
+// sendBlob hands the server what the next attach needs. Called by persist,
+// and by noteSelected.
 func (m *Model) sendBlob() {
 	if m.srv == nil || !m.srv.arranged {
 		return // before the first layout every terminal would read as hidden
@@ -341,6 +344,7 @@ func (m *Model) sendBlob() {
 	if p := m.selectedProject(); p != nil {
 		b.Selected = p.Name
 	}
+	m.srv.blobSelected = b.Selected
 	for _, p := range m.ws.Projects {
 		for _, t := range p.Terminals {
 			if !m.layouts[p].contains(t) {
@@ -350,6 +354,26 @@ func (m *Model) sendBlob() {
 	}
 	if data, err := json.Marshal(b); err == nil {
 		m.srv.client.SetBlob(data)
+	}
+}
+
+// noteSelected sends the blob when the project shown is not the one the
+// last blob named. Switching projects saves nothing, so without this a
+// window closed straight after would reopen on the project shown at the
+// last save. The blob carries the layout persist last recorded, which a
+// switch does not change, so no state-file write is needed. Called after
+// every Update.
+func (m *Model) noteSelected() {
+	l := m.srv
+	if l == nil || !l.arranged || m.released() || m.quitting {
+		return
+	}
+	name := ""
+	if p := m.selectedProject(); p != nil {
+		name = p.Name
+	}
+	if name != l.blobSelected {
+		m.sendBlob()
 	}
 }
 

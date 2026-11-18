@@ -380,10 +380,11 @@ which must be a real directory owned by the user with mode 0700.
 64-bit ref, and answers their terminal queries itself, so a program asking
 for the cursor position while no window is attached does not stall.
 Everything else — `workspace.Workspace`, worktrees, the config limit, the
-state file, the UI — stays in the client. On every persist the client also
-hands the server an opaque blob (`ui/attach.go`'s `uiBlob`: the state
-snapshot plus which running terminals were hidden, which the state file does
-not record) and gets it back on attach. That is how a reattach restores
+state file, the UI — stays in the client. On every persist, and whenever the
+project shown changes (which saves nothing), the client also hands the
+server an opaque blob (`ui/attach.go`'s `uiBlob`: the state snapshot plus
+which running terminals were hidden, which the state file does not record,
+and the project shown) and gets it back on attach. That is how a reattach restores
 hidden terminals without the server learning the workspace model. A spawn
 carries the client's `os.Environ()`: a long-lived server's own environment
 would be days old, and a shell opened after an SSH reconnect would get a

@@ -728,3 +728,24 @@ func TestSessionsForMissingProjectsAreReported(t *testing.T) {
 		t.Errorf("notice = %q, want %q", m.notice, want)
 	}
 }
+
+// Switching projects persists nothing, but the server must still hear of
+// it: a window closed straight after should reopen on the project it was
+// showing, not the one shown at the last save.
+func TestSwitchingProjectsTellsTheServer(t *testing.T) {
+	ts := startTestServer(t)
+	root := t.TempDir()
+	m := newAttachedModel(t, ts, root)
+	m = press(m, "enter", "alt+s", "j", "enter") // backend, then ecommerce shown
+	m = press(m, "alt+s", "k", "enter")          // back to backend: no save
+	if m.selectedProject() != m.ws.Projects[0] {
+		t.Fatalf("showing %s, want backend", m.selectedProject().Name)
+	}
+	m.srv.client.Close() // the window closes, with no q to persist
+	time.Sleep(50 * time.Millisecond)
+
+	m2 := newAttachedModel(t, ts, root)
+	if p := m2.selectedProject(); p == nil || p.Name != "backend" {
+		t.Fatalf("reattached showing %v, want backend", p)
+	}
+}
