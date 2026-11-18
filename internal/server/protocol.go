@@ -12,8 +12,9 @@ import (
 	uv "github.com/charmbracelet/ultraviolet"
 )
 
-// ProtocolVersion is bumped whenever any message below changes shape. A
-// client and server that disagree refuse to talk (see Hello).
+// ProtocolVersion is bumped whenever any message below changes shape, which
+// under the rule on Hello means only by adding fields. A client and server
+// that disagree refuse to talk (see Hello).
 const ProtocolVersion = 1
 
 // Msg is the one envelope both directions use. Exactly one pointer field is
@@ -42,9 +43,15 @@ type Msg struct {
 //
 // Hello, Welcome.Protocol and Status are frozen across protocol versions:
 // they are what a client and server of different versions still exchange to
-// discover the mismatch, so never change their field names or types. A server
-// receiving a Hello with a different Protocol replies Welcome{Protocol:
-// ProtocolVersion} with nothing else set and closes.
+// discover the mismatch. A server receiving a Hello with a different Protocol
+// replies Welcome{Protocol: ProtocolVersion} with nothing else set and closes.
+//
+// Freezing those three is not enough under gob, which checks the type of
+// every field it is sent whose name matches a local field, set or not, across
+// the whole of Msg. So the rule for every version is: a field name anywhere
+// under Msg must never change type. A version may only add fields, or retire
+// a name and add a new one in its place; changing, say, SessionInfo.Ref or
+// Spawn.Dir would make an older tm fail to decode even the mismatch reply.
 type Hello struct {
 	Protocol int
 	Attach   bool
