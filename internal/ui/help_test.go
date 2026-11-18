@@ -73,7 +73,7 @@ func TestHelpKeyGoesToTerminalWhenFocused(t *testing.T) {
 // new shortcut cannot be added without showing up in the help screen.
 func TestEveryBindingIsInHelp(t *testing.T) {
 	documented := map[string]bool{}
-	for _, s := range helpSections() {
+	for _, s := range append(helpSectionsFor(false), helpSectionsFor(true)...) { // a binding may show in one mode only
 		for _, b := range s.Bindings {
 			documented[b.Help().Key+"|"+b.Help().Desc] = true
 		}
@@ -82,7 +82,7 @@ func TestEveryBindingIsInHelp(t *testing.T) {
 	for i := 0; i < v.NumField(); i++ {
 		b := v.Field(i).Interface().(key.Binding)
 		if !documented[b.Help().Key+"|"+b.Help().Desc] {
-			t.Errorf("binding %s (%s) is not listed in helpSections", v.Type().Field(i).Name, b.Help().Key)
+			t.Errorf("binding %s (%s) is not listed in helpSectionsFor", v.Type().Field(i).Name, b.Help().Key)
 		}
 	}
 }

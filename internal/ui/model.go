@@ -100,7 +100,7 @@ func New(root string, projects []project.Project) Model {
 func NewWith(root string, projects []project.Project, o Options) Model {
 	spawn := spawnShell
 	if o.Client != nil {
-		spawn = remoteSpawner(o.Client)
+		spawn = noPlainSpawn
 	}
 	m := Model{root: root, ws: workspace.New(root, projects, spawn), selected: -1, layouts: map[*workspace.Project]*pane{}, allVisible: map[*workspace.Project]*pane{}, scroll: map[*workspace.Terminal]int{}, panes: map[*workspace.Terminal]paneRender{}, unseen: map[*workspace.Terminal]bool{}, branches: newBranchLookup()}
 	var err error
@@ -1597,6 +1597,8 @@ func (m Model) viewStatus() string {
 				info += " · zoom"
 			}
 		}
+	case m.srv != nil:
+		bindings = keys.serverSidebarHelp()
 	default:
 		bindings = keys.sidebarHelp()
 	}

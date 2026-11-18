@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Vonnue-ShijilCG/tm/internal/server"
 	"github.com/Vonnue-ShijilCG/tm/internal/state"
@@ -563,4 +565,83 @@ func TestUnknownRefsDependOnWhereTheyCameFrom(t *testing.T) {
 			t.Errorf("saved = %+v, want the definition kept, naming no session", s)
 		}
 	})
+}
+
+// R11: with a server, q does not quit everything, and the status bar must
+// not say it does. The help screen has room for the long form.
+func TestStatusBarSaysLeaveWithServer(t *testing.T) {
+	ts := startTestServer(t)
+	m := newAttachedModel(t, ts, t.TempDir())
+	status := ansi.Strip(m.viewStatus())
+	if !strings.Contains(status, "q/ctrl+c leave") || strings.Contains(status, "quit") || strings.Contains(status, "keep running") {
+		t.Errorf("status bar with a server = %q, want the short leave hint", status)
+	}
+	plain, _ := newTestModel(t)
+	if status := ansi.Strip(plain.viewStatus()); !strings.Contains(status, "q/ctrl+c quit") {
+		t.Errorf("status bar without a server = %q, want quit", status)
+	}
+}
+
+// Q is answered by an eviction ("stopped by tm stop") that may be read
+// before the program has finished quitting; the user asked for the stop and
+// must not be told about it as if it happened to them.
+func TestStopAllPrintsNothing(t *testing.T) {
+	ts := startTestServer(t)
+	m := quitWith(t, press(newAttachedModel(t, ts, t.TempDir()), "enter"), "Q")
+	next, cmd := m.Update(serverGoneMsg{reason: "stopped by tm stop"})
+	if cmd != nil {
+		t.Error("a gone message after Q should do nothing")
+	}
+	if got := next.(Model).ExitMessage(); got != "" {
+		t.Errorf("ExitMessage after Q = %q, want none", got)
+	}
+}
+
+// Every server spawn goes through SpawnFor, which records the terminal; the
+// plain Spawner is never meant to run and says so rather than spawning a
+// session with nothing recorded.
+func TestServerModeSpawnerWithoutMetaRefuses(t *testing.T) {
+	ts := startTestServer(t)
+	m := newAttachedModel(t, ts, t.TempDir())
+	m.ws.SpawnFor = nil
+	if _, err := m.ws.NewTerminal(m.ws.Projects[0], 80, 24); err == nil {
+		t.Error("the plain spawner should refuse in server mode")
+	}
+	if n := len(ts.spawned()); n != 0 {
+		t.Errorf("spawned %d", n)
+	}
+}
+
+// Before the first window size nothing is laid out, so a blob written then
+// would call every terminal hidden.
+func TestNoBlobBeforeTheFirstLayout(t *testing.T) {
+	ts := startTestServer(t)
+	m := attachModel(t, ts, t.TempDir())
+	m.persist()
+	c, w, err := server.Attach(ts.paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if len(w.Blob) != 0 {
+		t.Errorf("blob sent before the first layout: %s", w.Blob)
+	}
+}
+
+func TestSessionsForMissingProjectsAreReported(t *testing.T) {
+	ts := startTestServer(t)
+	c, _, err := server.Attach(ts.paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, _ := json.Marshal(spawnMeta{Project: "removed-repo"})
+	if _, err := c.Spawn("/ws/removed-repo", 80, 24, meta); err != nil {
+		t.Fatal(err)
+	}
+	c.Close()
+
+	m := newAttachedModel(t, ts, t.TempDir())
+	if want := "1 terminal still running for projects no longer here: Q or tm stop ends them"; m.notice != want {
+		t.Errorf("notice = %q, want %q", m.notice, want)
+	}
 }

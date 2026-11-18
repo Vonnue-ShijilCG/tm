@@ -193,7 +193,7 @@ type helpSection struct {
 	Bindings []key.Binding
 }
 
-// helpSections lists every binding for the help screen, grouped by context.
+// helpSectionsFor lists every binding for the help screen, grouped by context.
 // The order decides how viewHelp packs them into columns, and the screen has
 // no slack: CHANGES sits between PANES and NEW TERMINAL, and COPY between
 // CHANGES and NEW TERMINAL, because those are the places their rows fit
@@ -201,15 +201,7 @@ type helpSection struct {
 // labels. Moving a section, or adding one, means checking the screen at 100x30
 // again.
 //
-// helpSections is every binding, whichever screen shows it; helpSectionsFor
-// is the screen itself, which says what q does and lists Q only when a tm
-// server holds the terminals.
-func helpSections() []helpSection {
-	s := helpSectionsFor(false)
-	s[0].Bindings = append(s[0].Bindings, keys.Leave, keys.StopAll)
-	return s
-}
-
+// With a tm server the sidebar says what q does then and lists Q.
 func helpSectionsFor(server bool) []helpSection {
 	k := keys
 	quit := []key.Binding{k.Quit}
@@ -233,6 +225,23 @@ func helpSectionsFor(server bool) []helpSection {
 // Status-bar subsets: short enough to fit on one line.
 func (k keyMap) sidebarHelp() []key.Binding {
 	return []key.Binding{k.Select, k.New, k.Manage, k.Help, k.Quit}
+}
+
+// leaveHint is Leave in the few cells the status bar has for it: the help
+// screen explains that the terminals keep running. Not a keyMap field,
+// since it is never matched and the help screen does not list it.
+var leaveHint = key.NewBinding(key.WithKeys("q", "ctrl+c"), key.WithHelp("q/ctrl+c", "leave"))
+
+// serverSidebarHelp is sidebarHelp with a tm server: q leaves rather than
+// quits.
+func (k keyMap) serverSidebarHelp() []key.Binding {
+	b := k.sidebarHelp()
+	for i := range b {
+		if b[i].Help() == k.Quit.Help() {
+			b[i] = leaveHint
+		}
+	}
+	return b
 }
 
 func (k keyMap) terminalHelp() []key.Binding {

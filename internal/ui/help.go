@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// viewHelp renders every binding from helpSections in as few columns as fit
+// viewHelp renders every binding from helpSectionsFor in as few columns as fit
 // the available height (two at least), clipped so the layout never overflows.
 //
 // Columns are sized to their own content, and each column's key gutter to its

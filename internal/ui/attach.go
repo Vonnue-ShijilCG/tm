@@ -60,6 +60,8 @@ type serverLink struct {
 	selected string
 	arranged bool
 
+	unplaced int // live sessions whose project is not in this workspace
+
 	gone bool   // the server let this client go; nothing may be written now
 	exit string // what to print once the program has ended
 }
@@ -68,16 +70,12 @@ type serverLink struct {
 // window, stopped, or lost.
 type serverGoneMsg struct{ reason string }
 
-// remoteSpawner starts sessions on the server. The workspace calls
-// spawnFor instead when it is set; this is only the plain fallback.
-func remoteSpawner(c *server.Client) workspace.Spawner {
-	return func(dir string, cols, rows int) (workspace.Session, error) {
-		rs, err := c.Spawn(dir, cols, rows, nil)
-		if err != nil {
-			return nil, err // never a typed nil in the interface
-		}
-		return rs, nil
-	}
+// noPlainSpawn is the workspace's Spawner in server mode. Every spawn goes
+// through spawnFor, which records the terminal with its session; one that
+// reached here would start a session nothing could ever place back, so it
+// is refused instead.
+func noPlainSpawn(string, int, int) (workspace.Session, error) {
+	return nil, errors.New("tm server: a terminal must be started with its project and definition")
 }
 
 func (l *serverLink) spawnFor(p *workspace.Project, def workspace.SavedTerminal, cols, rows int) (workspace.Session, error) {
@@ -167,7 +165,8 @@ func (m *Model) attach(o Options) error {
 		}
 		p, def := m.orphanHome(s)
 		if p == nil {
-			continue // its project is not in this workspace any more
+			l.unplaced++ // its project is not in this workspace any more
+			continue
 		}
 		l.adopted[s.Ref] = true
 		l.hidden[m.ws.AttachRunning(p, def, o.Client.Adopt(s))] = true
@@ -328,12 +327,15 @@ func (m *Model) arrangeAttached() {
 	}
 	l.hidden = nil
 	m.persist()
+	if n := l.unplaced; n > 0 { // after persist, which clears the notice
+		m.notice = fmt.Sprintf("%d terminal%s still running for projects no longer here: Q or tm stop ends them", n, plural(n))
+	}
 }
 
 // sendBlob hands the server what the next attach needs. Called by persist.
 func (m *Model) sendBlob() {
-	if m.srv == nil {
-		return
+	if m.srv == nil || !m.srv.arranged {
+		return // before the first layout every terminal would read as hidden
 	}
 	b := uiBlob{State: m.ws.Snapshot()}
 	if p := m.selectedProject(); p != nil {
@@ -388,7 +390,12 @@ func (m Model) serverInit() tea.Cmd {
 }
 
 // serverGone ends the program with the reason, writing nothing.
+// After q or Q it is the answer to the user's own request (Q's Stop is
+// answered by an eviction), already on its way out, and says nothing.
 func (m Model) serverGone(msg serverGoneMsg) (tea.Model, tea.Cmd) {
+	if m.quitting {
+		return m, nil
+	}
 	m.srv.gone, m.srv.exit, m.quitting = true, "tm: "+msg.reason, true
 	return m, tea.Quit
 }
