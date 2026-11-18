@@ -17,7 +17,7 @@ import (
 )
 
 // TestMain lets the test binary stand in for `tm __server <root>`: with
-// TM_TEST_SERVER=1 it records its pid and serves the fake below on the
+// TM_TEST_SERVER=1 it records its pid and runs the real server on the
 // root's socket until killed. Ensure is then exercised against a real,
 // detached child process.
 func TestMain(m *testing.M) {
@@ -43,15 +43,17 @@ func testServer(root string) int {
 	// Linger before listening so concurrent Ensure callers really do have
 	// to wait for the socket rather than finding it at once.
 	time.Sleep(100 * time.Millisecond)
-	ln, err := net.Listen("unix", p.Socket)
+	ln, err := Listen(p)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}
 	// A safety net in case a test dies before its cleanup kills us.
 	time.AfterFunc(30*time.Second, func() { os.Exit(2) })
-	f2 := &fakeServer{live: 0}
-	f2.serve(ln)
+	if err := New(DefaultSpawner, p.Exited).Serve(ln); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
 	return 0
 }
 
