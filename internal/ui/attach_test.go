@@ -388,6 +388,89 @@ func TestAttachMarksOutputWhileAway(t *testing.T) {
 	}
 }
 
+// pump runs commands the way Bubble Tea would and feeds the terminal
+// watchers' messages back through Update, re-arming them as Update asks.
+type pump struct{ ch chan tea.Msg }
+
+func newPump() *pump { return &pump{ch: make(chan tea.Msg, 256)} }
+
+func (p *pump) run(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	go func() {
+		msg := cmd()
+		if b, ok := msg.(tea.BatchMsg); ok {
+			for _, sub := range b {
+				p.run(sub)
+			}
+			return
+		}
+		if msg != nil {
+			p.ch <- msg
+		}
+	}()
+}
+
+// settle delivers watcher messages to m for d.
+func (p *pump) settle(m Model, d time.Duration) Model {
+	timeout := time.After(d)
+	for {
+		select {
+		case msg := <-p.ch:
+			switch msg.(type) {
+			case terminalOutputMsg, terminalExitedMsg:
+				next, cmd := m.Update(msg)
+				m = next.(Model)
+				p.run(cmd)
+			}
+		case <-timeout:
+			return m
+		}
+	}
+}
+
+// The frames a reattach, a resize or a focus change make the server send
+// are redraws, not output: a terminal that printed nothing must not turn
+// amber because the window came back or changed size. One that did print
+// while out of sight still must.
+func TestRedrawFramesDoNotMarkOutput(t *testing.T) {
+	ts := startTestServer(t)
+	root := t.TempDir()
+	m := newAttachedModel(t, ts, root)
+	m = press(m, "enter", "alt+s", "j", "enter", "alt+s", "j", "enter") // backend, ecommerce, mobile shown
+	quitWith(t, m, "q")
+	time.Sleep(50 * time.Millisecond) // let the server see the detach
+	ts.spawned()[0].emit()            // backend prints while nobody is attached
+
+	m2 := newAttachedModel(t, ts, root)
+	backend, ecommerce, mobile := m2.ws.Projects[0], m2.ws.Projects[1], m2.ws.Projects[2]
+	if m2.selectedProject() != mobile {
+		t.Fatalf("reattached showing %v, want mobile", m2.selectedProject().Name)
+	}
+	p := newPump()
+	p.run(m2.Init())
+	m2 = p.settle(m2, 150*time.Millisecond)
+	if !m2.unseen[backend.Terminals[0]] {
+		t.Error("backend printed while away and must be marked")
+	}
+	if m2.unseen[ecommerce.Terminals[0]] {
+		t.Fatal("ecommerce printed nothing but was marked after reattach")
+	}
+
+	m2 = resize(m2, 120, 40)
+	m2 = p.settle(m2, 150*time.Millisecond)
+	if m2.unseen[ecommerce.Terminals[0]] {
+		t.Fatal("ecommerce printed nothing but was marked after a resize")
+	}
+
+	ts.spawned()[1].emit() // now it does print, out of sight
+	m2 = p.settle(m2, 150*time.Millisecond)
+	if !m2.unseen[ecommerce.Terminals[0]] || !m2.stirring(ecommerce) {
+		t.Error("ecommerce printed out of sight and must be marked")
+	}
+}
+
 func TestAttachResizesBeforeFirstFrame(t *testing.T) {
 	ts := startTestServer(t)
 	root := t.TempDir()

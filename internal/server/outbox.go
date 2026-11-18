@@ -51,6 +51,8 @@ func (c *client) pushFrame(f *Frame) {
 		return
 	}
 	if queued := c.frames[f.Ref]; queued != nil {
+		// The output the replaced frame carried still happened.
+		f.Printed = f.Printed || queued.Frame.Printed
 		queued.Frame = f
 		return
 	}

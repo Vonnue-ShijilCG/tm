@@ -124,7 +124,10 @@ type Kill struct {
 	Ref string
 }
 
-// Frame is a session's rendered screen, pushed by the server.
+// Frame is a session's rendered screen, pushed by the server. Printed says
+// the session wrote output since its last frame; a frame without it is a
+// redraw (attach, resize, focus), which must not read as the program having
+// said something.
 type Frame struct {
 	Ref        string
 	Version    uint64
@@ -133,6 +136,7 @@ type Frame struct {
 	Alt        bool
 	Mouse      bool
 	Scrollback int
+	Printed    bool
 }
 
 // Exit reports that a session's process ended.

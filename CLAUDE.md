@@ -210,6 +210,15 @@ Terminal Manager's row, which reads `hidden · new output`. The sidebar keeps
 the colour rather than adding a glyph because the marker is one cell wide and
 a project's row must not change width as its terminals come and go.
 
+In server mode not every frame is output: the server also pushes one after
+an attach, a resize or a focus change, and each wakes the watcher. `Frame`
+carries `Printed`, set when the server's watcher collected an output signal
+(and kept when a queued frame is replaced), and the UI asks
+`RemoteSession.TakePrinted` on every `terminalOutputMsg` before marking — so a
+reattach or a resize does not turn every quiet terminal amber. Output while
+nobody was attached comes the other way, as `SessionInfo.Changed` in the
+`Welcome`.
+
 ### Uncommitted changes view
 
 `d` (sidebar) and `alt+d` (terminal focus) open `ui/diffview.go`, a

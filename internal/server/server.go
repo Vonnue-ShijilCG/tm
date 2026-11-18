@@ -631,15 +631,18 @@ func (ss *session) poke() {
 
 // watch pushes ss's frames until it exits. After the first signal it waits
 // out frameWindow, collecting whatever else arrives, then sends one frame:
-// at most one per window. An exit never waits.
+// at most one per window. An exit never waits. A frame is Printed when an
+// output signal was among those it collected.
 func (s *Server) watch(ss *session) {
 	out, done := ss.s.Output(), ss.s.Done()
 	for {
+		printed := false
 		select {
 		case <-out:
+			printed = true
 		case <-ss.redraw:
 		case <-done:
-			s.ended(ss)
+			s.ended(ss, false)
 			return
 		}
 		t := time.NewTimer(frameWindow)
@@ -647,23 +650,24 @@ func (s *Server) watch(ss *session) {
 		for {
 			select {
 			case <-out:
+				printed = true
 			case <-ss.redraw:
 			case <-t.C:
 				break collect
 			case <-done:
 				t.Stop()
-				s.ended(ss)
+				s.ended(ss, printed)
 				return
 			}
 		}
-		s.pushFrame(ss)
+		s.pushFrame(ss, printed)
 	}
 }
 
 // ended records that ss exited and tells the client, if there is one.
 // Otherwise it stays listed until a Welcome carries it.
-func (s *Server) ended(ss *session) {
-	s.pushFrame(ss) // whatever it printed last
+func (s *Server) ended(ss *session, printed bool) {
+	s.pushFrame(ss, printed) // whatever it printed last
 	var msg string
 	if err := ss.s.Err(); err != nil {
 		msg = err.Error()
@@ -682,7 +686,7 @@ func (s *Server) ended(ss *session) {
 }
 
 // pushFrame renders ss and queues it for the client, if there is one.
-func (s *Server) pushFrame(ss *session) {
+func (s *Server) pushFrame(ss *session, printed bool) {
 	ss.render.Lock()
 	defer ss.render.Unlock()
 	s.mu.Lock()
@@ -698,6 +702,7 @@ func (s *Server) pushFrame(ss *session) {
 		Alt:        ss.s.IsAltScreen(),
 		Mouse:      ss.s.MouseTracking(),
 		Scrollback: ss.s.ScrollbackLen(),
+		Printed:    printed,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()

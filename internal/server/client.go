@@ -179,6 +179,7 @@ func (c *Client) onFrame(f *Frame) {
 	newer := f.Version > rs.frame.Version
 	if newer {
 		rs.frame = *f
+		rs.printed = rs.printed || f.Printed
 	}
 	rs.mu.Unlock()
 	if newer {
@@ -400,6 +401,7 @@ type RemoteSession struct {
 	err         error
 	cursorKnown bool // whether cursor is what the server has
 	cursor      bool
+	printed     bool // a frame since the last TakePrinted came from output
 	cache       queryCache
 }
 
@@ -568,6 +570,22 @@ func (r *RemoteSession) query(offset int, lines bool) *Answer {
 		return nil
 	}
 }
+
+// TakePrinted reports whether any frame since the last call was sent
+// because the program printed, rather than to redraw after an attach, a
+// resize or a focus change, and clears it. Output fires for both; only the
+// first is news.
+func (r *RemoteSession) TakePrinted() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p := r.printed
+	r.printed = false
+	return p
+}
+
+// Coalesced reports that Output is already throttled to one signal per
+// frame by the server, so the UI need not wait out a window of its own.
+func (r *RemoteSession) Coalesced() bool { return true }
 
 func (r *RemoteSession) Output() <-chan struct{} { return r.output }
 func (r *RemoteSession) Done() <-chan struct{}   { return r.done }

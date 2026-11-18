@@ -856,3 +856,43 @@ func TestListenReplacesOnlyAStaleSocket(t *testing.T) {
 	}
 	c.Close()
 }
+
+// A frame says whether the session printed. Attach, Resize and Focus push
+// frames too, and a window that took every frame for output would mark a
+// quiet terminal as having printed while it was out of sight.
+func TestFramesSayWhetherTheSessionPrinted(t *testing.T) {
+	fs := &fakes{}
+	r := startServer(t, fs.spawn)
+	c, _ := attach(t, r)
+	ref := spawnOne(t, c, 1, "/a")
+	f := fs.get(t, 0)
+
+	f.emit()
+	if m := expect(t, c, "output Frame", func(m Msg) bool { return m.Frame != nil }); !m.Frame.Printed {
+		t.Fatalf("a frame sent for output is not Printed: %+v", m.Frame)
+	}
+	send(t, c, Msg{Resize: &Resize{Ref: ref, Cols: 100, Rows: 30}})
+	if m := expect(t, c, "resized Frame", func(m Msg) bool { return m.Frame != nil }); m.Frame.Printed {
+		t.Fatalf("a frame sent for a resize is Printed: %+v", m.Frame)
+	}
+	send(t, c, Msg{Focus: &Focus{Ref: ref, Cursor: true}})
+	if m := expect(t, c, "focused Frame", func(m Msg) bool { return m.Frame != nil }); m.Frame.Printed {
+		t.Fatalf("a frame sent for focus is Printed: %+v", m.Frame)
+	}
+
+	c2, _ := attach(t, r)
+	if m := expect(t, c2, "attach Frame", func(m Msg) bool { return m.Frame != nil }); m.Frame.Printed {
+		t.Fatalf("a frame sent because a client attached is Printed: %+v", m.Frame)
+	}
+}
+
+// A redraw frame that replaces a queued output frame keeps its Printed:
+// the output it replaced still happened.
+func TestQueuedFrameKeepsPrinted(t *testing.T) {
+	c := newClient(nil)
+	c.pushFrame(&Frame{Ref: "r", Version: 1, Printed: true})
+	c.pushFrame(&Frame{Ref: "r", Version: 2})
+	if len(c.q) != 1 || c.q[0].Frame.Version != 2 || !c.q[0].Frame.Printed {
+		t.Fatalf("queue = %+v, want one frame, version 2, Printed", c.q[0].Frame)
+	}
+}

@@ -220,7 +220,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case terminalOutputMsg:
 		// Re-arm only if this terminal is still registered with that session.
 		if p, t := m.ws.Find(msg.id); t != nil && t.Session == msg.s {
-			if !m.onScreen(p, t) {
+			if printed(t.Session) && !m.onScreen(p, t) {
 				m.unseen[t] = true
 			}
 			return m, watchTerminal(t)
@@ -1130,6 +1130,19 @@ func watchTerminal(t *workspace.Terminal) tea.Cmd {
 			}
 		}
 	}
+}
+
+// printed reports whether the output a terminalOutputMsg stands for was the
+// program printing. A local session signals Output only for that. A server's
+// session also signals it for frames sent to redraw after an attach, a
+// resize or a focus change, and says which through TakePrinted; it is asked
+// on every message, on screen or not, so a flag left from output seen on
+// screen cannot mark a later redraw.
+func printed(s workspace.Session) bool {
+	if p, ok := s.(interface{ TakePrinted() bool }); ok {
+		return p.TakePrinted()
+	}
+	return true
 }
 
 func (m Model) selectedProject() *workspace.Project {

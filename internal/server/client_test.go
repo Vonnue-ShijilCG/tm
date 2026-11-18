@@ -421,3 +421,30 @@ func TestClientIgnoresStrayMessagesAndReportsExitErr(t *testing.T) {
 	default:
 	}
 }
+
+// TakePrinted reports, once, whether any frame since the last call came
+// from output rather than a redraw.
+func TestRemoteSessionTakePrinted(t *testing.T) {
+	fs := &fakes{}
+	r := startServer(t, fs.spawn)
+	c, _ := attachClient(t, r)
+	rs := spawnRemote(t, c, "/a")
+	f := fs.get(t, 0)
+
+	f.emit()
+	waitOutput(t, rs)
+	if !rs.TakePrinted() {
+		t.Fatal("output did not read as printed")
+	}
+	if rs.TakePrinted() {
+		t.Fatal("TakePrinted did not clear")
+	}
+	rs.Resize(100, 30)
+	waitOutput(t, rs)
+	if rs.TakePrinted() {
+		t.Fatal("a resize read as printed")
+	}
+	if !rs.Coalesced() {
+		t.Fatal("a RemoteSession's frames are coalesced by the server")
+	}
+}
