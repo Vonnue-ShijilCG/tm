@@ -10,6 +10,8 @@ import (
 	"time"
 
 	uv "github.com/charmbracelet/ultraviolet"
+
+	"github.com/Vonnue-ShijilCG/tm/internal/terminal"
 )
 
 // ErrProtocol is Attach's error when the server speaks another protocol
@@ -287,8 +289,8 @@ func (c *Client) req() uint64 {
 	return c.nextReq
 }
 
-// Spawn asks the server for a shell in dir, started with this process's
-// environment, and waits up to 5 s for it.
+// Spawn asks the server for a shell in dir, this process's own shell
+// started with its environment, and waits up to 5 s for it.
 func (c *Client) Spawn(dir string, cols, rows int, meta []byte) (*RemoteSession, error) {
 	ch := make(chan spawnReply, 1)
 	c.mu.Lock()
@@ -299,7 +301,7 @@ func (c *Client) Spawn(dir string, cols, rows int, meta []byte) (*RemoteSession,
 	req := c.req()
 	c.spawns[req] = ch
 	c.mu.Unlock()
-	c.send(Msg{Spawn: &Spawn{Req: req, Dir: dir, Env: os.Environ(), Cols: cols, Rows: rows, Meta: meta}})
+	c.send(Msg{Spawn: &Spawn{Req: req, Dir: dir, Env: os.Environ(), Cols: cols, Rows: rows, Meta: meta, Shell: terminal.DefaultShell()}})
 
 	timer := time.NewTimer(spawnTimeout)
 	defer timer.Stop()

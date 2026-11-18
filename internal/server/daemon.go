@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -109,9 +110,9 @@ func Probe(p Paths) (live int, running bool) {
 // a reason to start another: a second server would take over the socket and
 // orphan the first one's sessions.
 //
-// The child is a session leader (setsid) with stdin on /dev/null and
+// The child is a session leader (setsid) in / with stdin on /dev/null and
 // stdout and stderr appended to p.Log, so it outlives the terminal that
-// started it. Ensure does not wait for it to exit.
+// started it and pins no directory. Ensure does not wait for it to exit.
 func Ensure(p Paths, exe, root string) error {
 	lock, err := os.OpenFile(p.Lock, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
@@ -169,7 +170,19 @@ func start(p Paths, exe, root string) (<-chan error, error) {
 	}
 	defer null.Close()
 
+	// Both paths are resolved before the child moves to /, where a relative
+	// one would name something else.
+	if abs, err := filepath.Abs(exe); err == nil && strings.ContainsRune(exe, '/') {
+		exe = abs
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
 	cmd := exec.Command(exe, "__server", root)
+	// In /, so the server does not pin the directory tm was started from:
+	// it may run for days, and that directory may be one to unmount or
+	// delete.
+	cmd.Dir = "/"
 	cmd.Stdin = null
 	cmd.Stdout = log
 	cmd.Stderr = log

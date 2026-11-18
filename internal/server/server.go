@@ -43,12 +43,8 @@ var _ Session = (*terminal.Session)(nil)
 // Spawner starts a session.
 type Spawner func(terminal.Config) (Session, error)
 
-// DefaultSpawner runs c in a PTY, with the user's shell when c names no
-// command.
+// DefaultSpawner runs c in a PTY. spawnFor always names the command.
 func DefaultSpawner(c terminal.Config) (Session, error) {
-	if c.Command == "" {
-		c.Command = terminal.DefaultShell()
-	}
 	s, err := terminal.Start(c)
 	if err != nil {
 		return nil, err
@@ -543,7 +539,7 @@ func (s *Server) dispatch(c *client, m Msg) {
 
 func (s *Server) spawnFor(c *client, sp *Spawn) {
 	sess, err := s.spawn(terminal.Config{
-		Command: terminal.DefaultShell(),
+		Command: shellFor(sp.Shell),
 		Dir:     sp.Dir,
 		Env:     sp.Env,
 		Cols:    min(sp.Cols, maxSize),
@@ -570,6 +566,18 @@ func (s *Server) spawnFor(c *client, sp *Spawn) {
 	s.mu.Unlock()
 	go s.watch(ss)
 	go ss.worker()
+}
+
+// shellFor is the client's shell when the server can run it, else the
+// server's own: the server's $SHELL is whatever the tm that started it had,
+// possibly days ago, while the client's is the user's choice now.
+func shellFor(client string) string {
+	if client != "" {
+		if info, err := os.Stat(client); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o111 != 0 {
+			return client
+		}
+	}
+	return terminal.DefaultShell()
 }
 
 // newRef returns a random 64-bit ref no session holds. Called with mu held.

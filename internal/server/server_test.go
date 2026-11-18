@@ -796,9 +796,8 @@ func TestServerAnswersQueriesWithNoClient(t *testing.T) {
 	})
 }
 
-func TestDefaultSpawnerUsesTheShell(t *testing.T) {
-	t.Setenv("SHELL", "/bin/sh")
-	s, err := DefaultSpawner(terminal.Config{Dir: t.TempDir(), Cols: 20, Rows: 5})
+func TestDefaultSpawnerRunsTheCommand(t *testing.T) {
+	s, err := DefaultSpawner(terminal.Config{Command: "/bin/sh", Dir: t.TempDir(), Cols: 20, Rows: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -894,5 +893,31 @@ func TestQueuedFrameKeepsPrinted(t *testing.T) {
 	c.pushFrame(&Frame{Ref: "r", Version: 2})
 	if len(c.q) != 1 || c.q[0].Frame.Version != 2 || !c.q[0].Frame.Printed {
 		t.Fatalf("queue = %+v, want one frame, version 2, Printed", c.q[0].Frame)
+	}
+}
+
+// A spawn runs the client's shell, not the server's: the server was started
+// by some earlier tm, whose $SHELL may not be this user's choice today. A
+// shell the server cannot run falls back to its own.
+func TestSpawnRunsTheClientsShell(t *testing.T) {
+	notExec := filepath.Join(t.TempDir(), "notexec")
+	if err := os.WriteFile(notExec, []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	fs := &fakes{}
+	r := startServer(t, fs.spawn)
+	c, _ := attach(t, r)
+	for i, tc := range []struct{ shell, want string }{
+		{"/bin/sh", "/bin/sh"},
+		{"", terminal.DefaultShell()},
+		{"/no/such/shell", terminal.DefaultShell()},
+		{notExec, terminal.DefaultShell()},
+	} {
+		req := uint64(i + 1)
+		send(t, c, Msg{Spawn: &Spawn{Req: req, Dir: "/a", Cols: 80, Rows: 24, Shell: tc.shell}})
+		expect(t, c, "Spawned", func(m Msg) bool { return m.Spawned != nil && m.Spawned.Req == req })
+		if got := fs.get(t, i).cfg.Command; got != tc.want {
+			t.Errorf("Shell %q ran %q, want %q", tc.shell, got, tc.want)
+		}
 	}
 }

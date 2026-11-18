@@ -325,6 +325,11 @@ func TestEnsureServerStartsOnlyOne(t *testing.T) {
 	if sid != pid {
 		t.Fatalf("server session id = %d, want its own pid %d", sid, pid)
 	}
+	// It runs in /, so it does not pin the directory tm was started from
+	// (an unmountable USB stick, a directory someone wants to delete).
+	if cwd, err := os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid)); err != nil || cwd != "/" {
+		t.Fatalf("server cwd = %q (%v), want /", cwd, err)
+	}
 }
 
 func getsid(pid int) (int, error) {

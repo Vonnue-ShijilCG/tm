@@ -78,12 +78,15 @@ type SessionInfo struct {
 }
 
 // Spawn asks the server to start a shell. Req pairs it with its Spawned.
+// Shell is the client's own shell; the server runs it when it can, and its
+// own otherwise.
 type Spawn struct {
 	Req        uint64
 	Dir        string
 	Env        []string
 	Cols, Rows int
 	Meta       []byte
+	Shell      string
 }
 
 // Spawned answers Spawn with the new session's Ref, or Err.

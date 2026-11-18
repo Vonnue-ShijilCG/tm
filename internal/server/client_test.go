@@ -448,3 +448,37 @@ func TestRemoteSessionTakePrinted(t *testing.T) {
 		t.Fatal("a RemoteSession's frames are coalesced by the server")
 	}
 }
+
+// Spawn sends the client's own shell for the server to run.
+func TestSpawnSendsTheClientsShell(t *testing.T) {
+	t.Setenv("SHELL", "/bin/sh")
+	got := make(chan *Spawn, 1)
+	p := rawServer(t, func(c *Conn) {
+		c.Recv()
+		c.Send(Msg{Welcome: &Welcome{Protocol: ProtocolVersion}})
+		for {
+			m, err := c.Recv()
+			if err != nil {
+				return
+			}
+			if m.Spawn != nil {
+				got <- m.Spawn
+				c.Send(Msg{Spawned: &Spawned{Req: m.Spawn.Req, Err: "no"}})
+			}
+		}
+	})
+	c, _, err := Attach(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	c.Spawn("/a", 80, 24, nil)
+	select {
+	case sp := <-got:
+		if sp.Shell != "/bin/sh" {
+			t.Fatalf("Spawn.Shell = %q, want the client's /bin/sh", sp.Shell)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no Spawn arrived")
+	}
+}
