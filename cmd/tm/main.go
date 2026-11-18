@@ -66,44 +66,37 @@ func run(args []string, stdout io.Writer) error {
 	return runHere(root, projects)
 }
 
-// runHere is tm with its terminals in this process. It refuses to start
-// while a server holds this workspace's terminals: it would start a second
-// copy of every one of them beside the first.
+// runHere is tm with its terminals in this process.
 func runHere(root string, projects []project.Project) error {
-	var forget []string
-	// Without a state directory there can be no server to find, and tm runs
-	// exactly as it did before servers existed.
-	if paths, err := server.PathsFor(root); err == nil {
-		if live, running := server.Probe(paths); running {
-			return fmt.Errorf("a tm server is running here with %s: set server = true in %s to reattach, or run tm stop",
-				terminals(live), config.Display(config.Path()))
-		}
-		forget = server.TakeExited(paths)
+	forget, err := offModeGuard(root)
+	if err != nil {
+		return err
 	}
-	_, err := runUI(ui.NewWith(root, projects, ui.Options{Forget: forget}))
+	_, err = runUI(ui.NewWith(root, projects, ui.Options{Forget: forget}))
 	return err
 }
 
-// runAttached is tm with its terminals in the workspace's server, which it
-// starts when none is running.
-func runAttached(root string, projects []project.Project) error {
+// offModeGuard refuses to start while a server holds this workspace's
+// terminals: tm would start a second copy of every one of them beside the
+// first. Otherwise it returns the refs of terminals that ended in a server
+// since tm last ran.
+func offModeGuard(root string) ([]string, error) {
+	// Without a state directory there can be no server to find, and tm runs
+	// exactly as it did before servers existed.
 	paths, err := server.PathsFor(root)
 	if err != nil {
-		return err
+		return nil, nil
 	}
-	forget := server.TakeExited(paths)
-	exe, err := os.Executable()
-	if err != nil {
-		return err
+	if live, running := server.Probe(paths); running {
+		return nil, fmt.Errorf("a tm server is running here with %s: set server = true in %s to reattach, or run tm stop",
+			terminals(live), config.Display(config.Path()))
 	}
-	if err := server.Ensure(paths, exe, root); err != nil {
-		return err
-	}
-	client, welcome, err := server.Attach(paths)
-	if errors.Is(err, server.ErrProtocol) {
-		live, _ := server.Probe(paths)
-		return fmt.Errorf("a tm server from another tm version is running here with %s; run tm stop to end them, then start tm again", terminals(live))
-	}
+	return server.TakeExited(paths), nil
+}
+
+// runAttached is tm with its terminals in the workspace's server.
+func runAttached(root string, projects []project.Project) error {
+	client, welcome, forget, err := connect(root)
 	if err != nil {
 		return err
 	}
@@ -117,6 +110,33 @@ func runAttached(root string, projects []project.Project) error {
 		}
 	}
 	return err
+}
+
+// connect attaches to the workspace's server, starting one when none is
+// running, and returns the refs of terminals that ended while no window
+// was attached.
+func connect(root string) (*server.Client, server.Welcome, []string, error) {
+	paths, err := server.PathsFor(root)
+	if err != nil {
+		return nil, server.Welcome{}, nil, err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, server.Welcome{}, nil, err
+	}
+	if err := server.Ensure(paths, exe, root); err != nil {
+		return nil, server.Welcome{}, nil, err
+	}
+	client, welcome, err := server.Attach(paths)
+	if errors.Is(err, server.ErrProtocol) {
+		live, _ := server.Probe(paths)
+		return nil, server.Welcome{}, nil, fmt.Errorf("a tm server from another tm version is running here with %s; run tm stop to end them, then start tm again", terminals(live))
+	}
+	if err != nil {
+		return nil, server.Welcome{}, nil, err
+	}
+	// Taken only once attached: a start that fails leaves them for the next.
+	return client, welcome, server.TakeExited(paths), nil
 }
 
 // runUI runs the Bubble Tea program and returns its final model.

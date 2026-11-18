@@ -203,7 +203,9 @@ func TestOffModeRefusesWhenServerRuns(t *testing.T) {
 	root := workspace(t)
 	serveWith(t, root, 1)
 
-	err := run(nil, io.Discard)
+	// The guard itself, not run: a guard that regressed would have run
+	// start a real Bubble Tea program and hang instead of failing.
+	_, err := offModeGuard(root)
 
 	want := "a tm server is running here with 1 terminal: set server = true in " +
 		config.Display(config.Path()) + " to reattach, or run tm stop"
@@ -232,6 +234,8 @@ func TestServerIgnoresHangupAndStopsOnTerm(t *testing.T) {
 	go func() { served <- run([]string{"__server", root}, io.Discard) }()
 	waitFor(t, func() bool { _, running := server.Probe(paths); return running })
 
+	// serve's signal.Ignore(SIGHUP) stays in force for the rest of this test
+	// binary; nothing else here relies on SIGHUP.
 	if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
 		t.Fatal(err)
 	}
@@ -264,5 +268,72 @@ func waitFor(t *testing.T, cond func() bool) {
 			t.Fatal("timed out")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// serveOtherVersion answers like a server of another protocol version: a
+// probe or tm stop gets its count, an attach gets only its protocol number.
+func serveOtherVersion(t *testing.T, root string, live int) server.Paths {
+	t.Helper()
+	paths, err := server.PathsFor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := server.Listen(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	const other = 99
+	if other == server.ProtocolVersion {
+		t.Fatal("pick another protocol number for the other version")
+	}
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			conn := server.NewConn(c)
+			if m, err := conn.Recv(); err == nil && m.Hello != nil {
+				if m.Hello.Attach {
+					conn.Send(server.Msg{Welcome: &server.Welcome{Protocol: other}})
+				} else {
+					conn.Send(server.Msg{Status: &server.Status{Live: live}})
+				}
+			}
+			conn.Close()
+		}
+	}()
+	return paths
+}
+
+func TestAServerOfAnotherVersionIsNamedWithItsCount(t *testing.T) {
+	root := workspace(t)
+	serveOtherVersion(t, root, 2)
+
+	_, _, _, err := connect(root)
+
+	want := "a tm server from another tm version is running here with 2 terminals; run tm stop to end them, then start tm again"
+	if err == nil || err.Error() != want {
+		t.Errorf("got %v\nwant %s", err, want)
+	}
+}
+
+// Terminals that ended while no window was attached are reported by the
+// attach that succeeds; a start that fails must leave them for the next.
+func TestAFailedAttachLeavesTheExitedTerminalsForTheNextStart(t *testing.T) {
+	root := workspace(t)
+	paths := serveOtherVersion(t, root, 0)
+	if err := os.WriteFile(paths.Exited, []byte("0123456789abcdef\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, _, err := connect(root); err == nil {
+		t.Fatal("attaching to another version should fail")
+	}
+
+	if got := server.TakeExited(paths); len(got) != 1 || got[0] != "0123456789abcdef" {
+		t.Errorf("exited refs after a failed attach = %q, want the one written", got)
 	}
 }
