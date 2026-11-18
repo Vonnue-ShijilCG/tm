@@ -129,12 +129,24 @@ func Load(root string) (File, error) {
 	if err != nil {
 		return File{Version: Version}, err
 	}
+	f, err := Decode(data)
+	if err != nil {
+		return f, fmt.Errorf("%s: %w", FileName, err)
+	}
+	return f, nil
+}
+
+// Decode is Load for a state file already in hand, such as the copy a tm
+// server keeps for its client: empty bytes are an empty File, and what
+// decodes is sanitised exactly as Load sanitises it. Malformed JSON is an
+// error together with an empty File.
+func Decode(data []byte) (File, error) {
 	if len(strings.TrimSpace(string(data))) == 0 {
 		return File{Version: Version}, nil
 	}
 	var f File
 	if err := json.Unmarshal(data, &f); err != nil {
-		return File{Version: Version}, fmt.Errorf("%s: %w", FileName, err)
+		return File{Version: Version}, err
 	}
 	if f.Version == 0 {
 		f.Version = Version

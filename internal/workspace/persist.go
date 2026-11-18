@@ -429,11 +429,20 @@ func (ws *Workspace) open(p *Project, defs []SavedTerminal, one bool, cols, rows
 		if name == "" {
 			name = "shell"
 		}
-		if err := ws.CanCreateTerminal(p); err != nil {
+		// A definition with a session to adopt is not held back by the
+		// limit (see startTerminal); everything else is, before any git work.
+		if s.Ref == "" || ws.Adopt == nil {
+			if err := ws.CanCreateTerminal(p); err != nil {
+				res.NotOpened++
+				continue
+			}
+		}
+		t, err := ws.OpenSaved(p, s, cols, rows)
+		var limit *LimitError
+		if errors.As(err, &limit) { // its session was not adopted after all
 			res.NotOpened++
 			continue
 		}
-		t, err := ws.OpenSaved(p, s, cols, rows)
 		if err != nil {
 			res.Skipped = append(res.Skipped, name+" ("+err.Error()+")")
 			continue

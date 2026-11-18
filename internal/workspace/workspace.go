@@ -162,6 +162,11 @@ type Workspace struct {
 	// already running there). Nil means spawn as usual.
 	Adopt func(ref string) Session
 
+	// SpawnFor, when set, starts every new session instead of the Spawner,
+	// and is told which project and definition the session is for, which a
+	// tm server records beside the session. Nil means use the Spawner.
+	SpawnFor func(p *Project, def SavedTerminal, cols, rows int) (Session, error)
+
 	spawn       Spawner
 	nextID      int
 	limitNotice string
@@ -238,33 +243,67 @@ func (ws *Workspace) CurrentLimit() Limit { return ws.limit() }
 // the limit as the final guard for every path, including reopening saved
 // definitions. ref is the server session the definition last ran in; when
 // Adopt hands that session back it is used as it is, without a spawn and
-// without typing the command into it again.
+// without typing the command into it again - and without the limit, which
+// is about starting processes: one already running is not a new terminal,
+// and refusing it would leave it with no pane to reach it through.
 func (ws *Workspace) startTerminal(p *Project, name, command, ref string, wt *git.Worktree, cols, rows int) (*Terminal, error) {
-	if err := ws.CanCreateTerminal(p); err != nil {
-		return nil, err
-	}
 	t := &Terminal{Name: name, Command: command, Worktree: wt}
 	var s Session
 	if ref != "" && ws.Adopt != nil {
 		s = ws.Adopt(ref)
 	}
-	adopted := s != nil
-	if !adopted {
-		var err error
-		if s, err = ws.spawn(t.Dir(p), cols, rows); err != nil {
-			return nil, err
+	if s != nil {
+		ws.register(p, t, s)
+		return t, nil
+	}
+	if err := ws.CanCreateTerminal(p); err != nil {
+		return nil, err
+	}
+	var err error
+	if ws.SpawnFor != nil {
+		s, err = ws.SpawnFor(p, t.saved(), cols, rows)
+	} else {
+		s, err = ws.spawn(t.Dir(p), cols, rows)
+	}
+	if err != nil {
+		return nil, err
+	}
+	ws.register(p, t, s)
+	if command != "" { // typed into the shell, so the pane is a usable prompt when it ends
+		s.SendText(command + "\n")
+	}
+	return t, nil
+}
+
+// AttachRunning registers s, a session that is already running, as a
+// terminal of p described by def, and returns it. Nothing is checked: not
+// the limit, and not whether def's worktree still exists, because the
+// process is there either way and must stay reachable. A saved definition
+// equal to def, Ref included, is no longer saved.
+func (ws *Workspace) AttachRunning(p *Project, def SavedTerminal, s Session) *Terminal {
+	t := &Terminal{Name: def.Name, Command: def.Command}
+	if def.Worktree != "" {
+		t.Worktree = &git.Worktree{Path: def.Worktree, Branch: def.Branch}
+	}
+	for i, cur := range p.Saved {
+		if cur == def {
+			p.Saved = append(p.Saved[:i], p.Saved[i+1:]...)
+			break
 		}
 	}
+	ws.register(p, t, s)
+	return t
+}
+
+// register gives t its identifiers and session and makes it p's active
+// terminal.
+func (ws *Workspace) register(p *Project, t *Terminal, s Session) {
 	ws.nextID++
 	p.nextNum++
 	t.ID, t.Num, t.Session = ws.nextID, p.nextNum, s
 	p.Terminals = append(p.Terminals, t)
 	p.active = len(p.Terminals) - 1
 	p.Notice = ""
-	if command != "" && !adopted { // typed into the shell, so the pane is a usable prompt when it ends
-		s.SendText(command + "\n")
-	}
-	return t, nil
 }
 
 // Find returns the project and terminal with the given ID, or nils.

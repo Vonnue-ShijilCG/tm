@@ -811,18 +811,6 @@ func TestAdoptSkipsSpawnAndCommand(t *testing.T) {
 	}
 }
 
-func TestOpenLiveRespectsTheLimit(t *testing.T) {
-	ws := refWorkspace(t, nil)
-	ws.Limits = func() Limit { return Limit{Max: 1} }
-	ws.RestoreFrom(twoRefs())
-	p := ws.Projects[0]
-	ws.Adopt = func(ref string) Session { return &refSession{ref: ref} }
-	res := ws.OpenLive(p, map[string]bool{"a": true, "b": true}, 80, 24)
-	if len(res.Opened) != 1 || res.NotOpened != 1 || res.Limit.Max != 1 {
-		t.Errorf("result = %+v, want one opened and one not opened", res)
-	}
-}
-
 func TestAdoptMissFallsBackToSpawnAndCommand(t *testing.T) {
 	var spawned []*fakeSession
 	ws := refWorkspace(t, func(dir string, cols, rows int) (Session, error) {
@@ -876,5 +864,106 @@ func TestOpenLiveLeavesTheOtherSameKeyDefinitionsRef(t *testing.T) {
 	}
 	if want := []SavedTerminal{{Command: "claude", Ref: "a"}}; !reflect.DeepEqual(p.Saved, want) {
 		t.Errorf("saved = %+v, want a still saved with its own ref", p.Saved)
+	}
+}
+
+// R9: a session that is already running is not a new terminal. Adopting it
+// must not be refused by max_terminals, or a lowered limit would leave a
+// running process with no pane to reach it through.
+func TestAdoptIgnoresTheLimit(t *testing.T) {
+	spawns := 0
+	ws := refWorkspace(t, func(dir string, cols, rows int) (Session, error) {
+		spawns++
+		return &fakeSession{}, nil
+	})
+	max := 1
+	ws.Limits = fixedLimit(&max)
+	ws.RestoreFrom(twoRefs())
+	p := ws.Projects[0]
+	ws.Adopt = func(ref string) Session { return &refSession{ref: ref} }
+
+	res := ws.OpenLive(p, map[string]bool{"a": true, "b": true}, 80, 24)
+	if len(res.Opened) != 2 || res.NotOpened != 0 || len(p.Terminals) != 2 || len(p.Saved) != 0 {
+		t.Fatalf("opened %d, not opened %d, running %d, saved %d; want both adopted", len(res.Opened), res.NotOpened, len(p.Terminals), len(p.Saved))
+	}
+	if spawns != 0 {
+		t.Errorf("spawned %d", spawns)
+	}
+
+	// The limit still governs anything that would actually start a process.
+	if _, err := ws.NewTerminal(p, 80, 24); err == nil {
+		t.Error("a new terminal past the limit should still be refused")
+	}
+}
+
+// A definition whose ref Adopt does not hand back is a new process, and the
+// limit counts it as one: it is "not opened", as OpenAll reports it.
+func TestOpenAllCountsUnadoptedRefsAgainstTheLimit(t *testing.T) {
+	ws := refWorkspace(t, func(dir string, cols, rows int) (Session, error) { return &fakeSession{}, nil })
+	max := 1
+	ws.Limits = fixedLimit(&max)
+	ws.RestoreFrom(twoRefs())
+	p := ws.Projects[0]
+	ws.Adopt = func(string) Session { return nil }
+	res, _ := ws.OpenAll(p, 80, 24)
+	if len(res.Opened) != 1 || res.NotOpened != 1 || len(res.Skipped) != 0 {
+		t.Errorf("opened %d, not opened %d, skipped %q; want 1, 1, none", len(res.Opened), res.NotOpened, res.Skipped)
+	}
+}
+
+func TestSpawnForIsToldWhatItStarts(t *testing.T) {
+	ws := refWorkspace(t, func(string, int, int) (Session, error) {
+		t.Fatal("the Spawner must not be used when SpawnFor is set")
+		return nil, nil
+	})
+	var gotProject string
+	var gotDef SavedTerminal
+	ws.SpawnFor = func(p *Project, def SavedTerminal, cols, rows int) (Session, error) {
+		gotProject, gotDef = p.Name, def
+		return &fakeSession{cols: cols, rows: rows}, nil
+	}
+	tm, err := ws.CreateTerminal(ws.Projects[0], Options{Command: "npm run dev"}, 80, 24)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotProject != "api" || gotDef != (SavedTerminal{Command: "npm run dev"}) {
+		t.Errorf("SpawnFor got %q %+v", gotProject, gotDef)
+	}
+	if f := tm.Session.(*fakeSession); f.cols != 80 || len(f.text) != 1 {
+		t.Errorf("session %+v: want the size passed and the command typed", f)
+	}
+}
+
+func TestAttachRunningRegistersWithoutChecks(t *testing.T) {
+	ws := refWorkspace(t, func(string, int, int) (Session, error) {
+		t.Fatal("must not spawn")
+		return nil, nil
+	})
+	max := 1
+	ws.Limits = fixedLimit(&max)
+	ws.RestoreFrom(twoRefs())
+	p := ws.Projects[0]
+	gone := filepath.Join(ws.Root, ".terminal-worktrees", "api", "gone")
+	s1 := &refSession{ref: "a"}
+	def := SavedTerminal{Command: "server", Ref: "a"} // the saved definition of ref a
+	t1 := ws.AttachRunning(p, def, s1)
+	s2 := &refSession{ref: "c"}
+	t2 := ws.AttachRunning(p, SavedTerminal{Command: "watch", Branch: "feat", Worktree: gone, Ref: "c"}, s2)
+
+	if len(p.Terminals) != 2 || p.Terminals[0] != t1 || p.Terminals[1] != t2 {
+		t.Fatalf("terminals = %+v, want both attached past the limit", p.Terminals)
+	}
+	if t1.Session != s1 || t1.Command != "server" || t1.Worktree != nil || t1.Num != 1 || t2.Num != 2 || t1.ID == t2.ID {
+		t.Errorf("t1 = %+v", t1)
+	}
+	if t2.Worktree == nil || t2.Worktree.Path != gone || t2.Worktree.Branch != "feat" {
+		t.Errorf("t2 worktree = %+v, want the one its definition names, even though it is gone", t2.Worktree)
+	}
+	if len(s1.text)+len(s2.text) != 0 {
+		t.Error("an attached session must not be typed into")
+	}
+	// The definition it was running from is no longer saved; the other stays.
+	if len(p.Saved) != 1 || p.Saved[0].Ref != "b" {
+		t.Errorf("saved = %+v, want only b", p.Saved)
 	}
 }

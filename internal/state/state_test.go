@@ -263,3 +263,33 @@ func TestLoadClearsMalformedRefButKeepsTerminal(t *testing.T) {
 		}
 	}
 }
+
+// Decode is Load for bytes already in hand - the copy a tm server keeps -
+// and must sanitise exactly as Load does.
+func TestDecodeSanitisesLikeLoad(t *testing.T) {
+	body := `{"version":3,"projects":[{"name":"../x"},{"name":"api","terminals":[{"command":"a","ref":"NOT-A-REF"},{"worktree":"/etc"},{"ref":"00000000000000ff"}],"layout":{"terminal":7}}]}`
+	f, err := Decode([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(f.Projects) != 1 || f.Projects[0].Name != "api" {
+		t.Fatalf("projects = %+v, want only api", f.Projects)
+	}
+	want := []Terminal{{Command: "a"}, {Ref: "00000000000000ff"}}
+	if !reflect.DeepEqual(f.Projects[0].Terminals, want) {
+		t.Errorf("terminals = %+v, want %+v", f.Projects[0].Terminals, want)
+	}
+	if f.Projects[0].Layout != nil {
+		t.Errorf("a layout naming no terminal should be dropped, got %+v", f.Projects[0].Layout)
+	}
+	if f.Version != Version {
+		t.Errorf("version = %d", f.Version)
+	}
+
+	if _, err := Decode([]byte("{")); err == nil {
+		t.Error("malformed bytes should be an error")
+	}
+	if f, err := Decode(nil); err != nil || f.Version != Version || len(f.Projects) != 0 {
+		t.Errorf("empty bytes: %+v, %v; want an empty file", f, err)
+	}
+}
