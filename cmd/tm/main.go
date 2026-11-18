@@ -6,28 +6,47 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/Vonnue-ShijilCG/tm/internal/config"
 	"github.com/Vonnue-ShijilCG/tm/internal/project"
+	"github.com/Vonnue-ShijilCG/tm/internal/server"
 	"github.com/Vonnue-ShijilCG/tm/internal/terminal"
 	"github.com/Vonnue-ShijilCG/tm/internal/ui"
 )
 
 func main() {
-	if err := run(); err != nil {
+	if err := run(os.Args[1:], os.Stdout); err != nil {
 		fmt.Fprintln(os.Stderr, "tm:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+// run is tm with its arguments. `stop` and the hidden `__server <root>` are
+// the only ones it knows; anything else is ignored, as it always was.
+func run(args []string, stdout io.Writer) error {
+	if len(args) > 0 && args[0] == "__server" {
+		if len(args) != 2 {
+			return errors.New("usage: tm __server <root>")
+		}
+		return serve(args[1])
+	}
+
 	root, err := os.Getwd()
 	if err != nil {
 		return err
+	}
+	if len(args) > 0 && args[0] == "stop" {
+		return stop(root, stdout)
 	}
 
 	projects, err := project.Discover(root)
@@ -38,6 +57,70 @@ func run() error {
 		return explainNoProjects(root)
 	}
 
+	// A config file with mistakes still yields usable values, and the UI
+	// reports the mistake itself in the status bar.
+	cfg, _ := config.Load(config.Path())
+	if cfg.Server {
+		return runAttached(root, projects)
+	}
+	return runHere(root, projects)
+}
+
+// runHere is tm with its terminals in this process. It refuses to start
+// while a server holds this workspace's terminals: it would start a second
+// copy of every one of them beside the first.
+func runHere(root string, projects []project.Project) error {
+	var forget []string
+	// Without a state directory there can be no server to find, and tm runs
+	// exactly as it did before servers existed.
+	if paths, err := server.PathsFor(root); err == nil {
+		if live, running := server.Probe(paths); running {
+			return fmt.Errorf("a tm server is running here with %s: set server = true in %s to reattach, or run tm stop",
+				terminals(live), config.Display(config.Path()))
+		}
+		forget = server.TakeExited(paths)
+	}
+	_, err := runUI(ui.NewWith(root, projects, ui.Options{Forget: forget}))
+	return err
+}
+
+// runAttached is tm with its terminals in the workspace's server, which it
+// starts when none is running.
+func runAttached(root string, projects []project.Project) error {
+	paths, err := server.PathsFor(root)
+	if err != nil {
+		return err
+	}
+	forget := server.TakeExited(paths)
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if err := server.Ensure(paths, exe, root); err != nil {
+		return err
+	}
+	client, welcome, err := server.Attach(paths)
+	if errors.Is(err, server.ErrProtocol) {
+		live, _ := server.Probe(paths)
+		return fmt.Errorf("a tm server from another tm version is running here with %s; run tm stop to end them, then start tm again", terminals(live))
+	}
+	if err != nil {
+		return err
+	}
+	defer client.Close()
+
+	final, err := runUI(ui.NewWith(root, projects, ui.Options{Client: client, Welcome: welcome, Forget: forget}))
+	// Printed after the alternate screen is gone, or it would vanish with it.
+	if m, ok := final.(ui.Model); ok {
+		if msg := m.ExitMessage(); msg != "" {
+			fmt.Fprintln(os.Stderr, msg)
+		}
+	}
+	return err
+}
+
+// runUI runs the Bubble Tea program and returns its final model.
+func runUI(m ui.Model) (tea.Model, error) {
 	// Ask the terminal itself to use tm's ground while tm runs. Styling every
 	// cell tm draws is not enough on its own: the emulator's own window
 	// padding, and any cell tm has not painted, keep whatever background the
@@ -49,8 +132,74 @@ func run() error {
 		defer resetBackground()
 	}
 
-	_, err = tea.NewProgram(ui.New(root, projects), tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+	return tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion()).Run()
+}
+
+// stop is `tm stop`: end the workspace's server and every terminal in it.
+// Finding none running is an answer, not a failure.
+func stop(root string, stdout io.Writer) error {
+	paths, err := server.PathsFor(root)
+	if err != nil {
+		return err
+	}
+	n, err := server.StopServer(paths)
+	switch {
+	case errors.Is(err, server.ErrNotRunning):
+		fmt.Fprintln(stdout, "no tm server running here")
+		return nil
+	case err != nil:
+		return err
+	}
+	fmt.Fprintf(stdout, "stopped %s\n", terminals(n))
+	return nil
+}
+
+// serve is the hidden `tm __server <root>`, which Ensure starts detached.
+// It outlives the terminal that started it, so it ignores SIGHUP; SIGTERM
+// stops it as `tm stop` would.
+func serve(root string) error {
+	signal.Ignore(syscall.SIGHUP)
+	// Registered before the socket exists, so a SIGTERM sent to a server
+	// that answers is always caught rather than killing it mid-stop.
+	term := make(chan os.Signal, 1)
+	signal.Notify(term, syscall.SIGTERM)
+	defer signal.Stop(term)
+
+	paths, err := server.PathsFor(root)
+	if err != nil {
+		return err
+	}
+	l, err := server.Listen(paths)
+	if err != nil {
+		return err
+	}
+	served := make(chan struct{})
+	defer close(served)
+	var terminated atomic.Bool
+	go func() {
+		select {
+		case <-term:
+			// Closing the listener is the server's own stop path: nothing
+			// can reach the sessions any more, so it ends them.
+			terminated.Store(true)
+			l.Close()
+		case <-served:
+		}
+	}()
+
+	err = server.New(server.DefaultSpawner, paths.Exited).Serve(l)
+	if terminated.Load() && errors.Is(err, net.ErrClosed) {
+		return nil
+	}
 	return err
+}
+
+// terminals is a count of terminals that reads properly at one.
+func terminals(n int) string {
+	if n == 1 {
+		return "1 terminal"
+	}
+	return fmt.Sprintf("%d terminals", n)
 }
 
 // explainNoProjects is what tm says when it finds nothing to show. Every other
