@@ -58,8 +58,8 @@ type Hello struct {
 }
 
 // Welcome answers Hello{Attach: true}: the client's saved blob and every
-// session the server holds. Protocol is frozen (see Hello); the other fields
-// may change with the version.
+// session the server holds. Protocol is frozen (see Hello); the others may
+// be added to by a later version, never retyped.
 type Welcome struct {
 	Protocol int
 	Blob     []byte
@@ -96,9 +96,45 @@ type Spawned struct {
 // Input carries one of a key, pasted text or a wheel event to a session.
 type Input struct {
 	Ref   string
-	Key   *uv.KeyPressEvent
+	Key   *KeyPress
 	Text  string
 	Wheel *Wheel
+}
+
+// KeyPress is a key press on the wire: ultraviolet's Key, field for field,
+// in a type this package owns. Sending uv.KeyPressEvent itself would let a
+// dependency bump retype a field under Msg, breaking the rule on Hello,
+// without anyone bumping ProtocolVersion.
+type KeyPress struct {
+	Text        string
+	Mod         int
+	Code        rune
+	ShiftedCode rune
+	BaseCode    rune
+	IsRepeat    bool
+}
+
+func keyPressOf(k uv.KeyPressEvent) *KeyPress {
+	return &KeyPress{
+		Text:        k.Text,
+		Mod:         int(k.Mod),
+		Code:        k.Code,
+		ShiftedCode: k.ShiftedCode,
+		BaseCode:    k.BaseCode,
+		IsRepeat:    k.IsRepeat,
+	}
+}
+
+// Event is the key press as ultraviolet's type.
+func (k KeyPress) Event() uv.KeyPressEvent {
+	return uv.KeyPressEvent{
+		Text:        k.Text,
+		Mod:         uv.KeyMod(k.Mod),
+		Code:        k.Code,
+		ShiftedCode: k.ShiftedCode,
+		BaseCode:    k.BaseCode,
+		IsRepeat:    k.IsRepeat,
+	}
 }
 
 // Wheel is one wheel notch at a cell of the session's screen.

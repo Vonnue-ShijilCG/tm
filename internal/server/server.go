@@ -482,7 +482,7 @@ func (s *Server) dispatch(c *client, m Msg) {
 		in := *m.Input
 		ss.enqueue(func() {
 			if in.Key != nil {
-				ss.s.SendKey(*in.Key)
+				ss.s.SendKey(in.Key.Event())
 			}
 			if in.Text != "" {
 				ss.s.SendText(in.Text)

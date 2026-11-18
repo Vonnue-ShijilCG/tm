@@ -38,7 +38,7 @@ func TestConnRoundTripsEveryMessage(t *testing.T) {
 		{Spawn: &Spawn{Req: 7, Dir: "/tmp/x", Env: []string{"A=1", "B=2"}, Cols: 80, Rows: 24, Meta: []byte("meta")}},
 		{Spawned: &Spawned{Req: 7, Ref: "0123456789abcdef"}},
 		{Spawned: &Spawned{Req: 8, Err: "no such directory"}},
-		{Input: &Input{Ref: "0123456789abcdef", Key: &uv.KeyPressEvent{Code: 'a', Mod: uv.ModCtrl}}},
+		{Input: &Input{Ref: "0123456789abcdef", Key: keyPressOf(uv.KeyPressEvent{Code: 'a', Mod: uv.ModCtrl})}},
 		{Input: &Input{Ref: "0123456789abcdef", Text: "pasted text"}},
 		{Input: &Input{Ref: "0123456789abcdef", Wheel: &Wheel{Up: true, X: 3, Y: 4}}},
 		{Resize: &Resize{Ref: "0123456789abcdef", Cols: 120, Rows: 40}},
@@ -118,5 +118,35 @@ func TestConnRecvFailsAfterPeerCloses(t *testing.T) {
 	a.Close()
 	if _, err := b.Recv(); err == nil {
 		t.Fatal("Recv succeeded on a closed connection")
+	}
+}
+
+// The wire carries a key in tm's own KeyPress, not ultraviolet's type, so
+// a dependency bump cannot change the protocol without a ProtocolVersion
+// bump. This fails when ultraviolet's Key gains or changes a field, which
+// is the moment to decide whether the wire needs it.
+func TestKeyPressMirrorsUltravioletKey(t *testing.T) {
+	want := map[string]string{
+		"Text": "string", "Mod": "uv.KeyMod", "Code": "int32",
+		"ShiftedCode": "int32", "BaseCode": "int32", "IsRepeat": "bool",
+	}
+	kt := reflect.TypeOf(uv.Key{})
+	if kt.NumField() != len(want) {
+		t.Fatalf("uv.Key has %d fields, KeyPress mirrors %d", kt.NumField(), len(want))
+	}
+	for i := range kt.NumField() {
+		f := kt.Field(i)
+		typ := f.Type.String()
+		if f.Type == reflect.TypeOf(uv.KeyMod(0)) {
+			typ = "uv.KeyMod"
+		}
+		if want[f.Name] != typ {
+			t.Errorf("uv.Key.%s is %s, KeyPress expects %q", f.Name, typ, want[f.Name])
+		}
+	}
+
+	k := uv.KeyPressEvent{Text: "A", Mod: uv.ModShift | uv.ModAlt, Code: 'a', ShiftedCode: 'A', BaseCode: 'q', IsRepeat: true}
+	if got := keyPressOf(k).Event(); got != k {
+		t.Fatalf("round trip = %+v, want %+v", got, k)
 	}
 }

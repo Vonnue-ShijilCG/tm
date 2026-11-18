@@ -425,7 +425,7 @@ func (r *RemoteSession) finish(err error) {
 func (r *RemoteSession) Ref() string { return r.ref }
 
 func (r *RemoteSession) SendKey(k uv.KeyPressEvent) {
-	r.c.send(Msg{Input: &Input{Ref: r.ref, Key: &k}})
+	r.c.send(Msg{Input: &Input{Ref: r.ref, Key: keyPressOf(k)}})
 }
 
 func (r *RemoteSession) SendText(s string) {

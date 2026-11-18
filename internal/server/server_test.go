@@ -293,7 +293,7 @@ func TestSpawnInputAndFrame(t *testing.T) {
 
 	send(t, c, Msg{Input: &Input{Ref: ref, Text: "ls"}})
 	key := uv.KeyPressEvent{Code: 'x', Text: "x"}
-	send(t, c, Msg{Input: &Input{Ref: ref, Key: &key}})
+	send(t, c, Msg{Input: &Input{Ref: ref, Key: keyPressOf(key)}})
 	send(t, c, Msg{Input: &Input{Ref: ref, Wheel: &Wheel{Up: true, X: 1, Y: 2}}})
 	eventually(t, "input to reach the session", func() bool {
 		return len(f.texts()) == 1 && f.texts()[0] == "ls" && len(f.keyPresses()) == 1 && len(f.wheels()) == 1
