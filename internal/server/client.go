@@ -272,6 +272,9 @@ func (c *Client) send(m Msg) {
 	if c.isDead() {
 		return
 	}
+	// Set outside Conn's mutex, so concurrent senders may each move the
+	// deadline; any of them bounds the write in progress, which is all
+	// that is needed. A write that misses it ends the connection.
 	c.conn.c.SetWriteDeadline(time.Now().Add(sendTimeout))
 	if c.conn.Send(m) != nil {
 		c.conn.Close()

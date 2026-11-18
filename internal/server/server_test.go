@@ -26,6 +26,8 @@ type fakeSession struct {
 	version atomic.Uint64
 	closed  atomic.Int32
 	once    sync.Once
+	stuck   atomic.Bool  // SendText blocks until the session ends
+	scrolls atomic.Int32 // RenderScrolled calls
 
 	mu    sync.Mutex
 	text  []string
@@ -55,6 +57,9 @@ func (f *fakeSession) SendKey(k uv.KeyPressEvent) {
 	f.keys = append(f.keys, k)
 }
 func (f *fakeSession) SendText(s string) {
+	if f.stuck.Load() {
+		<-f.done // a program that has stopped reading its input
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.text = append(f.text, s)
@@ -69,6 +74,7 @@ func (f *fakeSession) Render(cursor bool) string {
 	return fmt.Sprintf("SCREEN:%s:v%d:cursor=%v", f.cfg.Dir, f.version.Load(), cursor)
 }
 func (f *fakeSession) RenderScrolled(offset int) string {
+	f.scrolls.Add(1)
 	if offset >= 1000 { // big enough to fill a socket buffer
 		return strings.Repeat("x", offset)
 	}
@@ -564,6 +570,9 @@ func TestExitLostWithTheClientIsRecorded(t *testing.T) {
 	for i := 0; i < 100; i++ {
 		send(t, a, Msg{Query: &Query{Req: uint64(i), Ref: ref, Offset: 100000}})
 	}
+	// Queries are answered on the session's worker: let them all queue
+	// before the Kill, so the Exit lands behind them.
+	eventually(t, "every query answered", func() bool { return fs.get(t, 0).scrolls.Load() == 100 })
 	send(t, a, Msg{Kill: &Kill{Ref: ref}})
 	eventually(t, "the session to be killed", func() bool { return fs.get(t, 0).closed.Load() > 0 })
 	time.Sleep(50 * time.Millisecond) // let the server queue the Exit

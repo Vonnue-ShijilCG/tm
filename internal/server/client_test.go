@@ -109,6 +109,39 @@ func TestRemoteSessionHistoryQueries(t *testing.T) {
 	if got := rs.RenderScrolled(3); got != "SCROLLED:3" {
 		t.Errorf("cached RenderScrolled(3) = %q", got)
 	}
+	if n := fs.get(t, 0).scrolls.Load(); n != 1 {
+		t.Errorf("server rendered the scrolled screen %d times, want 1 (cached)", n)
+	}
+}
+
+func TestStuckProgramDoesNotStallOtherSessions(t *testing.T) {
+	fs := &fakes{}
+	r := startServer(t, fs.spawn)
+	c, _ := attachClient(t, r)
+	stuck := spawnRemote(t, c, "/stuck")
+	other := spawnRemote(t, c, "/other")
+	fs.get(t, 0).stuck.Store(true)
+
+	stuck.SendText("a large paste nobody reads")
+	stuck.SendText("more")
+	other.SendText("hi")
+	f := fs.get(t, 1)
+	deadline := time.Now().Add(time.Second)
+	for len(f.texts()) != 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("input to another session stalled behind a stuck one")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	start := time.Now()
+	if got := other.RenderScrolled(5); got != "SCROLLED:5" || time.Since(start) > time.Second {
+		t.Fatalf("Query = %q after %v", got, time.Since(start))
+	}
+	select {
+	case reason := <-c.Gone():
+		t.Fatalf("client gone: %q", reason)
+	default:
+	}
 }
 
 func TestRemoteSessionCursorFollowsFocus(t *testing.T) {
@@ -295,6 +328,11 @@ func TestCloseIsNotGone(t *testing.T) {
 	case <-time.After(100 * time.Millisecond):
 	}
 	rs.SendText("x") // a no-op, not a panic
+	select {
+	case <-rs.Done():
+		t.Error("Close made a running session read as exited")
+	default:
+	}
 	if f := fs.get(t, 0); f.closed.Load() != 0 {
 		t.Error("detaching closed the session")
 	}

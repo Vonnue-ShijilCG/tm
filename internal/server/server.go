@@ -110,6 +110,15 @@ type session struct {
 	meta   []byte
 	redraw chan struct{} // Resize or Focus: push a frame
 
+	// work is the session's own FIFO of input, resizes and queries, run
+	// in order by its worker. terminal.Session writes input to the PTY
+	// holding its lock, so a program that stops reading stdin blocks that
+	// write and every other call that takes the lock; on the connection's
+	// read loop that would stall every session and the client with them.
+	workMu   sync.Mutex
+	work     []func()
+	workWake chan struct{}
+
 	// guarded by Server.mu
 	cursor    bool
 	exited    bool
@@ -422,8 +431,10 @@ func (s *Server) attach(conn *Conn) *client {
 		defer s.wg.Done()
 		c.run()
 	}()
+	// Each session's watcher renders its frame: Render takes the lock a
+	// stuck input write holds, and this goroutine must reach its read loop.
 	for _, ss := range live {
-		s.pushFrame(ss)
+		ss.poke()
 	}
 	return c
 }
@@ -468,19 +479,26 @@ func (s *Server) dispatch(c *client, m Msg) {
 		if ss == nil {
 			return
 		}
-		if m.Input.Key != nil {
-			ss.s.SendKey(*m.Input.Key)
-		}
-		if m.Input.Text != "" {
-			ss.s.SendText(m.Input.Text)
-		}
-		if w := m.Input.Wheel; w != nil {
-			ss.s.SendWheel(w.Up, w.X, w.Y)
-		}
+		in := *m.Input
+		ss.enqueue(func() {
+			if in.Key != nil {
+				ss.s.SendKey(*in.Key)
+			}
+			if in.Text != "" {
+				ss.s.SendText(in.Text)
+			}
+			if w := in.Wheel; w != nil {
+				ss.s.SendWheel(w.Up, w.X, w.Y)
+			}
+		})
 	case m.Resize != nil:
 		if ss := s.lookup(c, m.Resize.Ref); ss != nil && m.Resize.Cols > 0 && m.Resize.Rows > 0 {
-			ss.s.Resize(min(m.Resize.Cols, maxSize), min(m.Resize.Rows, maxSize))
-			ss.poke()
+			cols, rows := min(m.Resize.Cols, maxSize), min(m.Resize.Rows, maxSize)
+			// Queued too: it takes the lock a stuck input write holds.
+			ss.enqueue(func() {
+				ss.s.Resize(cols, rows)
+				ss.poke()
+			})
 		}
 	case m.Focus != nil:
 		s.mu.Lock()
@@ -498,16 +516,22 @@ func (s *Server) dispatch(c *client, m Msg) {
 			go ss.s.Close() // the watcher reports the exit
 		}
 	case m.Query != nil:
-		q := m.Query
-		a := &Answer{Req: q.Req}
-		if ss := s.lookup(c, q.Ref); ss != nil {
+		q := *m.Query
+		ss := s.lookup(c, q.Ref)
+		if ss == nil {
+			c.push(Msg{Answer: &Answer{Req: q.Req}})
+			return
+		}
+		// On the worker, behind the input before it and off the read loop.
+		ss.enqueue(func() {
+			a := &Answer{Req: q.Req}
 			if q.Lines {
 				a.Lines = ss.s.Lines(max(q.Offset, 0))
 			} else {
 				a.Screen = ss.s.RenderScrolled(max(q.Offset, 0))
 			}
-		}
-		c.push(Msg{Answer: a})
+			c.push(Msg{Answer: a})
+		})
 	case m.SetBlob != nil:
 		s.mu.Lock()
 		if s.client == c {
@@ -529,7 +553,7 @@ func (s *Server) spawnFor(c *client, sp *Spawn) {
 		c.push(Msg{Spawned: &Spawned{Req: sp.Req, Err: err.Error()}})
 		return
 	}
-	ss := &session{s: sess, meta: sp.Meta, redraw: make(chan struct{}, 1)}
+	ss := &session{s: sess, meta: sp.Meta, redraw: make(chan struct{}, 1), workWake: make(chan struct{}, 1)}
 	s.mu.Lock()
 	// A client evicted while this spawn ran would leave a session that the
 	// client now attached was never told about.
@@ -545,6 +569,7 @@ func (s *Server) spawnFor(c *client, sp *Spawn) {
 	c.push(Msg{Spawned: &Spawned{Req: sp.Req, Ref: ss.ref}})
 	s.mu.Unlock()
 	go s.watch(ss)
+	go ss.worker()
 }
 
 // newRef returns a random 64-bit ref no session holds. Called with mu held.
@@ -555,6 +580,45 @@ func (s *Server) newRef() string {
 		if ref := hex.EncodeToString(b[:]); s.sessions[ref] == nil {
 			return ref
 		}
+	}
+}
+
+// enqueue adds f to the session's FIFO; it never blocks.
+func (ss *session) enqueue(f func()) {
+	ss.workMu.Lock()
+	ss.work = append(ss.work, f)
+	ss.workMu.Unlock()
+	select {
+	case ss.workWake <- struct{}{}:
+	default:
+	}
+}
+
+// worker runs the session's queued work in order. Once the session has
+// ended it runs what is already queued — an ended terminal.Session no
+// longer blocks — and returns.
+func (ss *session) worker() {
+	done := ss.s.Done()
+	for {
+		ss.workMu.Lock()
+		if len(ss.work) == 0 {
+			ss.workMu.Unlock()
+			select {
+			case <-ss.workWake:
+				continue
+			case <-done:
+			}
+			ss.workMu.Lock()
+			if len(ss.work) == 0 {
+				ss.workMu.Unlock()
+				return
+			}
+		}
+		f := ss.work[0]
+		ss.work[0] = nil
+		ss.work = ss.work[1:]
+		ss.workMu.Unlock()
+		f()
 	}
 }
 
