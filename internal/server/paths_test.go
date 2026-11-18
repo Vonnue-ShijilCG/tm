@@ -11,6 +11,14 @@ import (
 func TestPathsForIsStableAndPrivate(t *testing.T) {
 	state := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", state)
+	base := useFallbackBase(t)
+	// tm/<16 hex>.sock under each directory must fit in sun_path for the
+	// two branches below to be the ones taken.
+	for _, d := range []string{filepath.Join(state, "tm"), filepath.Join(base, "tm-4294967295")} {
+		if len(filepath.Join(d, "0123456789abcdef.sock")) > maxSocket {
+			t.Skipf("temp dir %s is too long for a socket path", d)
+		}
+	}
 
 	root := t.TempDir()
 	a, err := PathsFor(root)
@@ -71,7 +79,7 @@ func TestPathsForIsStableAndPrivate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantDir := fmt.Sprintf("/tmp/tm-%d", os.Getuid())
+	wantDir := filepath.Join(base, fmt.Sprintf("tm-%d", os.Getuid()))
 	if f.Dir != wantDir {
 		t.Fatalf("long path Dir = %q, want %q", f.Dir, wantDir)
 	}
@@ -88,10 +96,7 @@ func TestPathsForIsStableAndPrivate(t *testing.T) {
 }
 
 func TestPathsForRefusesASharedFallbackDir(t *testing.T) {
-	base := t.TempDir()
-	old := fallbackBase
-	fallbackBase = base
-	t.Cleanup(func() { fallbackBase = old })
+	base := useFallbackBase(t)
 	t.Setenv("XDG_STATE_HOME", filepath.Join(t.TempDir(), strings.Repeat("d", 100)))
 
 	dir := filepath.Join(base, fmt.Sprintf("tm-%d", os.Getuid()))
@@ -114,6 +119,17 @@ func TestPathsForRefusesASharedFallbackDir(t *testing.T) {
 	if _, err := PathsFor(t.TempDir()); err == nil {
 		t.Fatal("a symlinked fallback dir was accepted")
 	}
+}
+
+// useFallbackBase points the short-path fallback at a fresh temp dir, so
+// tests neither depend on nor leave behind the real /tmp/tm-<uid>.
+func useFallbackBase(t *testing.T) string {
+	t.Helper()
+	base := t.TempDir()
+	old := fallbackBase
+	fallbackBase = base
+	t.Cleanup(func() { fallbackBase = old })
+	return base
 }
 
 func assertPrivateDir(t *testing.T, dir string) {

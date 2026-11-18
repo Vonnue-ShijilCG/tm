@@ -203,6 +203,75 @@ func TestEnsureReportsAServerThatNeverListens(t *testing.T) {
 	if !strings.Contains(err.Error(), p.Log) {
 		t.Fatalf("error %q does not name the log", err)
 	}
+	if strings.Contains(err.Error(), "<nil>") {
+		t.Fatalf("error %q prints a nil exit error", err)
+	}
+}
+
+// startSilent listens on a fresh workspace's socket and accepts connections
+// but never answers: a server that is alive but wedged or busy.
+func startSilent(t *testing.T) Paths {
+	t.Helper()
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	p, err := PathsFor(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("unix", p.Socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var conns []net.Conn
+	t.Cleanup(func() {
+		ln.Close()
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range conns {
+			c.Close()
+		}
+	})
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, c)
+			mu.Unlock()
+		}
+	}()
+	return p
+}
+
+func TestProbeCountsASilentServerAsRunning(t *testing.T) {
+	p := startSilent(t)
+	if live, running := Probe(p); !running || live != 0 {
+		t.Fatalf("Probe = %d, %v; want 0, true", live, running)
+	}
+}
+
+func TestEnsureDoesNotStartASecondServerBesideASilentOne(t *testing.T) {
+	p := startSilent(t)
+	pidFile := filepath.Join(t.TempDir(), "pids")
+	t.Setenv("TM_TEST_SERVER", "1")
+	t.Setenv("TM_TEST_PIDFILE", pidFile)
+	t.Cleanup(func() {
+		for _, pid := range readPids(t, pidFile) {
+			syscall.Kill(pid, syscall.SIGKILL)
+		}
+	})
+	err := Ensure(p, os.Args[0], t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "running here but not answering") {
+		t.Fatalf("Ensure err = %v, want a not-answering error", err)
+	}
+	if !strings.Contains(err.Error(), p.Log) {
+		t.Fatalf("error %q does not name the log", err)
+	}
+	if pids := readPids(t, pidFile); len(pids) != 0 {
+		t.Fatalf("Ensure started %d servers beside a running one", len(pids))
+	}
 }
 
 func TestEnsureServerStartsOnlyOne(t *testing.T) {

@@ -29,14 +29,15 @@ const (
 
 // status asks the server at p for its live session count with
 // Hello{Attach: false}, which by ruling R1 leaves any attached client alone.
-// It returns the open connection so StopServer can follow with Stop.
-func status(p Paths) (*Conn, int, error) {
-	c, err := net.DialTimeout("unix", p.Socket, dialTimeout)
+// It returns the open connection so StopServer can follow with Stop. timeout
+// bounds the wait for the reply.
+func status(p Paths, timeout time.Duration) (*Conn, int, error) {
+	c, err := net.DialTimeout("unix", p.Socket, min(dialTimeout, timeout))
 	if err != nil {
 		return nil, 0, err
 	}
 	conn := NewConn(c)
-	c.SetDeadline(time.Now().Add(replyTimeout))
+	c.SetDeadline(time.Now().Add(timeout))
 	if err := conn.Send(Msg{Hello: &Hello{Protocol: ProtocolVersion}}); err != nil {
 		conn.Close()
 		return nil, 0, err
@@ -63,26 +64,50 @@ func status(p Paths) (*Conn, int, error) {
 
 var errOtherVersion = errors.New("a tm server from another tm version is running here")
 
-// Probe reports whether a server is answering on p's socket and how many
-// live sessions it holds. A dial error — no socket, or a stale one left by a
-// server that died — reads as not running. A server of another protocol
-// version is running, with an unknown count of 0.
+// isDialError reports whether err means nothing is listening: no socket
+// file, or a stale one left by a server that died. Any other failure came
+// from a connection a server accepted, which proves one is alive.
+func isDialError(err error) bool {
+	var op *net.OpError
+	return errors.As(err, &op) && op.Op == "dial"
+}
+
+// probe is Probe with the handshake's error: running with a non-nil err is
+// a server that accepted the connection but did not answer properly. A
+// server of another protocol version is running with no error; telling the
+// user about the mismatch is the attaching client's job.
+func probe(p Paths, timeout time.Duration) (live int, running bool, err error) {
+	conn, n, err := status(p, timeout)
+	switch {
+	case err == nil:
+		conn.Close()
+		return n, true, nil
+	case errors.Is(err, errOtherVersion):
+		return 0, true, nil
+	case isDialError(err):
+		return 0, false, err
+	default:
+		return 0, true, err
+	}
+}
+
+// Probe reports whether a server is on p's socket and how many live
+// sessions it holds. Only a dial error reads as not running. A server that
+// accepted the connection but was slow or answered oddly, or one of another
+// protocol version, is running with an unknown count of 0.
 func Probe(p Paths) (live int, running bool) {
-	conn, n, err := status(p)
-	if errors.Is(err, errOtherVersion) {
-		return 0, true
-	}
-	if err != nil {
-		return 0, false
-	}
-	conn.Close()
-	return n, true
+	live, running, _ = probe(p, replyTimeout)
+	return live, running
 }
 
 // Ensure makes sure a server is running for the workspace at root, starting
 // `exe __server root` if none answers. The lock is held across probing,
 // starting and waiting for the new server to answer, so concurrent callers
 // serialise: the first starts the server, the rest find it running.
+//
+// A server that accepts the connection but does not answer is an error, not
+// a reason to start another: a second server would take over the socket and
+// orphan the first one's sessions.
 //
 // The child is a session leader (setsid) with stdin on /dev/null and
 // stdout and stderr appended to p.Log, so it outlives the terminal that
@@ -97,7 +122,10 @@ func Ensure(p Paths, exe, root string) error {
 		return fmt.Errorf("locking %s: %w", p.Lock, err)
 	}
 
-	if _, running := Probe(p); running {
+	if _, running, err := probe(p, replyTimeout); running {
+		if err != nil {
+			return fmt.Errorf("a tm server is running here but not answering (%v); see %s", err, p.Log)
+		}
 		return nil
 	}
 
@@ -107,16 +135,21 @@ func Ensure(p Paths, exe, root string) error {
 	}
 	deadline := time.Now().Add(startTimeout)
 	for {
-		if _, running := Probe(p); running {
+		left := time.Until(deadline)
+		if left <= 0 {
+			return fmt.Errorf("tm server did not start within %v; see %s", startTimeout, p.Log)
+		}
+		if _, running, err := probe(p, left); running && err == nil {
 			return nil
 		}
 		select {
 		case err := <-exited:
-			return fmt.Errorf("tm server exited before it was ready (%v); see %s", err, p.Log)
-		case <-time.After(pollInterval):
-		}
-		if time.Now().After(deadline) {
-			return fmt.Errorf("tm server did not start within %v; see %s", startTimeout, p.Log)
+			how := "exited"
+			if err != nil {
+				how = err.Error()
+			}
+			return fmt.Errorf("tm server stopped before it was ready (%s); see %s", how, p.Log)
+		case <-time.After(min(pollInterval, max(time.Until(deadline), 0))):
 		}
 	}
 }
@@ -162,10 +195,9 @@ func flock(f *os.File) error {
 // for it to close the connection. It returns the number of live sessions the
 // server held before stopping, or ErrNotRunning when none is listening.
 func StopServer(p Paths) (stopped int, err error) {
-	conn, n, err := status(p)
+	conn, n, err := status(p, replyTimeout)
 	if err != nil {
-		var dial *net.OpError
-		if errors.As(err, &dial) && dial.Op == "dial" {
+		if isDialError(err) {
 			return 0, ErrNotRunning
 		}
 		return 0, err
