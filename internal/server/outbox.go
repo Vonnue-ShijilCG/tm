@@ -14,6 +14,7 @@ type client struct {
 	q       []*Msg
 	frames  map[string]*Msg // ref -> its queued, not yet written frame
 	closing bool            // write what is queued, then close
+	lost    []string        // refs whose Exit was never written
 }
 
 func newClient(conn *Conn) *client {
@@ -36,6 +37,7 @@ func (c *client) push(m Msg) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closing {
+		c.dropped(&m)
 		return
 	}
 	c.q = append(c.q, &m)
@@ -65,6 +67,7 @@ func (c *client) evict(reason string) {
 	if c.closing {
 		return
 	}
+	c.drop()
 	c.q = []*Msg{{Evict: &Evict{Reason: reason}}}
 	c.frames = map[string]*Msg{}
 	c.closing = true
@@ -75,8 +78,37 @@ func (c *client) evict(reason string) {
 func (c *client) shutdown() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.q, c.closing = nil, true
+	c.drop()
+	c.closing = true
 	c.signal()
+}
+
+// drop discards the queue, keeping the refs of the Exits in it. Called
+// with mu held.
+func (c *client) drop() {
+	for _, m := range c.q {
+		c.dropped(m)
+	}
+	c.q = nil
+}
+
+// dropped notes a message that will never be written. An Exit that never
+// reached a window must still be reported, or a terminal whose end nobody
+// saw would be started again. Called with mu held.
+func (c *client) dropped(m *Msg) {
+	if m != nil && m.Exit != nil {
+		c.lost = append(c.lost, m.Exit.Ref)
+	}
+}
+
+// takeLost returns the refs of Exits that were never written. It is only
+// complete once run has returned.
+func (c *client) takeLost() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	lost := c.lost
+	c.lost = nil
+	return lost
 }
 
 func (c *client) run() {
@@ -101,6 +133,9 @@ func (c *client) run() {
 		}
 		c.mu.Unlock()
 		if sendNow(c.conn, *m) != nil {
+			c.mu.Lock()
+			c.dropped(m)
+			c.mu.Unlock()
 			c.shutdown()
 			return
 		}

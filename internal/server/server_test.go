@@ -69,6 +69,9 @@ func (f *fakeSession) Render(cursor bool) string {
 	return fmt.Sprintf("SCREEN:%s:v%d:cursor=%v", f.cfg.Dir, f.version.Load(), cursor)
 }
 func (f *fakeSession) RenderScrolled(offset int) string {
+	if offset >= 1000 { // big enough to fill a socket buffer
+		return strings.Repeat("x", offset)
+	}
 	return fmt.Sprintf("SCROLLED:%d", offset)
 }
 func (f *fakeSession) Version() uint64 { return f.version.Load() }
@@ -549,6 +552,78 @@ func TestServeReturnsWhenEmptyAndDetached(t *testing.T) {
 	}
 }
 
+// An Exit that was queued for a client that went before reading it was
+// never seen by any window, so it must still reach the exited file.
+func TestExitLostWithTheClientIsRecorded(t *testing.T) {
+	fs := &fakes{}
+	r := startServer(t, fs.spawn)
+	a, _ := attach(t, r)
+	ref := spawnOne(t, a, 1, "/a")
+	// Answers this client never reads fill the socket, so the server's
+	// writer stalls and the Exit below waits in its queue.
+	for i := 0; i < 100; i++ {
+		send(t, a, Msg{Query: &Query{Req: uint64(i), Ref: ref, Offset: 100000}})
+	}
+	send(t, a, Msg{Kill: &Kill{Ref: ref}})
+	eventually(t, "the session to be killed", func() bool { return fs.get(t, 0).closed.Load() > 0 })
+	time.Sleep(50 * time.Millisecond) // let the server queue the Exit
+	a.Close()
+	if err := r.waitServed(t, 2*time.Second); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(r.exited)
+	if err != nil || strings.TrimSpace(string(b)) != ref {
+		t.Fatalf("exited file %q (%v), want %s", b, err, ref)
+	}
+}
+
+func TestSizesAreClamped(t *testing.T) {
+	fs := &fakes{}
+	r := startServer(t, fs.spawn)
+	c, _ := attach(t, r)
+	send(t, c, Msg{Spawn: &Spawn{Req: 1, Cols: 5000, Rows: 1 << 30}})
+	ref := expect(t, c, "Spawned", func(m Msg) bool { return m.Spawned != nil }).Spawned.Ref
+	if f := fs.get(t, 0); f.cfg.Cols != maxSize || f.cfg.Rows != maxSize {
+		t.Fatalf("spawn size %dx%d, want %d each", f.cfg.Cols, f.cfg.Rows, maxSize)
+	}
+	send(t, c, Msg{Resize: &Resize{Ref: ref, Cols: 1 << 20, Rows: 2000}})
+	expect(t, c, "Frame", func(m Msg) bool { return m.Frame != nil })
+	if got := fs.get(t, 0).lastSize(); got != [2]int{maxSize, maxSize} {
+		t.Fatalf("resize to %v, want %d each", got, maxSize)
+	}
+}
+
+func TestListenerClosedFromOutsideStopsEverything(t *testing.T) {
+	fs := &fakes{}
+	dir := t.TempDir()
+	ln, err := net.Listen("unix", filepath.Join(dir, "s"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := New(fs.spawn, filepath.Join(dir, "exited"))
+	served := make(chan error, 1)
+	go func() { served <- srv.Serve(ln) }()
+	r := &running{srv: srv, sock: filepath.Join(dir, "s")}
+	a, _ := attach(t, r)
+	spawnOne(t, a, 1, "/a")
+	ln.Close()
+	m := expect(t, a, "Evict", func(m Msg) bool { return m.Evict != nil })
+	if m.Evict.Reason != "stopped by tm stop" {
+		t.Fatalf("evict %q", m.Evict.Reason)
+	}
+	select {
+	case err := <-served:
+		if err == nil {
+			t.Fatal("Serve = nil after its listener failed")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Serve did not return")
+	}
+	if fs.get(t, 0).closed.Load() == 0 {
+		t.Fatal("session left running")
+	}
+}
+
 func TestExitedFileIsAppended(t *testing.T) {
 	fs := &fakes{}
 	r := startServer(t, fs.spawn)
@@ -685,10 +760,11 @@ func TestQueryAnswersScrolledAndLines(t *testing.T) {
 func TestServerAnswersQueriesWithNoClient(t *testing.T) {
 	// The shell asks for the cursor position and waits for the reply,
 	// which only the server's emulator can give while no client is
-	// attached. The reply has no newline, so the tty is put in
+	// attached (the sleep makes the query land after the client has
+	// gone). The reply has no newline, so the tty is put in
 	// non-canonical mode to read it; the shell then lingers so the session
 	// is still there to query.
-	script := `printf "\033[6n"; stty -icanon -echo min 1; dd bs=1 count=6 >/dev/null 2>&1; echo got; exec sleep 30`
+	script := `sleep 0.3; printf "\033[6n"; stty -icanon -echo min 1; dd bs=1 count=6 >/dev/null 2>&1; echo got; exec sleep 30`
 	spawn := func(c terminal.Config) (Session, error) {
 		c.Command = "/bin/sh"
 		c.Args = []string{"-c", script}

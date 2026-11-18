@@ -63,6 +63,12 @@ const (
 	// sendTimeout bounds one write to a client; a client that stops
 	// reading for this long is detached.
 	sendTimeout = 10 * time.Second
+	// acceptBackoff doubles up to maxAcceptBackoff while Accept keeps
+	// failing.
+	acceptBackoff    = 10 * time.Millisecond
+	maxAcceptBackoff = time.Second
+	// maxSize caps the columns and rows a client may ask a session for.
+	maxSize = 1000
 	// evictWait is how long Serve lets a stopped client's Evict drain
 	// before closing every connection.
 	evictWait = time.Second
@@ -89,6 +95,7 @@ type Server struct {
 	conns      map[*Conn]struct{}
 	stopping   bool     // Serve is about to return
 	exitRefs   []string // written to exitedPath when Serve returns
+	lostExits  []string // Exits queued for a client that left unwritten
 	stopClient *client  // evicted by Stop; Serve lets its Evict drain
 
 	done     chan struct{} // closed once the server decides to exit
@@ -143,6 +150,7 @@ func (s *Server) Serve(l net.Listener) error {
 	}()
 
 	var serveErr error
+	backoff := acceptBackoff
 	for {
 		c, err := l.Accept()
 		if err != nil {
@@ -150,14 +158,19 @@ func (s *Server) Serve(l net.Listener) error {
 			case <-s.done:
 			default:
 				if !errors.Is(err, net.ErrClosed) {
-					time.Sleep(10 * time.Millisecond) // e.g. out of file descriptors
+					// e.g. out of file descriptors: wait, longer each time.
+					time.Sleep(backoff)
+					backoff = min(2*backoff, maxAcceptBackoff)
 					continue
 				}
+				// Closed by someone else: nothing can reach these sessions
+				// any more, so end them as Stop would.
 				serveErr = err
-				s.finish()
+				s.stop()
 			}
 			break
 		}
+		backoff = acceptBackoff
 		conn := NewConn(c)
 		s.mu.Lock()
 		s.conns[conn] = struct{}{}
@@ -235,7 +248,7 @@ func (s *Server) exitedRefs() []string {
 			refs = append(refs, ss.ref)
 		}
 	}
-	return refs
+	return append(refs, s.lostExits...)
 }
 
 // remove drops ss from the list. Called with mu held.
@@ -418,8 +431,13 @@ func (s *Server) attach(conn *Conn) *client {
 // detach forgets c if it is still the client.
 func (s *Server) detach(c *client) {
 	c.shutdown()
+	c.conn.Close() // so a write stalled on a full socket fails now
+	<-c.done       // run has dropped what it will never write
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Taken under mu with the check below, so an Exit queued after this
+	// went to a client that is no longer s.client and stayed listed.
+	s.lostExits = append(s.lostExits, c.takeLost()...)
 	if s.client != c {
 		return
 	}
@@ -461,7 +479,7 @@ func (s *Server) dispatch(c *client, m Msg) {
 		}
 	case m.Resize != nil:
 		if ss := s.lookup(c, m.Resize.Ref); ss != nil && m.Resize.Cols > 0 && m.Resize.Rows > 0 {
-			ss.s.Resize(m.Resize.Cols, m.Resize.Rows)
+			ss.s.Resize(min(m.Resize.Cols, maxSize), min(m.Resize.Rows, maxSize))
 			ss.poke()
 		}
 	case m.Focus != nil:
@@ -504,8 +522,8 @@ func (s *Server) spawnFor(c *client, sp *Spawn) {
 		Command: terminal.DefaultShell(),
 		Dir:     sp.Dir,
 		Env:     sp.Env,
-		Cols:    sp.Cols,
-		Rows:    sp.Rows,
+		Cols:    min(sp.Cols, maxSize),
+		Rows:    min(sp.Rows, maxSize),
 	})
 	if err != nil {
 		c.push(Msg{Spawned: &Spawned{Req: sp.Req, Err: err.Error()}})
