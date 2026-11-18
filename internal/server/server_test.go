@@ -921,3 +921,31 @@ func TestSpawnRunsTheClientsShell(t *testing.T) {
 		}
 	}
 }
+
+// A server that exits on its own writes .exited before it stops accepting.
+// The next tm waits for the socket to go before starting a server of its
+// own and reading the file; written after, the file could be read empty and
+// a terminal that finished would come back.
+func TestExitedIsWrittenBeforeTheSocketCloses(t *testing.T) {
+	for range 20 {
+		fs := &fakes{}
+		r := startServer(t, fs.spawn)
+		a, _ := attach(t, r)
+		ref := spawnOne(t, a, 1, "/a")
+		a.Close()
+		time.Sleep(20 * time.Millisecond)
+		fs.get(t, 0).exit()
+		eventually(t, "the socket to stop accepting", func() bool {
+			c, err := net.Dial("unix", r.sock)
+			if err == nil {
+				c.Close()
+				return false
+			}
+			return true
+		})
+		if b, _ := os.ReadFile(r.exited); string(b) != ref+"\n" {
+			t.Fatalf("exited file %q once the socket was gone, want %q", b, ref+"\n")
+		}
+		r.waitServed(t, time.Second)
+	}
+}

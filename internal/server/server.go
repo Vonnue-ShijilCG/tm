@@ -149,8 +149,19 @@ func (s *Server) Serve(l net.Listener) error {
 		s.maybeFinish()
 	})
 	defer grace.Stop()
+	// The exited refs are written before the listener closes. A tm that
+	// found this server dying waits for its socket to go before starting
+	// another and reading the file, so the file must be complete by then.
+	unlistened := make(chan struct{})
 	go func() {
+		defer close(unlistened)
 		<-s.done
+		s.mu.Lock()
+		refs := s.exitRefs
+		s.mu.Unlock()
+		if len(refs) > 0 {
+			appendExited(s.exitedPath, refs)
+		}
 		l.Close()
 	}()
 
@@ -184,12 +195,10 @@ func (s *Server) Serve(l net.Listener) error {
 		go s.handle(conn)
 	}
 
+	<-unlistened
 	s.mu.Lock()
-	refs, evicted := s.exitRefs, s.stopClient
+	evicted := s.stopClient
 	s.mu.Unlock()
-	if len(refs) > 0 {
-		appendExited(s.exitedPath, refs)
-	}
 	if evicted != nil {
 		select {
 		case <-evicted.done:
@@ -220,7 +229,8 @@ func appendExited(path string, refs []string) {
 	}
 }
 
-// finish makes Serve return. The caller has set exitRefs if it wants them.
+// finish makes Serve return. The caller has set exitRefs, under mu, if it
+// wants them.
 func (s *Server) finish() {
 	s.doneOnce.Do(func() { close(s.done) })
 }

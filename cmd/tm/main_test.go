@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -333,5 +335,76 @@ func TestAFailedAttachLeavesTheExitedTerminalsForTheNextStart(t *testing.T) {
 
 	if got := server.TakeExited(paths); len(got) != 1 || got[0] != "0123456789abcdef" {
 		t.Errorf("exited refs after a failed attach = %q, want the one written", got)
+	}
+}
+
+// A server that is exiting on its own when tm starts still answers Ensure's
+// probe, then closes the attach. tm waits for it to go and starts a fresh
+// one, rather than failing with "tm server did not answer".
+func TestAttachRetriesPastAServerThatWasExiting(t *testing.T) {
+	root := workspace(t)
+	paths, err := server.PathsFor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, err := server.Listen(paths)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gone atomic.Bool
+	go func() { // the dying server: counts, refuses attaches, then goes
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			conn := server.NewConn(c)
+			if m, err := conn.Recv(); err == nil && m.Hello != nil && !m.Hello.Attach {
+				conn.Send(server.Msg{Status: &server.Status{}})
+			} else {
+				time.AfterFunc(100*time.Millisecond, func() { gone.Store(true); l.Close() })
+			}
+			conn.Close()
+		}
+	}()
+
+	ensures := 0
+	ensure := func() error {
+		ensures++
+		if ensures == 1 {
+			return nil // found the dying one running
+		}
+		if !gone.Load() {
+			t.Error("started a server before the dying one had gone")
+		}
+		nl, err := server.Listen(paths)
+		if err != nil {
+			return err
+		}
+		srv := server.New(spawnIdle, paths.Exited)
+		served := make(chan struct{})
+		go func() { srv.Serve(nl); close(served) }()
+		t.Cleanup(func() { server.StopServer(paths); <-served })
+		return nil
+	}
+
+	client, _, err := attachFresh(paths, ensure)
+	if err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	client.Close()
+	if ensures != 2 {
+		t.Errorf("Ensure ran %d times, want 2", ensures)
+	}
+}
+
+// Another version is not a server on its way out: no retry.
+func TestAttachDoesNotRetryAnotherVersion(t *testing.T) {
+	root := workspace(t)
+	paths := serveOtherVersion(t, root, 1)
+	ensures := 0
+	_, _, err := attachFresh(paths, func() error { ensures++; return nil })
+	if !errors.Is(err, server.ErrProtocol) || ensures != 1 {
+		t.Errorf("err %v after %d Ensures, want ErrProtocol after 1", err, ensures)
 	}
 }

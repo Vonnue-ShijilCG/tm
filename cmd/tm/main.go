@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -124,10 +125,7 @@ func connect(root string) (*server.Client, server.Welcome, []string, error) {
 	if err != nil {
 		return nil, server.Welcome{}, nil, err
 	}
-	if err := server.Ensure(paths, exe, root); err != nil {
-		return nil, server.Welcome{}, nil, err
-	}
-	client, welcome, err := server.Attach(paths)
+	client, welcome, err := attachFresh(paths, func() error { return server.Ensure(paths, exe, root) })
 	if errors.Is(err, server.ErrProtocol) {
 		live, _ := server.Probe(paths)
 		return nil, server.Welcome{}, nil, fmt.Errorf("a tm server from another tm version is running here with %s; run tm stop to end them, then start tm again", terminals(live))
@@ -137,6 +135,34 @@ func connect(root string) (*server.Client, server.Welcome, []string, error) {
 	}
 	// Taken only once attached: a start that fails leaves them for the next.
 	return client, welcome, server.TakeExited(paths), nil
+}
+
+// exitWait bounds how long attachFresh waits for a server it found on its
+// way out to go.
+const exitWait = 2 * time.Second
+
+// attachFresh runs ensure and attaches. A server that is exiting on its own
+// as tm starts answers ensure's probe and then closes the attach; tm waits
+// for its socket to go - by which time it has written its .exited, which
+// the caller reads next - and then starts and attaches to a fresh one,
+// once. Another version is not retried: it is not going anywhere.
+func attachFresh(paths server.Paths, ensure func() error) (*server.Client, server.Welcome, error) {
+	if err := ensure(); err != nil {
+		return nil, server.Welcome{}, err
+	}
+	client, welcome, err := server.Attach(paths)
+	if err == nil || errors.Is(err, server.ErrProtocol) {
+		return client, welcome, err
+	}
+	for deadline := time.Now().Add(exitWait); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		if _, running := server.Probe(paths); !running {
+			break
+		}
+	}
+	if err := ensure(); err != nil {
+		return nil, server.Welcome{}, err
+	}
+	return server.Attach(paths)
 }
 
 // runUI runs the Bubble Tea program and returns its final model.
