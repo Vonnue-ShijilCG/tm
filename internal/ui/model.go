@@ -1105,7 +1105,9 @@ func (m *Model) placeBalanced(p *workspace.Project, nt *workspace.Terminal) bool
 const outputWindow = 16 * time.Millisecond
 
 // watchTerminal blocks until the terminal has new output or exits, then
-// collects further output for one window so a burst wakes the UI once.
+// collects further output for one window so a burst wakes the UI once. A
+// session whose output is coalesced upstream (Coalesced, a server's
+// RemoteSession) wakes the UI at once instead.
 func watchTerminal(t *workspace.Terminal) tea.Cmd {
 	s := t.Session
 	return func() tea.Msg {
@@ -1113,6 +1115,12 @@ func watchTerminal(t *workspace.Terminal) tea.Cmd {
 		case <-s.Done():
 			return terminalExitedMsg{id: t.ID, err: s.Err()}
 		case <-s.Output():
+		}
+		if c, ok := s.(interface{ Coalesced() bool }); ok && c.Coalesced() {
+			// A tm server's session: the server already waited out its
+			// frameWindow before pushing this frame, and a second window
+			// here would only delay the echo of every keystroke.
+			return terminalOutputMsg{id: t.ID, s: s}
 		}
 		// The screen is read once, when the message lands, so ten signals
 		// and one describe the same work. Exit still wins the moment it

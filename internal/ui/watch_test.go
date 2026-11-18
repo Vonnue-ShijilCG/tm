@@ -94,3 +94,34 @@ func TestAnIdleTerminalsExitIsReportedAtOnce(t *testing.T) {
 		t.Errorf("an idle exit took %v, want well under the %v window", elapsed, outputWindow)
 	}
 }
+
+// coalescedSession is a session whose Output is already throttled to one
+// signal per frame upstream, as a tm server's is.
+type coalescedSession struct{ *fakeSession }
+
+func (coalescedSession) Coalesced() bool { return true }
+
+// A server already waits out a frame window before it pushes a frame, so
+// waiting out another here would put two windows between a keystroke and
+// its echo. A coalesced session's signal wakes the UI at once; the server's
+// window still holds a steady printer to one wake per frame.
+func TestACoalescedSessionWakesTheUIAtOnce(t *testing.T) {
+	f := coalescedSession{newFakeSession("/ws", 80, 24)}
+	term := &workspace.Terminal{ID: 5, Session: f}
+
+	fastest := time.Hour
+	for range 10 {
+		f.output <- struct{}{}
+		start := time.Now()
+		msg := watchTerminal(term)()
+		fastest = min(fastest, time.Since(start))
+		if _, ok := msg.(terminalOutputMsg); !ok {
+			t.Fatalf("msg = %T, want terminalOutputMsg", msg)
+		}
+	}
+	// Every one of ten waiting the full window is what a second throttle
+	// looks like; a scheduler hiccup cannot fake all ten.
+	if fastest >= outputWindow {
+		t.Errorf("a coalesced session's output never woke the UI in under %v (fastest %v): it waited out a second window", outputWindow, fastest)
+	}
+}

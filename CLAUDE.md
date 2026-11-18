@@ -124,6 +124,12 @@ and below what a typist can see. An exit is the exception and never waits:
 the pane goes away when it lands, so holding it back would only postpone
 saying the terminal is gone.
 
+In server mode the window is the server's: it waits `frameWindow` before
+pushing a frame, so a `RemoteSession` reports `Coalesced()` and
+`watchTerminal` wakes the UI on its signal at once. Waiting out
+`outputWindow` again would put two windows between a keystroke and its
+echo; the server's window alone keeps the ceiling at one wake per frame.
+
 A frame then repaints only the panes that changed. `renderLeaf` caches each
 terminal's finished card in `Model.panes` against a `paneKey` — every input it
 reads, including `Session.Version()`, which the session bumps on output and on
