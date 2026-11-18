@@ -384,11 +384,14 @@ state file, the UI — stays in the client. On every persist, and whenever the
 project shown changes (which saves nothing), the client also hands the
 server an opaque blob (`ui/attach.go`'s `uiBlob`: the state snapshot plus
 which running terminals were hidden, which the state file does not record,
-and the project shown) and gets it back on attach. That is how a reattach restores
-hidden terminals without the server learning the workspace model. A spawn
-carries the client's `os.Environ()`: a long-lived server's own environment
-would be days old, and a shell opened after an SSH reconnect would get a
-stale `SSH_AUTH_SOCK` and `DISPLAY`.
+and the project shown) and gets it back on attach. That is how a reattach
+restores hidden terminals without the server learning the workspace model.
+A spawn carries the client's `os.Environ()`: a long-lived server's own
+environment would be days old, and a shell opened after an SSH reconnect
+would get a stale `SSH_AUTH_SOCK` and `DISPLAY`. It carries the client's
+shell too (`Spawn.Shell`), for the same reason; the server runs it when it
+can execute it and its own `DefaultShell()` otherwise. The server itself
+runs in `/`, so it pins no directory for days.
 
 **`RemoteSession` is a `workspace.Session`.** Nothing above `workspace`
 knows which kind it holds, which is why scrollback, copy mode, mouse
@@ -398,9 +401,12 @@ server throttles each session to `frameWindow` (16 ms, the same window as
 `Render` returns the last frame with no round trip, because tm renders on
 every output event and a round trip per pane per frame is too slow. History
 (`RenderScrolled`, `Lines`) is request/reply, cached by version and offset,
-since it is only asked for while scrolling or copying. Focus is sent to the
-server so the cursor is drawn in the right pane, and both panes' versions
-move so the pane cache cannot keep a card with the cursor in the old one.
+since it is only asked for while scrolling or copying. Those queries, and
+`Spawn`, are synchronous round trips on the UI goroutine, bounded at 2 s
+and 5 s: a server that stops answering freezes the window for that long.
+Focus is sent to the server so the cursor is drawn in the right pane, and
+both panes' versions move so the pane cache cannot keep a card with the
+cursor in the old one.
 
 **Refs in the state file.** `state.Terminal.Ref` records the session a
 terminal ran in (optional; old files load unchanged and `Version` stays 3).
@@ -448,9 +454,14 @@ forgets those terminals in the restored state, and deletes it — only once
 attached or past the guard, so a start that fails leaves it for the next.
 A terminal that exits while detached with the server still running is
 reported in the next `Welcome` and dropped then. Two guards cover an exit
-that races a leaving window: the server keeps an `Exit` it had queued for a client that left before reading
-it (`lostExits`, which go to `.exited` too), and on attach `settleRefs`
-forgets a blob ref the server no longer lists, as if it had exited.
+that races a leaving window: the server keeps an `Exit` it had queued for a
+client that left before reading it (`lostExits`, which go to `.exited`
+too), and on attach `settleRefs` forgets a blob ref the server no longer
+lists, as if it had exited. A third covers a server exiting on its own as a
+new `tm` starts: it answers `Ensure`'s probe and then closes the attach, so
+`attachFresh` (`cmd/tm`) waits for its socket to go and starts a fresh one,
+once. The server writes `.exited` *before* it closes its listener, so by
+the time the socket is gone the file is complete for `TakeExited`.
 
 **The off-mode guard.** With `server` off, tm still probes the socket
 (`offModeGuard` in `cmd/tm`): starting a second, in-process copy of every
