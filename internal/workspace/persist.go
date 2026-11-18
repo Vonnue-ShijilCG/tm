@@ -11,12 +11,17 @@ import (
 
 // SavedTerminal is a terminal definition remembered from a previous run (or
 // from a closed worktree terminal) that is not currently running. Worktree
-// is an absolute path, "" for a terminal in the project checkout.
+// is an absolute path, "" for a terminal in the project checkout. Ref is
+// the tm server session the terminal last ran in ("" without a server); it
+// is what lets a reattaching client adopt that session instead of starting
+// a new one, and it is deliberately not part of key(): a terminal is the
+// same terminal whichever session runs it.
 type SavedTerminal struct {
 	Name     string
 	Command  string
 	Branch   string
 	Worktree string
+	Ref      string
 }
 
 // Restore loads the state file and attaches saved terminal definitions to
@@ -33,6 +38,13 @@ type SavedTerminal struct {
 // reported but leaves the workspace usable.
 func (ws *Workspace) Restore() error {
 	f, err := state.Load(ws.Root)
+	ws.RestoreFrom(f)
+	return err
+}
+
+// RestoreFrom is Restore for a state file already in hand - the one a tm
+// server keeps for its client - with exactly the same checks.
+func (ws *Workspace) RestoreFrom(f state.File) {
 	for _, sp := range f.Projects {
 		p := ws.projectByName(sp.Name)
 		if p == nil {
@@ -41,7 +53,7 @@ func (ws *Workspace) Restore() error {
 		var worktrees map[string]bool             // resolved lazily, once per project
 		keys := make([]string, len(sp.Terminals)) // "" marks a terminal we refused
 		for i, st := range sp.Terminals {
-			saved := SavedTerminal{Name: st.Name, Command: st.Command, Branch: st.Branch}
+			saved := SavedTerminal{Name: st.Name, Command: st.Command, Branch: st.Branch, Ref: st.Ref}
 			if st.Worktree != "" {
 				abs := filepath.Join(ws.Root, filepath.FromSlash(st.Worktree))
 				if worktrees == nil {
@@ -60,7 +72,93 @@ func (ws *Workspace) Restore() error {
 			p.Focus = keys[*sp.Focused]
 		}
 	}
-	return err
+}
+
+// Forget drops the saved definitions whose server session is listed in
+// refs - terminals that exited while no client was attached, which must not
+// be rerun unasked - together with their places in the saved layout. A ref
+// no definition carries is ignored, so a list may be applied twice.
+func (ws *Workspace) Forget(refs []string) {
+	gone := map[string]bool{}
+	for _, r := range refs {
+		if r != "" {
+			gone[r] = true
+		}
+	}
+	if len(gone) == 0 {
+		return
+	}
+	for _, p := range ws.Projects {
+		// A leaf names a key, and the n-th leaf with a key belongs to the
+		// n-th terminal with it, running ones first (see layoutToState), so
+		// the occurrence number is what picks out the right leaf.
+		seen := map[string]int{}
+		for _, t := range p.Terminals {
+			seen[t.Key()]++
+		}
+		drop := map[string]map[int]bool{}
+		kept := p.Saved[:0]
+		for _, s := range p.Saved {
+			k := s.key()
+			n := seen[k]
+			seen[k]++
+			if !gone[s.Ref] {
+				kept = append(kept, s)
+				continue
+			}
+			if drop[k] == nil {
+				drop[k] = map[int]bool{}
+			}
+			drop[k][n] = true
+		}
+		if len(drop) == 0 {
+			continue
+		}
+		p.Saved = kept
+		p.Layout = dropLeaves(p.Layout, drop, map[string]int{})
+		if p.Focus != "" && !p.hasKey(p.Focus) {
+			p.Focus = ""
+		}
+	}
+}
+
+// dropLeaves removes the leaves whose occurrence of their key (counted in
+// reading order) is listed in drop, collapsing a split left with one child.
+func dropLeaves(l *Layout, drop map[string]map[int]bool, seen map[string]int) *Layout {
+	if l == nil {
+		return nil
+	}
+	if l.First == nil && l.Second == nil {
+		n := seen[l.Key]
+		seen[l.Key]++
+		if drop[l.Key][n] {
+			return nil
+		}
+		return l
+	}
+	first, second := dropLeaves(l.First, drop, seen), dropLeaves(l.Second, drop, seen)
+	switch {
+	case first == nil:
+		return second
+	case second == nil:
+		return first
+	}
+	return &Layout{Side: l.Side, Ratio: l.Ratio, First: first, Second: second}
+}
+
+// hasKey reports whether a running terminal or saved definition has key k.
+func (p *Project) hasKey(k string) bool {
+	for _, t := range p.Terminals {
+		if t.Key() == k {
+			return true
+		}
+	}
+	for _, s := range p.Saved {
+		if s.key() == k {
+			return true
+		}
+	}
+	return false
 }
 
 // projectCheckouts is every checkout git currently reports for p - the
@@ -118,7 +216,7 @@ func (ws *Workspace) Snapshot() state.File {
 		sp := state.Project{Name: p.Name}
 		var keys []string
 		for _, t := range p.Terminals {
-			st := state.Terminal{Name: t.Name, Command: t.Command}
+			st := state.Terminal{Name: t.Name, Command: t.Command, Ref: sessionRef(t.Session)}
 			if t.Worktree != nil {
 				st.Branch, st.Worktree = t.Worktree.Branch, ws.relPath(t.Worktree.Path)
 			}
@@ -126,7 +224,7 @@ func (ws *Workspace) Snapshot() state.File {
 			keys = append(keys, t.Key())
 		}
 		for _, s := range p.Saved {
-			sp.Terminals = append(sp.Terminals, state.Terminal{Name: s.Name, Command: s.Command, Branch: s.Branch, Worktree: ws.relPath(s.Worktree)})
+			sp.Terminals = append(sp.Terminals, state.Terminal{Name: s.Name, Command: s.Command, Branch: s.Branch, Worktree: ws.relPath(s.Worktree), Ref: s.Ref})
 			keys = append(keys, s.key())
 		}
 		if len(sp.Terminals) == 0 {
@@ -144,6 +242,16 @@ func (ws *Workspace) Snapshot() state.File {
 		f.Projects = append(f.Projects, sp)
 	}
 	return f
+}
+
+// sessionRef is the server session ref of s, or "" for a session that runs
+// in this process. The workspace learns it only through this method, so it
+// never depends on the server package.
+func sessionRef(s Session) string {
+	if r, ok := s.(interface{ Ref() string }); ok {
+		return r.Ref()
+	}
+	return ""
 }
 
 func (ws *Workspace) relPath(abs string) string {
@@ -182,8 +290,16 @@ func (p *Project) remember(s SavedTerminal) {
 // command and worktree path, exactly what Key() expresses. Since a worktree
 // may now hold several definitions, this is the only safe way to remove
 // one: matching on the worktree path alone (as before this task) could drop
-// a different definition that happens to share the path.
+// a different definition that happens to share the path. A definition equal
+// in every field, Ref included, is preferred, so opening one of two
+// same-key definitions by its session leaves the other's ref in place.
 func (p *Project) forget(s SavedTerminal) {
+	for i, cur := range p.Saved {
+		if cur == s {
+			p.Saved = append(p.Saved[:i], p.Saved[i+1:]...)
+			return
+		}
+	}
 	for i, cur := range p.Saved {
 		if cur.key() == s.key() {
 			p.Saved = append(p.Saved[:i], p.Saved[i+1:]...)
@@ -213,7 +329,7 @@ func (p *Project) forgetPath(worktree string) {
 // On success the definition leaves p.Saved (it is running now).
 func (ws *Workspace) OpenSaved(p *Project, s SavedTerminal, cols, rows int) (*Terminal, error) {
 	if s.Worktree == "" {
-		t, err := ws.startTerminal(p, s.Name, s.Command, nil, cols, rows)
+		t, err := ws.startTerminal(p, s.Name, s.Command, s.Ref, nil, cols, rows)
 		if err == nil {
 			p.forget(s)
 		}
@@ -246,7 +362,7 @@ func (ws *Workspace) OpenSaved(p *Project, s SavedTerminal, cols, rows int) (*Te
 	if _, err := os.Stat(s.Worktree); err != nil {
 		return nil, errors.New("worktree directory missing")
 	}
-	t, err := ws.startTerminal(p, s.Name, s.Command, &git.Worktree{Path: s.Worktree, Branch: branch}, cols, rows)
+	t, err := ws.startTerminal(p, s.Name, s.Command, s.Ref, &git.Worktree{Path: s.Worktree, Branch: branch}, cols, rows)
 	if err == nil {
 		p.forget(s)
 	}
@@ -269,6 +385,20 @@ type RestoreResult struct {
 func (ws *Workspace) OpenAll(p *Project, cols, rows int) (RestoreResult, error) {
 	res := ws.open(p, append([]SavedTerminal(nil), p.Saved...), false, cols, rows)
 	return res, nil
+}
+
+// OpenLive is OpenAll restricted to the definitions whose server session
+// is still running (their Ref is in live), which Adopt then hands back
+// instead of a new spawn. Every other definition stays in p.Saved
+// untouched. Skipped and NotOpened are counted as OpenAll counts them.
+func (ws *Workspace) OpenLive(p *Project, live map[string]bool, cols, rows int) RestoreResult {
+	var defs []SavedTerminal
+	for _, s := range p.Saved {
+		if s.Ref != "" && live[s.Ref] {
+			defs = append(defs, s)
+		}
+	}
+	return ws.open(p, defs, false, cols, rows)
 }
 
 // RestoreOne starts a single saved terminal of p: the one that had focus

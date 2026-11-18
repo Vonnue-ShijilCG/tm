@@ -211,3 +211,55 @@ func TestVersion2FileLoadsWithNoCommand(t *testing.T) {
 		t.Errorf("command = %q, want empty for a v2 file", got)
 	}
 }
+
+func TestTerminalRefSurvivesARoundTrip(t *testing.T) {
+	root := t.TempDir()
+	in := File{Version: Version, Projects: []Project{{
+		Name:      "api",
+		Terminals: []Terminal{{Command: "npm run dev", Ref: "00ff00ff00ff00ff"}, {Name: "shell"}},
+	}}}
+	if err := Save(root, in); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(data), `"ref"`); n != 1 {
+		t.Errorf("file has %d ref keys, want 1 (omitted when empty):\n%s", n, data)
+	}
+	out, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if out.Version != 3 {
+		t.Errorf("version = %d, want 3", out.Version)
+	}
+	if got := out.Projects[0].Terminals[0].Ref; got != "00ff00ff00ff00ff" {
+		t.Errorf("ref = %q, want %q", got, "00ff00ff00ff00ff")
+	}
+	if got := out.Projects[0].Terminals[1].Ref; got != "" {
+		t.Errorf("a terminal with no ref loaded %q, want empty", got)
+	}
+}
+
+func TestLoadClearsMalformedRefButKeepsTerminal(t *testing.T) {
+	root := t.TempDir()
+	body := `{"version":3,"projects":[{"name":"api","terminals":[{"command":"a","ref":"../../x"},{"command":"b","ref":"00FF00FF00FF00FF"},{"command":"c","ref":"0123456789abcdef"}]}]}`
+	if err := os.WriteFile(filepath.Join(root, FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load(root)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	terms := out.Projects[0].Terminals
+	if len(terms) != 3 {
+		t.Fatalf("terminals = %+v, want all three kept", terms)
+	}
+	for i, want := range []string{"", "", "0123456789abcdef"} {
+		if terms[i].Ref != want {
+			t.Errorf("terminal %d ref = %q, want %q", i, terms[i].Ref, want)
+		}
+	}
+}

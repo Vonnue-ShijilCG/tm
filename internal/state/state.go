@@ -107,11 +107,15 @@ func sanitizeLayout(l *Layout, remap map[int]int, seen map[int]bool, depth int) 
 // Terminal is one saved terminal definition. Worktree is relative to the
 // workspace root and empty for terminals running in the project checkout.
 // Command is run in the terminal's shell each time the terminal is started.
+// Ref names the tm server session the terminal was running in when the file
+// was written, empty without a server; it is optional, so files written
+// before it existed load unchanged and Version stays 3.
 type Terminal struct {
 	Name     string `json:"name,omitempty"`
 	Command  string `json:"command,omitempty"`
 	Branch   string `json:"branch,omitempty"`
 	Worktree string `json:"worktree,omitempty"`
+	Ref      string `json:"ref,omitempty"`
 }
 
 // Load reads the state file under root. A missing file yields an empty
@@ -204,6 +208,9 @@ func (f File) sanitized() File {
 			if t.Worktree != "" && !ValidRelPath(t.Worktree) {
 				continue
 			}
+			if !ValidRef(t.Ref) {
+				t.Ref = "" // the definition is still good; it just names no session
+			}
 			remap[i] = len(terms)
 			terms = append(terms, t)
 		}
@@ -231,6 +238,23 @@ func (f File) sanitized() File {
 // line, e.g. "npm run devrm -rf build".
 func stripNewlines(s string) string {
 	return strings.NewReplacer("\n", " ", "\r", " ").Replace(s)
+}
+
+// ValidRef reports whether ref could be a server session ref: empty, or 16
+// lowercase hex characters (a random 64-bit value).
+func ValidRef(ref string) bool {
+	if ref == "" {
+		return true
+	}
+	if len(ref) != 16 {
+		return false
+	}
+	for _, c := range ref {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // ValidName reports whether name is a plain directory name.

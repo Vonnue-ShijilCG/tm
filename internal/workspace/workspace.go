@@ -156,6 +156,12 @@ type Workspace struct {
 	Projects []*Project
 	Limits   LimitSource // per-project terminal limit; ConfigLimit unless replaced
 
+	// Adopt, when set, is asked for an already-running session before a
+	// saved definition with a Ref is started; a non-nil answer is used
+	// instead of spawning, and its command is not typed again (it is
+	// already running there). Nil means spawn as usual.
+	Adopt func(ref string) Session
+
 	spawn       Spawner
 	nextID      int
 	limitNotice string
@@ -189,7 +195,7 @@ func (ws *Workspace) CreateTerminal(p *Project, opts Options, cols, rows int) (*
 			return nil, err
 		}
 	}
-	return ws.startTerminal(p, opts.Name, opts.Command, wt, cols, rows)
+	return ws.startTerminal(p, opts.Name, opts.Command, "", wt, cols, rows) // a new terminal never adopts
 }
 
 // CanCreateTerminal is the single rule every creation path goes through:
@@ -230,15 +236,24 @@ func (ws *Workspace) CurrentLimit() Limit { return ws.limit() }
 
 // startTerminal spawns the session and registers the terminal. It enforces
 // the limit as the final guard for every path, including reopening saved
-// definitions.
-func (ws *Workspace) startTerminal(p *Project, name, command string, wt *git.Worktree, cols, rows int) (*Terminal, error) {
+// definitions. ref is the server session the definition last ran in; when
+// Adopt hands that session back it is used as it is, without a spawn and
+// without typing the command into it again.
+func (ws *Workspace) startTerminal(p *Project, name, command, ref string, wt *git.Worktree, cols, rows int) (*Terminal, error) {
 	if err := ws.CanCreateTerminal(p); err != nil {
 		return nil, err
 	}
 	t := &Terminal{Name: name, Command: command, Worktree: wt}
-	s, err := ws.spawn(t.Dir(p), cols, rows)
-	if err != nil {
-		return nil, err
+	var s Session
+	if ref != "" && ws.Adopt != nil {
+		s = ws.Adopt(ref)
+	}
+	adopted := s != nil
+	if !adopted {
+		var err error
+		if s, err = ws.spawn(t.Dir(p), cols, rows); err != nil {
+			return nil, err
+		}
 	}
 	ws.nextID++
 	p.nextNum++
@@ -246,7 +261,7 @@ func (ws *Workspace) startTerminal(p *Project, name, command string, wt *git.Wor
 	p.Terminals = append(p.Terminals, t)
 	p.active = len(p.Terminals) - 1
 	p.Notice = ""
-	if command != "" { // typed into the shell, so the pane is a usable prompt when it ends
+	if command != "" && !adopted { // typed into the shell, so the pane is a usable prompt when it ends
 		s.SendText(command + "\n")
 	}
 	return t, nil

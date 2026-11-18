@@ -627,3 +627,254 @@ func TestRemovingAWorktreeForgetsEveryDefinitionSharingIt(t *testing.T) {
 		t.Errorf("removing the worktree should forget every definition pointing at it, got %+v", p.Saved)
 	}
 }
+
+// refSession is a fakeSession that also reports a server session ref, the
+// way a remote session does.
+type refSession struct {
+	fakeSession
+	ref string
+}
+
+func (r *refSession) Ref() string { return r.ref }
+
+// refWorkspace is a workspace on a real temp root (so Save works) whose one
+// project is not a Git repository, so only plain terminals are involved.
+func refWorkspace(t *testing.T, spawn Spawner) *Workspace {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "api")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return New(root, []project.Project{{Name: "api", Path: dir}}, spawn)
+}
+
+func TestRefRoundTripsThroughState(t *testing.T) {
+	ws := refWorkspace(t, func(dir string, cols, rows int) (Session, error) {
+		return &refSession{ref: "00ff00ff00ff00ff"}, nil
+	})
+	if _, err := ws.CreateTerminal(ws.Projects[0], Options{Command: "npm run dev"}, 80, 24); err != nil {
+		t.Fatal(err)
+	}
+	if err := ws.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	ws2 := New(ws.Root, []project.Project{ws.Projects[0].Project}, nil)
+	if err := ws2.Restore(); err != nil {
+		t.Fatal(err)
+	}
+	p := ws2.Projects[0]
+	if len(p.Saved) != 1 || p.Saved[0].Ref != "00ff00ff00ff00ff" || p.Saved[0].Command != "npm run dev" {
+		t.Fatalf("saved = %+v, want the definition with its ref", p.Saved)
+	}
+	// A saved definition keeps its ref through the next snapshot too.
+	if got := ws2.Snapshot().Projects[0].Terminals[0].Ref; got != "00ff00ff00ff00ff" {
+		t.Errorf("snapshot of a restored definition has ref %q", got)
+	}
+
+	// A file written before refs existed loads exactly as before.
+	body := `{"version":3,"projects":[{"name":"api","terminals":[{"command":"make watch"}],"layout":{"terminal":0}}]}`
+	if err := os.WriteFile(filepath.Join(ws.Root, state.FileName), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ws3 := New(ws.Root, []project.Project{ws.Projects[0].Project}, nil)
+	if err := ws3.Restore(); err != nil {
+		t.Fatal(err)
+	}
+	if want := []SavedTerminal{{Command: "make watch"}}; !reflect.DeepEqual(ws3.Projects[0].Saved, want) {
+		t.Errorf("saved = %+v, want %+v", ws3.Projects[0].Saved, want)
+	}
+	if ws3.Projects[0].Layout == nil {
+		t.Error("layout of a file without refs should load")
+	}
+}
+
+func TestSnapshotWritesNoRefForSessionsWithout(t *testing.T) {
+	ws := refWorkspace(t, func(dir string, cols, rows int) (Session, error) { return &fakeSession{}, nil })
+	if _, err := ws.CreateTerminal(ws.Projects[0], Options{}, 80, 24); err != nil {
+		t.Fatal(err)
+	}
+	if got := ws.Snapshot().Projects[0].Terminals[0].Ref; got != "" {
+		t.Errorf("a local session has no ref, snapshot wrote %q", got)
+	}
+}
+
+func TestRefIsNotPartOfKey(t *testing.T) {
+	a := SavedTerminal{Command: "x", Ref: "aaaaaaaaaaaaaaaa"}
+	b := SavedTerminal{Command: "x", Ref: "bbbbbbbbbbbbbbbb"}
+	if a.key() != b.key() {
+		t.Error("Ref must not change a terminal's key")
+	}
+}
+
+// twoRefs is a state file with two definitions, refs a and b, side by side.
+func twoRefs() state.File {
+	zero, one := 0, 1
+	return state.File{Version: state.Version, Projects: []state.Project{{
+		Name: "api",
+		Terminals: []state.Terminal{
+			{Command: "server", Ref: "a"},
+			{Command: "tests", Ref: "b"},
+		},
+		Layout: &state.Layout{Direction: state.DirSide, Ratio: 0.5,
+			First: &state.Layout{Terminal: &zero}, Second: &state.Layout{Terminal: &one}},
+		Focused: &zero,
+	}}}
+}
+
+func TestRestoreDropsTerminalsListedAsExited(t *testing.T) {
+	ws := refWorkspace(t, nil)
+	ws.RestoreFrom(twoRefs())
+	p := ws.Projects[0]
+	ws.Forget([]string{"a"})
+	if len(p.Saved) != 1 || p.Saved[0].Ref != "b" {
+		t.Fatalf("saved = %+v, want only b", p.Saved)
+	}
+	if leaves := p.Layout.Leaves(); len(leaves) != 1 || leaves[0] != p.Saved[0].key() {
+		t.Errorf("layout leaves = %q, want just b's", leaves)
+	}
+	if p.Focus != "" {
+		t.Errorf("focus = %q, should be cleared once the focused terminal is forgotten", p.Focus)
+	}
+	ws.Forget([]string{"a", "zzzz"}) // already gone, or never known: nothing happens
+	if len(p.Saved) != 1 {
+		t.Errorf("forgetting unknown refs changed saved: %+v", p.Saved)
+	}
+}
+
+func TestForgetDropsTheRightLeafAmongSharedKeys(t *testing.T) {
+	// Two definitions with one key are matched positionally: forgetting the
+	// second must drop the second leaf, leaving the first in its place.
+	zero, one, two := 0, 1, 2
+	f := state.File{Version: state.Version, Projects: []state.Project{{
+		Name:      "api",
+		Terminals: []state.Terminal{{Ref: "a"}, {Command: "log"}, {Ref: "b"}},
+		Layout: &state.Layout{Direction: state.DirStack, Ratio: 0.5,
+			First: &state.Layout{Direction: state.DirSide, Ratio: 0.5,
+				First: &state.Layout{Terminal: &zero}, Second: &state.Layout{Terminal: &one}},
+			Second: &state.Layout{Terminal: &two}},
+	}}}
+	ws := refWorkspace(t, nil)
+	ws.RestoreFrom(f)
+	p := ws.Projects[0]
+	ws.Forget([]string{"b"})
+	if len(p.Saved) != 2 || p.Saved[0].Ref != "a" || p.Saved[1].Command != "log" {
+		t.Fatalf("saved = %+v", p.Saved)
+	}
+	l := p.Layout
+	if l == nil || !l.Side || l.First.Key != p.Saved[0].key() || l.Second.Key != p.Saved[1].key() {
+		t.Errorf("layout = %+v, want the side-by-side split of a and log", l)
+	}
+}
+
+func TestAdoptSkipsSpawnAndCommand(t *testing.T) {
+	spawns := 0
+	ws := refWorkspace(t, func(dir string, cols, rows int) (Session, error) {
+		spawns++
+		return &fakeSession{}, nil
+	})
+	ws.RestoreFrom(twoRefs())
+	p := ws.Projects[0]
+	adopted := &refSession{ref: "a"}
+	var asked []string
+	ws.Adopt = func(ref string) Session {
+		asked = append(asked, ref)
+		if ref == "a" {
+			return adopted
+		}
+		return nil
+	}
+
+	res := ws.OpenLive(p, map[string]bool{"a": true}, 80, 24)
+	if spawns != 0 {
+		t.Errorf("spawner called %d times, want 0", spawns)
+	}
+	if len(adopted.text) != 0 {
+		t.Errorf("adopted session was typed into: %q", adopted.text)
+	}
+	if len(res.Opened) != 1 || res.Opened[0].Session != adopted || res.Opened[0].Command != "server" {
+		t.Fatalf("opened = %+v, want the adopted terminal", res.Opened)
+	}
+	if len(p.Terminals) != 1 || p.Terminals[0] != res.Opened[0] {
+		t.Errorf("terminals = %+v, want the adopted one running", p.Terminals)
+	}
+	if !reflect.DeepEqual(asked, []string{"a"}) {
+		t.Errorf("Adopt asked for %q, want only a", asked)
+	}
+	if want := []SavedTerminal{{Command: "tests", Ref: "b"}}; !reflect.DeepEqual(p.Saved, want) {
+		t.Errorf("saved = %+v, want b left untouched", p.Saved)
+	}
+	// The running terminal's ref comes from its session.
+	if got := ws.Snapshot().Projects[0].Terminals; got[0].Ref != "a" || got[1].Ref != "b" {
+		t.Errorf("snapshot refs = %+v", got)
+	}
+}
+
+func TestOpenLiveRespectsTheLimit(t *testing.T) {
+	ws := refWorkspace(t, nil)
+	ws.Limits = func() Limit { return Limit{Max: 1} }
+	ws.RestoreFrom(twoRefs())
+	p := ws.Projects[0]
+	ws.Adopt = func(ref string) Session { return &refSession{ref: ref} }
+	res := ws.OpenLive(p, map[string]bool{"a": true, "b": true}, 80, 24)
+	if len(res.Opened) != 1 || res.NotOpened != 1 || res.Limit.Max != 1 {
+		t.Errorf("result = %+v, want one opened and one not opened", res)
+	}
+}
+
+func TestAdoptMissFallsBackToSpawnAndCommand(t *testing.T) {
+	var spawned []*fakeSession
+	ws := refWorkspace(t, func(dir string, cols, rows int) (Session, error) {
+		f := &fakeSession{}
+		spawned = append(spawned, f)
+		return f, nil
+	})
+	ws.RestoreFrom(twoRefs())
+	p := ws.Projects[0]
+	ws.Adopt = func(string) Session { return nil }
+	if _, err := ws.OpenAll(p, 80, 24); err != nil {
+		t.Fatal(err)
+	}
+	if len(spawned) != 2 || !reflect.DeepEqual(spawned[0].text, []string{"server\n"}) {
+		t.Errorf("spawned = %+v, want both spawned and their commands typed", spawned)
+	}
+}
+
+func TestCreateTerminalNeverAdopts(t *testing.T) {
+	ws := refWorkspace(t, func(dir string, cols, rows int) (Session, error) { return &fakeSession{}, nil })
+	ws.Adopt = func(string) Session {
+		t.Error("a new terminal must never adopt a session")
+		return &refSession{}
+	}
+	if _, err := ws.CreateTerminal(ws.Projects[0], Options{}, 80, 24); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExitedTerminalForgetsItsRef(t *testing.T) {
+	ws := refWorkspace(t, func(dir string, cols, rows int) (Session, error) { return &refSession{ref: "cccccccccccccccc"}, nil })
+	term, _ := ws.CreateTerminal(ws.Projects[0], Options{}, 80, 24)
+	ws.Remove(term.ID)
+	if got := ws.Projects[0].Saved[0].Ref; got != "" {
+		t.Errorf("an exited terminal's definition kept ref %q; its session is gone", got)
+	}
+}
+
+func TestOpenLiveLeavesTheOtherSameKeyDefinitionsRef(t *testing.T) {
+	f := state.File{Version: state.Version, Projects: []state.Project{{
+		Name:      "api",
+		Terminals: []state.Terminal{{Command: "claude", Ref: "a"}, {Command: "claude", Ref: "b"}},
+	}}}
+	ws := refWorkspace(t, nil)
+	ws.RestoreFrom(f)
+	p := ws.Projects[0]
+	ws.Adopt = func(ref string) Session { return &refSession{ref: ref} }
+	res := ws.OpenLive(p, map[string]bool{"b": true}, 80, 24)
+	if len(res.Opened) != 1 || sessionRef(res.Opened[0].Session) != "b" {
+		t.Fatalf("opened = %+v, want b's session", res.Opened)
+	}
+	if want := []SavedTerminal{{Command: "claude", Ref: "a"}}; !reflect.DeepEqual(p.Saved, want) {
+		t.Errorf("saved = %+v, want a still saved with its own ref", p.Saved)
+	}
+}
