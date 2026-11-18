@@ -32,8 +32,10 @@ what the code actually draws.)*
   split reads as four panes rather than one wall of text.
 - See what changed without leaving tm: `d` shows a project's uncommitted
   changes, each file as it was committed beside how it is now, line for line.
-- Terminal definitions and layouts survive restarts. Processes do not.
-- One small JSON state file per workspace, no daemon.
+- Terminal definitions and layouts survive restarts. Processes do not —
+  unless you turn on the background server, which keeps every terminal
+  running after you close the window (opt-in, see below).
+- One small JSON state file per workspace; no daemon unless you ask for one.
 
 ## Install
 
@@ -85,11 +87,45 @@ tm
   mouse selection would drag in the card border and whatever the pane beside it
   is showing on the same rows. The text goes to your clipboard with OSC 52, so
   it works over SSH; terminals that ship with OSC 52 disabled will ignore it.
-- `alt+s` returns to the sidebar, `s` shows every shortcut, `q` quits. Plain
+- `alt+s` returns to the sidebar, `s` shows every shortcut, `q` quits (with the
+  background server on, `q` leaves and `Q` quits; see below). Plain
   `Esc` goes to the program, so it interrupts Claude Code and leaves Vim's
   insert mode as usual.
 - Inside a terminal everything you type reaches the program. Only a few
   `Alt` chords belong to `tm`; press `s` in the sidebar to see them.
+
+### Keep terminals running after you close the window
+
+Add this to `~/.config/tm/config.toml`:
+
+```toml
+server = true
+```
+
+`tm` then runs your terminals in a small background server, one per
+workspace folder, and the window only shows them. Close the window, lose
+the SSH connection, run `tm` again in the same folder, and every terminal is
+where you left it — hidden ones included — still running, with what it
+printed meanwhile. A project whose terminals printed while you were away has
+its sidebar marker turned amber.
+
+| Key / command | With `server = true` |
+| --- | --- |
+| `q` / `ctrl+c` (sidebar), or closing the window | Leave. Every terminal keeps running. |
+| `Q` (sidebar) | Stop everything: kill every terminal, save the layout, end the server. What `q` does without the server. |
+| `alt+delete`, or `d` in the Terminal Manager | Kill that one terminal, as always. |
+| `tm stop` (in the workspace folder) | Stop the server and every terminal in it, from outside `tm`. |
+
+Running `tm` while another window already has the workspace open moves it to
+the new window; the old one exits saying `tm: opened in another window`. A
+terminal that finishes while no window is open is gone the next time, just
+as it would be had the window stayed open.
+
+No process survives a reboot: after one, `tm` brings back the layout and
+re-runs each terminal's command from `.terminal-state.json`, exactly as
+without the server. With `server` off, `tm` refuses to start while a server
+still holds this workspace's terminals, rather than run every command
+twice; turn the setting back on to reattach, or run `tm stop`.
 
 ## Where things live
 
@@ -97,7 +133,8 @@ tm
 | --- | --- |
 | Saved terminals and layouts | `<workspace>/.terminal-state.json` |
 | Worktrees created by `tm` | `<workspace>/.terminal-worktrees/<project>/` |
-| Configuration | `~/.config/tm/config.toml` (`max_terminals = 6`) |
+| Configuration | `~/.config/tm/config.toml` (`max_terminals = 6`, `server = true`) |
+| Background server socket, lock and log | `~/.local/state/tm/` (`$XDG_STATE_HOME/tm`) |
 
 `tm` only removes worktrees it created and that no terminal still uses. The
 project's own checkout is never touched.

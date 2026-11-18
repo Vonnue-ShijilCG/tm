@@ -234,8 +234,6 @@ func TestServerIgnoresHangupAndStopsOnTerm(t *testing.T) {
 	go func() { served <- run([]string{"__server", root}, io.Discard) }()
 	waitFor(t, func() bool { _, running := server.Probe(paths); return running })
 
-	// serve's signal.Ignore(SIGHUP) stays in force for the rest of this test
-	// binary; nothing else here relies on SIGHUP.
 	if err := syscall.Kill(os.Getpid(), syscall.SIGHUP); err != nil {
 		t.Fatal(err)
 	}

@@ -175,10 +175,19 @@ func stop(root string, stdout io.Writer) error {
 }
 
 // serve is the hidden `tm __server <root>`, which Ensure starts detached.
-// It outlives the terminal that started it, so it ignores SIGHUP; SIGTERM
-// stops it as `tm stop` would.
+// It outlives the terminal that started it, so a SIGHUP is caught and
+// dropped; SIGTERM stops it as `tm stop` would.
+//
+// Caught, not signal.Ignore'd: an ignored signal stays ignored across
+// exec, so every shell the server started, and everything run in it,
+// ignored SIGHUP too. Killing a shell hangs up its PTY, and the hangup is
+// what ends the job in its foreground — with it ignored, a dev server
+// would outlive the terminal it was started in. A caught signal is reset to
+// its default in the child.
 func serve(root string) error {
-	signal.Ignore(syscall.SIGHUP)
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	defer signal.Stop(hup)
 	// Registered before the socket exists, so a SIGTERM sent to a server
 	// that answers is always caught rather than killing it mid-stop.
 	term := make(chan os.Signal, 1)

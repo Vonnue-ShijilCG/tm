@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`tm` is a Linux-only, terminal-native workspace manager written in Go (Bubble Tea TUI). Run inside a directory whose direct children are Git repositories; it shows each repo in a sidebar and hosts multiple PTY-backed terminals per project in split panes, each optionally in its own Git worktree. Terminal definitions and layouts persist in `<workspace>/.terminal-state.json`; processes do not. No daemon.
+`tm` is a Linux-only, terminal-native workspace manager written in Go (Bubble Tea TUI). Run inside a directory whose direct children are Git repositories; it shows each repo in a sidebar and hosts multiple PTY-backed terminals per project in split panes, each optionally in its own Git worktree. Terminal definitions and layouts persist in `<workspace>/.terminal-state.json`; processes do not, unless server mode is on: it is opt-in (`server = true` in `config.toml`), and then a per-workspace background server holds the terminals so they outlive the window (see Background server). With it off there is no daemon and tm behaves as it always has.
 
 ## Commands
 
@@ -28,7 +28,11 @@ Dependency direction (lower layers know nothing about higher ones):
 cmd/tm  →  ui  →  workspace  →  { project, git, config, state }
                 ↘  terminal (PTY + vt emulator; independent of everything above)
                 ↘  diff (hunk headers → aligned rows; imports neither git nor Bubble Tea)
+                ↘  server  →  terminal (background server, protocol, RemoteSession)
 ```
+
+`workspace` does not import `server`: a server-held terminal reaches it only
+as a `Session`, and its ref through an optional `Ref() string` method.
 
 - **`project`**: `Discover(root)` — every direct subdirectory with a `.git` entry.
 - **`git`**: thin wrapper over the `git` CLI (branches, worktrees, dirty check, and in `git/changes.go` the uncommitted-changes queries `Changes`, `ShowHEAD`, `DiffHEAD`). `git.Head(dir)` reads `.git/HEAD` directly without spawning a process; the UI uses it via a 1s TTL cache (`ui/branches.go`) because rendering happens on every output event.
@@ -39,6 +43,7 @@ cmd/tm  →  ui  →  workspace  →  { project, git, config, state }
 root by design, which is why the form refuses a worktree outside the workspace rather than
 accepting one and dropping the terminal on save. Malformed layout nodes decode to empty nodes and are sanitised away rather than failing the load.
 - **`config`**: `$XDG_CONFIG_HOME/tm/config.toml` with `max_terminals`. Re-read on every creation attempt (`workspace.LimitSource`), so edits apply without restart; invalid values fall back to the default and carry a `Notice`.
+- **`server`**: the background server (`server.go`, `outbox.go`), its gob wire protocol (`protocol.go`), the client side with `RemoteSession` (`client.go`), and the files and start/stop/probe helpers (`paths.go`, `daemon.go`, `listen.go`). Knows sessions only — nothing about projects, layouts or git (see Background server).
 - **`ui`**: the Bubble Tea `Model` (`ui/model.go`), the new-terminal form, the per-project Terminal Manager (`ui/manager.go`), the uncommitted-changes view (`ui/diffview.go`), copy mode (`ui/copymode.go`), and the pane tree.
 
 ### Lists longer than the window
@@ -333,6 +338,130 @@ ship with it disabled, and there is no reply, so tm cannot report failure.
 Moving the cursor reuses `keys.Up`/`Down`/`Top`/`Bottom` rather than adding
 bindings: the same keys meaning the same thing, and the help screen has no row
 to spare for repeating them.
+
+### Background server
+
+Opt-in with `server = true` in `config.toml`. Without it a closed window —
+or a dropped SSH connection — takes every shell, dev server and agent
+session with it, because the UI process owns the PTYs. With it, `tm` is a
+client and the terminals live in `tm __server <root>`, the same binary
+re-executed, one per workspace folder. `server.Ensure` starts it under a
+`flock` on `<id>.lock` so two `tm`s started at once do not start two
+servers, and starts it in a session of its own (`setsid`) with its stdio
+in `<id>.log`, so the window's hangup never reaches it.
+
+**Files.** All four live in `$XDG_STATE_HOME/tm/` (default
+`~/.local/state/tm/`, mode 0700) under a stem that is the first 16 hex chars
+of the sha256 of the absolute, symlink-resolved root: `<id>.sock`,
+`<id>.lock`, `<id>.exited`, `<id>.log`. Never `$XDG_RUNTIME_DIR`: logind
+deletes it when the user's last session ends — which is exactly an SSH drop
+on a headless machine — and a server whose socket vanished would be
+unreachable and get a duplicate started beside it. When the socket path
+would not fit `sun_path` (107 bytes), all four move to `/tmp/tm-<uid>/`,
+which must be a real directory owned by the user with mode 0700.
+
+**What lives where.** The server is deliberately dumb: it owns sessions
+(PTY + process + `vt.Emulator`, i.e. `terminal.Session`) keyed by a random
+64-bit ref, and answers their terminal queries itself, so a program asking
+for the cursor position while no window is attached does not stall.
+Everything else — `workspace.Workspace`, worktrees, the config limit, the
+state file, the UI — stays in the client. On every persist the client also
+hands the server an opaque blob (`ui/attach.go`'s `uiBlob`: the state
+snapshot plus which running terminals were hidden, which the state file does
+not record) and gets it back on attach. That is how a reattach restores
+hidden terminals without the server learning the workspace model. A spawn
+carries the client's `os.Environ()`: a long-lived server's own environment
+would be days old, and a shell opened after an SSH reconnect would get a
+stale `SSH_AUTH_SOCK` and `DISPLAY`.
+
+**`RemoteSession` is a `workspace.Session`.** Nothing above `workspace`
+knows which kind it holds, which is why scrollback, copy mode, mouse
+forwarding and the pane cache work unchanged. Frames are *pushed*: the
+server throttles each session to `frameWindow` (16 ms, the same window as
+`outputWindow`) and sends the rendered screen with its version and flags;
+`Render` returns the last frame with no round trip, because tm renders on
+every output event and a round trip per pane per frame is too slow. History
+(`RenderScrolled`, `Lines`) is request/reply, cached by version and offset,
+since it is only asked for while scrolling or copying. Focus is sent to the
+server so the cursor is drawn in the right pane, and both panes' versions
+move so the pane cache cannot keep a card with the cursor in the old one.
+
+**Refs in the state file.** `state.Terminal.Ref` records the session a
+terminal ran in (optional; old files load unchanged and `Version` stays 3).
+It is not part of `Key()`: a terminal is the same terminal whichever session
+runs it. A restored definition whose ref the server still holds is adopted
+rather than spawned, past `max_terminals` if need be, because refusing it
+would leave a running terminal unreachable. Each ref is handed out at most
+once, and a live session the blob does not mention (its write was lost) is
+attached as hidden, so nothing running is ever out of reach.
+
+**Lifetime.**
+
+- `q`/`ctrl+c` in the sidebar, and closing the window, leave: the client
+  exits and every terminal keeps running. The status bar says `leave`, not
+  `quit`, so nobody kills their work by habit — and nobody thinks they did.
+- `Q` (sidebar) is today's quit: every terminal is killed, the state file
+  is saved with their definitions so the next `tm` restores the layout, and
+  the server exits. `tm stop` does the same from the CLI, and SIGTERM to the
+  server likewise. Sessions killed this way are not written to `.exited`:
+  they were stopped, not finished, so their definitions come back.
+- `alt+delete` and the manager's `d` kill one terminal, as before.
+- A second window takes over: the server evicts the first, which exits with
+  `tm: opened in another window`. Two windows driving one workspace was a
+  non-goal, and one that silently keeps a stale copy is worse than one that
+  says it lost.
+- The server exits when it has no live sessions **and** no client — an
+  attached window with zero terminals keeps it — and also when no client
+  has attached within `startGrace` (10 s), so a server whose starter died
+  does not linger.
+- A server that dies under an attached window takes the window with it,
+  saying `tm: the tm server stopped`; the next `tm` starts a fresh server
+  from the state file, which is the reboot path too.
+- The server catches SIGHUP and drops it rather than `signal.Ignore`-ing
+  it. An ignored signal stays ignored across exec, so every shell the
+  server started inherited SIGHUP ignored (seen in `/proc/<pid>/status`
+  `SigIgn` by the end-to-end test) and so did whatever ran in it — and the
+  hangup is what ends a shell's foreground job when the shell is killed.
+
+**Exits while detached are forgotten, as they always were.** Without a
+server an exited terminal leaves the state file at once, so a finished
+`npm test` is never rerun unasked. With nobody attached to do that, a server
+that exits because its last session ended first appends the refs that
+exited to `<id>.exited`; the next `tm` reads it (`server.TakeExited`),
+forgets those terminals in the restored state, and deletes it — only once
+attached or past the guard, so a start that fails leaves it for the next.
+A terminal that exits while detached with the server still running is
+reported in the next `Welcome` and dropped then. Two guards cover an exit
+that races a leaving window — a `-count=20` run caught one being lost: the
+server keeps an `Exit` it had queued for a client that left before reading
+it (`lostExits`, which go to `.exited` too), and on attach `settleRefs`
+forgets a blob ref the server no longer lists, as if it had exited.
+
+**The off-mode guard.** With `server` off, tm still probes the socket
+(`offModeGuard` in `cmd/tm`): starting a second, in-process copy of every
+terminal a running server holds would run each command twice, so tm refuses
+with the count and how to reattach or `tm stop`. It reads `.exited` in off
+mode too, so turning the setting off after the server ended forgets the
+same terminals. The probe goes through `server.PathsFor`, which creates
+`~/.local/state/tm/` even when the setting has never been on.
+
+**The wire protocol** is one gob-encoded `Msg` envelope per message, exactly
+one pointer field set. `Hello`, `Welcome.Protocol`, `Status` and `Stop` are
+frozen across versions: they are what a client and server of different tm
+versions still exchange, so a new tm can count and stop an old server, as
+the mismatch message tells the user to. Gob type-checks every field it
+receives whose name matches a local one, set or not, across the whole of
+`Msg`, so freezing those is not enough: **a field name anywhere under `Msg`
+never changes type.** A version may only add fields, or retire a name and
+add a new one; bump `ProtocolVersion` when it does.
+
+**Testing.** `server.New` takes a `Spawner` like `workspace` does, so the
+protocol and lifetime tests run over a temp socket with fake sessions and no
+PTY. `cmd/tm/server_e2e_test.go` (skipped under `-short`) is the one place
+the pieces meet: it builds tm and drives it in PTYs with tools/screenshot's
+draining emulator — a window closed under a running command, a second
+window finding it still printing, a third taking over, `Q`, and a terminal
+exiting while detached being forgotten.
 
 ### Key handling policy
 
