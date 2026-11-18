@@ -224,7 +224,7 @@ func TestTerminalsReadsProperlyAtOneAndMany(t *testing.T) {
 
 // The hidden server outlives the terminal that started it, so a hangup must
 // not end it; SIGTERM must, and through the same stop as tm stop.
-func TestServerIgnoresHangupAndStopsOnTerm(t *testing.T) {
+func TestServerSurvivesHangupAndStopsOnTerm(t *testing.T) {
 	root := workspace(t)
 	paths, err := server.PathsFor(root)
 	if err != nil {

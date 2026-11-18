@@ -44,9 +44,10 @@ func TestServerKeepsTerminalsAcrossWindows(t *testing.T) {
 	// 1. A terminal running a command that prints forever.
 	a := e.open(t, "A")
 	a.waitScreen(t, "the sidebar", 5*time.Second, contains("api"))
-	// Enter on a project with nothing in it opens its first shell.
+	// Enter on a project with nothing in it opens its first shell. Its
+	// prompt is a bare "$" against the card's left border.
 	a.send(t, "\r")
-	a.waitScreen(t, "the shell prompt", 3*time.Second, contains("$"))
+	a.waitScreen(t, "the shell prompt", 3*time.Second, contains("│$"))
 	a.send(t, "i=0; while :; do i=$((i+1)); echo tick$i; sleep 0.2; done")
 	a.send(t, "\r")
 	a.waitScreen(t, "the command printing", 5*time.Second, func(s string) bool { return lastTick(s) > 0 })
@@ -112,7 +113,7 @@ func TestServerKeepsTerminalsAcrossWindows(t *testing.T) {
 	d.waitScreen(t, "the sidebar", 5*time.Second, contains("solo"))
 	// Enter on a project with nothing in it opens its first shell.
 	d.send(t, "\r")
-	d.waitScreen(t, "the shell prompt", 3*time.Second, contains("$"))
+	d.waitScreen(t, "the shell prompt", 3*time.Second, contains("│$"))
 	// Long enough that the window is certainly gone before it ends; the
 	// .exited check below proves it was.
 	d.send(t, "sleep 2; exit")
@@ -121,6 +122,10 @@ func TestServerKeepsTerminalsAcrossWindows(t *testing.T) {
 		f := e.state(t, root)
 		return len(f.Projects) == 1 && len(f.Projects[0].Terminals) == 1 && f.Projects[0].Terminals[0].Ref != ""
 	})
+	// The ref is recorded at spawn, so the wait above can be true before the
+	// shell has the command. Closing the window then could lose it with the
+	// hangup; the echo is drawn only once the server's shell has it.
+	d.waitScreen(t, "the command echoed", 3*time.Second, contains("sleep 2; exit"))
 	before := d.screen()
 	d.closeWindow(t)
 	for deadline := time.Now().Add(5 * time.Second); ; {
@@ -310,7 +315,7 @@ func (e *e2e) openIn(t *testing.T, name, root string) *window {
 		"COLORTERM=truecolor",
 		"PS1=$ ",
 	)
-	tty, err := pty.StartWithSize(cmd, &pty.Winsize{Cols: winCols, Rows: winRows})
+	tty, err := startInPTY(cmd)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,6 +374,44 @@ func (w *window) waitScreen(t *testing.T, what string, timeout time.Duration, ok
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
+}
+
+// startInPTY starts cmd on a new PTY, as pty.StartWithSize does, but
+// returns a master the runtime poller manages. pty.Open's master is a
+// blocking file, and closing a blocking file while a Read is parked in it
+// defers the real close(2) until that Read returns — which is when tm next
+// draws. A window closed over a silent terminal stayed open, and tm with
+// it, until the shell printed again.
+func startInPTY(cmd *exec.Cmd) (*os.File, error) {
+	ptmx, tty, err := pty.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer tty.Close()
+	if err := pty.Setsize(tty, &pty.Winsize{Cols: winCols, Rows: winRows}); err != nil {
+		ptmx.Close()
+		return nil, err
+	}
+	// Close-on-exec, as every fd Go opens is: a plain dup leaks into tm,
+	// and a master tm holds itself never hangs up.
+	r, _, errno := syscall.Syscall(syscall.SYS_FCNTL, ptmx.Fd(), syscall.F_DUPFD_CLOEXEC, 0)
+	ptmx.Close() // nothing reads it yet, so this close is immediate
+	if errno != 0 {
+		return nil, errno
+	}
+	fd := int(r)
+	if err := syscall.SetNonblock(fd, true); err != nil {
+		syscall.Close(fd)
+		return nil, err
+	}
+	master := os.NewFile(uintptr(fd), "ptmx") // non-blocking: polled
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = tty, tty, tty
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true}
+	if err := cmd.Start(); err != nil {
+		master.Close()
+		return nil, err
+	}
+	return master, nil
 }
 
 // closeWindow is the terminal window going away: the PTY master closes,

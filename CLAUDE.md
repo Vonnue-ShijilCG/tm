@@ -432,8 +432,7 @@ forgets those terminals in the restored state, and deletes it — only once
 attached or past the guard, so a start that fails leaves it for the next.
 A terminal that exits while detached with the server still running is
 reported in the next `Welcome` and dropped then. Two guards cover an exit
-that races a leaving window — a `-count=20` run caught one being lost: the
-server keeps an `Exit` it had queued for a client that left before reading
+that races a leaving window: the server keeps an `Exit` it had queued for a client that left before reading
 it (`lostExits`, which go to `.exited` too), and on attach `settleRefs`
 forgets a blob ref the server no longer lists, as if it had exited.
 
@@ -461,7 +460,12 @@ PTY. `cmd/tm/server_e2e_test.go` (skipped under `-short`) is the one place
 the pieces meet: it builds tm and drives it in PTYs with tools/screenshot's
 draining emulator — a window closed under a running command, a second
 window finding it still printing, a third taking over, `Q`, and a terminal
-exiting while detached being forgotten.
+exiting while detached being forgotten. Its PTY master is opened
+non-blocking and close-on-exec (`startInPTY`) for a reason: closing a
+blocking master while a `Read` is parked in it defers the real close until
+that `Read` returns, so a window "closed" over a silent terminal stayed open
+until the shell next printed — which is what made the exit-while-detached
+step fail intermittently.
 
 ### Key handling policy
 
