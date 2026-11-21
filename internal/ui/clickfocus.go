@@ -55,27 +55,43 @@ func projectNameLines(name string, inner int) []string {
 	return strings.Split(ansi.Wrap(name, max(inner-2, 1), ""), "\n")
 }
 
-// sidebarProjectAt is the index of the project drawn on screen row y, or -1.
-// It measures the frame viewSidebar draws: the border, the title and its
-// blank row, then the list in the rows the footer leaves, scrolled by
-// visibleStart.
-func (m Model) sidebarProjectAt(y int) int {
+// sidebarListHeight is the rows viewSidebar gives the project list: the
+// sidebar less the title and its blank row, and the footer when it fits.
+func (m Model) sidebarListHeight() int {
 	height := m.height - statusHeight - sidebarStyle.GetVerticalFrameSize()
 	if height >= sidebarFooterMin {
 		height -= sidebarFooterRows
 	}
-	height -= 2 // the title and the blank row under it
-	row := y - sidebarStyle.GetBorderTopSize() - 2
-	if row < 0 || row >= height {
-		return -1
-	}
+	return height - 2
+}
+
+// sidebarEntries is each project's lines as the sidebar wraps them.
+func (m Model) sidebarEntries() [][]string {
 	inner := sidebarWidth - sidebarStyle.GetHorizontalFrameSize()
 	entries := make([][]string, len(m.ws.Projects))
 	for i, p := range m.ws.Projects {
 		entries[i] = projectNameLines(p.Name, inner)
 	}
+	return entries
+}
+
+// sidebarStart is the first project the sidebar list draws.
+func (m Model) sidebarStart() int {
+	return stickyStart(m.sidebarEntries(), m.cursor, m.sidebarListHeight(), m.sidebarTop)
+}
+
+// sidebarProjectAt is the index of the project drawn on screen row y, or -1.
+// It measures the frame viewSidebar draws: the border, the title and its
+// blank row, then the list from sidebarStart.
+func (m Model) sidebarProjectAt(y int) int {
+	height := m.sidebarListHeight()
+	row := y - sidebarStyle.GetBorderTopSize() - 2
+	if row < 0 || row >= height {
+		return -1
+	}
+	entries := m.sidebarEntries()
 	used := 0
-	for i := visibleStart(entries, m.cursor, height); i < len(entries); i++ {
+	for i := m.sidebarStart(); i < len(entries); i++ {
 		if used+len(entries[i]) > height {
 			break
 		}

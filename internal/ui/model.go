@@ -53,16 +53,19 @@ type Model struct {
 	root string
 	ws   *workspace.Workspace
 
-	cursor   int // highlighted row in the sidebar
-	selected int // project whose terminals fill the main pane, -1 when none
-	focus    focus
-	form     *newTermForm // open "new terminal" dialog, nil otherwise
-	panel    *manager     // open terminal manager, nil otherwise
-	diff     *diffView    // open uncommitted-changes view, nil otherwise
-	sel      *selection   // mouse selection in a pane, nil otherwise; see mouseselect.go
-	help     bool         // help screen shown over everything
-	notice   string       // one-line message in the status bar (state file problems)
-	quitting bool         // set once quit began; later exit messages must not rewrite state
+	cursor int // highlighted row in the sidebar
+	// sidebarTop is the first project the sidebar list drew, kept so the list
+	// scrolls only when the highlight would leave the screen (stickyStart).
+	sidebarTop int
+	selected   int // project whose terminals fill the main pane, -1 when none
+	focus      focus
+	form       *newTermForm // open "new terminal" dialog, nil otherwise
+	panel      *manager     // open terminal manager, nil otherwise
+	diff       *diffView    // open uncommitted-changes view, nil otherwise
+	sel        *selection   // mouse selection in a pane, nil otherwise; see mouseselect.go
+	help       bool         // help screen shown over everything
+	notice     string       // one-line message in the status bar (state file problems)
+	quitting   bool         // set once quit began; later exit messages must not rewrite state
 
 	zoom bool // render only the focused terminal at full size; the layout tree is untouched
 
@@ -168,6 +171,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	next, cmd := m.update(msg)
 	if nm, ok := next.(Model); ok {
 		nm.noteSelected()
+		nm.sidebarTop = nm.sidebarStart() // what the next View draws from
+		next = nm
 	}
 	return next, cmd
 }
@@ -1280,7 +1285,7 @@ func (m Model) viewSidebarList(height int) string {
 			}
 		}
 	}
-	b.WriteString(strings.Join(visibleEntries(entries, m.cursor, height), "\n"))
+	b.WriteString(strings.Join(linesFrom(entries, stickyStart(entries, m.cursor, height, m.sidebarTop), height), "\n"))
 	return b.String()
 }
 

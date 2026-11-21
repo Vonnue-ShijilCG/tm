@@ -176,3 +176,49 @@ func TestClickingTheButtonRowKeepsTheHighlight(t *testing.T) {
 		t.Errorf("cursor = %d, want it left on 1", m.cursor)
 	}
 }
+
+// fortyProjects is a sidebar far longer than a 12-row window, with the
+// highlight taken to the last project.
+func fortyProjects(t *testing.T) Model {
+	t.Helper()
+	var names []string
+	for i := 0; i < 40; i++ {
+		names = append(names, "proj"+string(rune('A'+i/10))+string(rune('0'+i%10)))
+	}
+	m, _ := discoveredModel(t, names...)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 12})
+	return press(next.(Model), "G")
+}
+
+// A click on a project already on screen must not scroll the list: the row
+// would slide out from under the pointer, and a second click on the same
+// spot would land on another project.
+func TestClickingAScrolledSidebarDoesNotScrollIt(t *testing.T) {
+	m := fortyProjects(t)
+	at := find(t, m, "projD6")
+
+	m = click(m, at[0], at[1])
+	if again := find(t, m, "projD6"); again != at {
+		t.Fatalf("projD6 moved from %v to %v after the click", at, again)
+	}
+	m = click(m, at[0], at[1])
+	if got := m.ws.Projects[m.cursor].Name; got != "projD6" {
+		t.Errorf("a second click on the same spot chose %q, want projD6", got)
+	}
+}
+
+// The keys follow the same rule: moving the highlight up inside the visible
+// part leaves the list where it is.
+func TestMovingUpInsideTheVisibleListDoesNotScrollIt(t *testing.T) {
+	m := fortyProjects(t)
+	top := find(t, m, "projD5")
+
+	m = press(m, "k", "k")
+
+	if got := find(t, m, "projD5"); got != top {
+		t.Errorf("projD5 moved from %v to %v while the highlight moved within view", top, got)
+	}
+	if got := m.ws.Projects[m.cursor].Name; got != "projD7" {
+		t.Errorf("highlight on %q, want projD7", got)
+	}
+}

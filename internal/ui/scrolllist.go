@@ -21,8 +21,14 @@ func visibleEntries(entries [][]string, selected, height int) []string {
 	if height <= 0 {
 		return nil
 	}
+	return linesFrom(entries, visibleStart(entries, selected, height), height)
+}
+
+// linesFrom is the lines of entries from start on, as many whole entries as
+// fit in height rows.
+func linesFrom(entries [][]string, start, height int) []string {
 	var lines []string
-	for _, e := range entries[visibleStart(entries, selected, height):] {
+	for _, e := range entries[min(max(start, 0), len(entries)):] {
 		if len(lines)+len(e) > height {
 			break
 		}
@@ -43,6 +49,38 @@ func visibleStart(entries [][]string, selected, height int) int {
 	for used > height && start < selected {
 		used -= len(entries[start])
 		start++
+	}
+	return start
+}
+
+// stickyStart is where a list that remembers its scroll position starts: at
+// prev, unless that would leave the selected entry off screen, in which case
+// it moves just far enough to show it. Unlike visibleStart it does not pull
+// the selection to the bottom row, so moving inside what is on screen — with
+// a key or a click — leaves the list where it is, and a row never slides out
+// from under the pointer. It also never leaves rows empty at the end that an
+// earlier entry could fill, so a list that grew shorter scrolls back.
+func stickyStart(entries [][]string, selected, height, prev int) int {
+	if len(entries) == 0 || height <= 0 {
+		return 0
+	}
+	selected = min(max(selected, 0), len(entries)-1)
+	start := min(max(prev, 0), len(entries)-1)
+	if selected < start {
+		start = selected
+	}
+	span := func(from, to int) int { // rows taken by entries[from..to]
+		n := 0
+		for _, e := range entries[from : to+1] {
+			n += len(e)
+		}
+		return n
+	}
+	for start < selected && span(start, selected) > height {
+		start++
+	}
+	for start > 0 && span(start-1, len(entries)-1) <= height {
+		start--
 	}
 	return start
 }

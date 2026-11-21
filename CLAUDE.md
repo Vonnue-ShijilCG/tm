@@ -71,11 +71,16 @@ Two rules for anything that draws into a frame:
   wrapped it cost the list its last row. The changes view does the same for
   the same reason.
 
-The list has no scroll position of its own: `visibleStart` recomputes it from
-the cursor every frame. So in a list longer than the sidebar, a click that
-moves the highlight can scroll the list under the pointer, and a second click
-on the same spot lands on another project. Harmless while a click only moves
-the highlight; a sticky offset is the fix if a click ever does more.
+The sidebar keeps a scroll position of its own (`Model.sidebarTop`, through
+`stickyStart`): the list moves only when the highlight would leave the
+screen, and then only far enough to show it. Recomputing the start from the
+cursor every frame, as `visibleStart` does for the manager and the changes
+view, pinned the highlight to the bottom row, so a click on a project in a
+scrolled list slid the row out from under the pointer and a second click on
+the same spot picked another project. `Update` stores the start the next
+`View` draws from, and both `viewSidebarList` and the click hit-test
+(`sidebarProjectAt`) go through `sidebarStart`, so what is drawn and what is
+clicked cannot disagree.
 
 ### Three layout representations
 
@@ -111,7 +116,7 @@ Creating a worktree on a branch that does not already exist requires `Options.Ba
 
 ### Scrollback
 
-The Bubble Tea program runs with mouse reporting on (`tea.WithMouseCellMotion()`), for the wheel, for drag-to-copy (see Copying text) and for clicks, which only move focus (`ui/clickfocus.go`): a pane clicked takes focus as `alt+j` would give it, and a click on the sidebar focuses it as `alt+s` does, with the highlight moved to the project clicked as `j`/`k` would. A click never opens or starts anything and is never forwarded to the program; `sidebarProjectAt` maps rows through `visibleStart`, the same function `visibleEntries` scrolls with, so a click on a scrolled list lands on the project drawn there. `ui/scroll.go` hit-tests the pointer against `paneScreenRects` (pane rects translated by the sidebar width and main-pane border) and keeps a per-terminal offset in `Model.scroll`. Rendering calls `Session.RenderScrolled` when the offset is non-zero; typing, `applyLayout` (resizes) and `dropPane` clear it. A program that enabled mouse tracking (Claude Code, htop, Vim with mouse) gets the wheel forwarded through `Session.SendWheel` in its own protocol; alt-screen programs without mouse tracking get arrow keys; everything else scrolls tm's own history view. Scroll positions are never persisted.
+The Bubble Tea program runs with mouse reporting on (`tea.WithMouseCellMotion()`), for the wheel, for drag-to-copy (see Copying text) and for clicks, which only move focus (`ui/clickfocus.go`): a pane clicked takes focus as `alt+j` would give it, and a click on the sidebar focuses it as `alt+s` does, with the highlight moved to the project clicked as `j`/`k` would. A click never opens or starts anything and is never forwarded to the program; `sidebarProjectAt` maps rows through `sidebarStart`, the same start the sidebar is drawn from, so a click on a scrolled list lands on the project drawn there. `ui/scroll.go` hit-tests the pointer against `paneScreenRects` (pane rects translated by the sidebar width and main-pane border) and keeps a per-terminal offset in `Model.scroll`. Rendering calls `Session.RenderScrolled` when the offset is non-zero; typing, `applyLayout` (resizes) and `dropPane` clear it. A program that enabled mouse tracking (Claude Code, htop, Vim with mouse) gets the wheel forwarded through `Session.SendWheel` in its own protocol; alt-screen programs without mouse tracking get arrow keys; everything else scrolls tm's own history view. Scroll positions are never persisted.
 
 ### Render cadence
 
