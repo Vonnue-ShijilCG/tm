@@ -14,6 +14,7 @@ package workspace
 import (
 	"fmt"
 	"os"
+	"sort"
 
 	uv "github.com/charmbracelet/ultraviolet"
 
@@ -31,7 +32,7 @@ type Session interface {
 	Render(showCursor bool) string
 	RenderScrolled(offset int) string // the screen scrolled back offset lines into history
 	Version() uint64                  // changes whenever Render might return something different
-	Lines(offset int) []string        // the rows Render draws, as plain text, for copy mode
+	Lines(offset int) []string        // the rows Render draws, as plain text, for a mouse selection
 	ScrollbackLen() int               // lines of history available to RenderScrolled
 	IsAltScreen() bool                // the program runs full-screen and keeps no history
 	MouseTracking() bool              // the program asked for mouse events and should get the wheel
@@ -179,6 +180,38 @@ func New(root string, projects []project.Project, spawn Spawner) *Workspace {
 		ws.Projects = append(ws.Projects, &Project{Project: p, active: -1})
 	}
 	return ws
+}
+
+// Rediscover merges a fresh project.Discover of the root into the workspace,
+// for repositories cloned or removed while tm runs. A repository not seen
+// before is added with no terminals, in name order like Discover's. One whose
+// directory is gone is dropped only when nothing runs or is saved in it:
+// forgetting a terminal is not something a rescan may do. It returns the
+// names added and removed.
+func (ws *Workspace) Rediscover(found []project.Project) (added, removed []string) {
+	seen := map[string]bool{}
+	for _, f := range found {
+		seen[f.Path] = true
+	}
+	known := map[string]bool{}
+	kept := ws.Projects[:0:0]
+	for _, p := range ws.Projects {
+		known[p.Path] = true
+		if !seen[p.Path] && len(p.Terminals) == 0 && len(p.Saved) == 0 {
+			removed = append(removed, p.Name)
+			continue
+		}
+		kept = append(kept, p)
+	}
+	for _, f := range found {
+		if !known[f.Path] {
+			kept = append(kept, &Project{Project: f, active: -1})
+			added = append(added, f.Name)
+		}
+	}
+	sort.SliceStable(kept, func(i, j int) bool { return kept[i].Name < kept[j].Name })
+	ws.Projects = kept
+	return added, removed
 }
 
 // NewTerminal spawns a plain shell in p's directory. See CreateTerminal.

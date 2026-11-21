@@ -82,11 +82,13 @@ tm
   and the arrows move the file list, `←`/`→` scroll both columns sideways,
   `n`/`N` jump between changes, `r` re-reads from git, `Esc` closes. Long
   lines are cut rather than wrapped so the two sides stay in step.
-- `alt+c` freezes the pane so you can copy out of it: `j`/`k` move, `v` starts a
-  selection, `y` copies and closes. The lines come from that pane alone — a
-  mouse selection would drag in the card border and whatever the pane beside it
-  is showing on the same rows. The text goes to your clipboard with OSC 52, so
-  it works over SSH; terminals that ship with OSC 52 disabled will ignore it.
+- Drag the mouse over a pane to copy from it; letting go copies. The selection
+  stays inside the pane you started in, so it never picks up the card border
+  or the pane beside it (your terminal's own shift+drag selection still spans
+  the whole window). The text goes to your clipboard with OSC 52, so it works
+  over SSH; terminals that ship with OSC 52 disabled will ignore it.
+- `↻ refresh` at the top of the sidebar (or `r`) finds repositories added to
+  the folder while tm runs; `? keys` beside it shows every shortcut.
 - `alt+s` returns to the sidebar, `s` shows every shortcut, `q` quits (with the
   background server on, `q` leaves and `Q` quits; see below). Plain
   `Esc` goes to the program, so it interrupts Claude Code and leaves Vim's

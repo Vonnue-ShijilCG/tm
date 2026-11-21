@@ -512,7 +512,7 @@ func (r *RemoteSession) RenderScrolled(offset int) string {
 	return a.Screen
 }
 
-// Lines asks the server for the rows copy mode reads, cached like
+// Lines asks the server for the rows a mouse selection reads, cached like
 // RenderScrolled. It is nil when no answer comes within 2 s.
 func (r *RemoteSession) Lines(offset int) []string {
 	r.mu.Lock()

@@ -22,17 +22,31 @@ const wheelStep = 3
 // scrollMark precedes the scrolled-back line count in a pane header.
 const scrollMark = "↑"
 
-// handleMouse routes wheel events to whatever is under the pointer: the
-// changes view when it is open, else the terminal pane. Every other mouse
-// event is ignored.
+// handleMouse routes the mouse to whatever is under the pointer: the wheel
+// to the changes view when it is open, else to the terminal pane; the left
+// button to the sidebar's refresh button or to a selection in a pane (see
+// handleSelect). Every other mouse event is ignored.
 func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
-	if msg.Action != tea.MouseActionPress {
-		return nil
-	}
 	if m.diff != nil {
+		if msg.Action != tea.MouseActionPress {
+			return nil
+		}
 		return m.diffWheel(msg)
 	}
 	if m.help || m.form != nil || m.panel != nil {
+		return nil
+	}
+	switch sidebarButtonAt(msg) {
+	case buttonRefresh:
+		m.sel = nil
+		m.refreshProjects()
+		return nil
+	case buttonHelp:
+		m.sel = nil
+		m.help = true
+		return nil
+	}
+	if m.handleSelect(msg) || msg.Action != tea.MouseActionPress {
 		return nil
 	}
 	var up bool

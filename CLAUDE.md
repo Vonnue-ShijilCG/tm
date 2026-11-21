@@ -44,7 +44,7 @@ root by design, which is why the form refuses a worktree outside the workspace r
 accepting one and dropping the terminal on save. Malformed layout nodes decode to empty nodes and are sanitised away rather than failing the load.
 - **`config`**: `$XDG_CONFIG_HOME/tm/config.toml` with `max_terminals`. Re-read on every creation attempt (`workspace.LimitSource`), so edits apply without restart; invalid values fall back to the default and carry a `Notice`.
 - **`server`**: the background server (`server.go`, `outbox.go`), its gob wire protocol (`protocol.go`), the client side with `RemoteSession` (`client.go`), and the files and start/stop/probe helpers (`paths.go`, `daemon.go`, `listen.go`). Knows sessions only — nothing about projects, layouts or git (see Background server).
-- **`ui`**: the Bubble Tea `Model` (`ui/model.go`), the new-terminal form, the per-project Terminal Manager (`ui/manager.go`), the uncommitted-changes view (`ui/diffview.go`), copy mode (`ui/copymode.go`), and the pane tree.
+- **`ui`**: the Bubble Tea `Model` (`ui/model.go`), the new-terminal form, the per-project Terminal Manager (`ui/manager.go`), the uncommitted-changes view (`ui/diffview.go`), mouse selection (`ui/mouseselect.go`), the sidebar's refresh and help buttons (`ui/refresh.go`), and the pane tree.
 
 ### Lists longer than the window
 
@@ -324,24 +324,38 @@ while the terminal draws it wide, so a line cut with tabs in it shoves the
 other column along. `d.title` and `d.dir` are the deliberate exemptions: they
 name where tm runs, not what is inside the repository.
 
-### Copy mode
+### Copying text: drag to select
 
-`alt+c` freezes the focused pane and lets a selection be made in it
-(`ui/copymode.go`). It exists because panes are drawn side by side in one
-terminal buffer: a row of that buffer spans every pane, so the host terminal's
-own mouse selection drags in the card borders and the neighbouring pane's text.
-The rows here come from the emulator's grid through `Session.Lines`, so a copy
-is that pane's text and nothing else.
+Dragging the left button over a pane selects text in that pane and letting
+go copies it (`ui/mouseselect.go`). It exists because panes are drawn side
+by side in one terminal buffer: a row of that buffer spans every pane, so the
+host terminal's own selection — shift+drag, which tm never sees and cannot
+confine — runs through the card borders into the neighbouring pane. tm's
+selection is clamped to the pane the press landed in (`clampTo`), however far
+the pointer wanders, and the text comes from the emulator's grid through
+`Session.Lines`, so a copy is that pane's text and nothing else. It replaced
+the keyboard copy mode (`alt+c`), which nobody reached for: people select
+with the mouse.
 
-**Selection is by whole lines.** A line is the unit an error message, a command
-and a path all arrive in, and it sidesteps the column arithmetic that wide
-runes and grapheme clusters would demand of every cursor move.
+**Selection is by cell**, like the terminal's own: from the cell pressed to
+the cell released, in reading order, rows in between whole. Columns are
+cells, cut with `ansi.Cut`, so wide runes count as two. Each row's trailing
+blanks and the blank rows at the end are dropped. A click that never leaves
+its cell is not a selection: it copies nothing and freezes nothing, so it
+cannot overwrite the clipboard.
 
-**The rows are frozen when the mode opens**, so a program that keeps printing
-cannot move text out from under the cursor between choosing a line and copying
-it; the pane header says `COPY` so a screen that has stopped is explained.
-The pane is drawn straight rather than through the pane cache: its cursor and
-selection move on keys `paneKey` knows nothing about.
+**The pane is frozen from the press** until the next key, click, wheel or
+resize: both its rendered rows and its plain lines are captured then, so a
+program that keeps printing cannot move text out from under the pointer, and
+what stays highlighted is what was copied. The header says `COPY` meanwhile.
+The pane is drawn straight rather than through the pane cache, because the
+highlight moves with the pointer, which `paneKey` knows nothing about. Rows
+keep the program's colours outside the selection; inside, the text is
+redrawn plain on the highlight.
+
+Programs with mouse tracking (Claude Code, htop) get only the wheel
+forwarded, as before; tm never forwarded clicks, so taking the drag costs
+them nothing.
 
 **The clipboard is written with OSC 52** (`ansi.SetSystemClipboard` to
 `clipboard`, a variable so tests can read it). tm asks the terminal to do it
@@ -350,9 +364,19 @@ works over SSH — the escape travels back down the connection and lands in the
 clipboard of the machine in front of the user. Terminals may refuse it, many
 ship with it disabled, and there is no reply, so tm cannot report failure.
 
-Moving the cursor reuses `keys.Up`/`Down`/`Top`/`Bottom` rather than adding
-bindings: the same keys meaning the same thing, and the help screen has no row
-to spare for repeating them.
+### Finding new projects
+
+Projects are discovered once at start, so a repository cloned into the
+workspace while tm runs used to need a restart — which with a tm server
+nobody does. The sidebar's row under its title, blank before, holds two
+buttons: `↻ refresh` (also `r` in the sidebar) and `? keys` (the help
+screen, also `s`). Each owns half the row, not just its label, because a row
+is the smallest target a terminal has. `Workspace.Rediscover` merges a fresh
+`project.Discover`: new repositories join in name order with no terminals;
+one whose directory is gone is dropped only when nothing runs or is saved in
+it, since a rescan must never forget a terminal. The UI keeps the cursor and
+the shown project on the same `*Project`, not the same index, because a new
+name can sort above them.
 
 ### Background server
 
@@ -394,7 +418,7 @@ can execute it and its own `DefaultShell()` otherwise. The server itself
 runs in `/`, so it pins no directory for days.
 
 **`RemoteSession` is a `workspace.Session`.** Nothing above `workspace`
-knows which kind it holds, which is why scrollback, copy mode, mouse
+knows which kind it holds, which is why scrollback, mouse selection, mouse
 forwarding and the pane cache work unchanged. Frames are *pushed*: the
 server throttles each session to `frameWindow` (16 ms, the same window as
 `outputWindow`) and sends the rendered screen with its version and flags;

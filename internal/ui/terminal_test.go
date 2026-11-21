@@ -25,7 +25,7 @@ type fakeSession struct {
 	wheels     []wheelCall
 	closed     bool
 	renders    int      // times Render was called, for the pane-cache tests
-	rowsText   []string // what Lines returns, when a test needs particular rows
+	rowsText   []string // what Render and Lines return, when a test needs particular rows
 	grounded   bool     // Render paints its ground the way a real Session does, for tests that read every cell
 	output     chan struct{}
 	done       chan struct{}
@@ -41,6 +41,9 @@ func (f *fakeSession) SendText(t string)          { f.text = append(f.text, t) }
 func (f *fakeSession) Resize(c, r int)            { f.cols, f.rows = c, r }
 func (f *fakeSession) Render(bool) string {
 	f.renders++
+	if f.rowsText != nil {
+		return strings.Join(f.rowsText, "\n")
+	}
 	screen := "SCREEN:" + f.dir + ":" + f.title
 	if f.grounded {
 		return textStyle.Render(screen)
@@ -51,7 +54,7 @@ func (f *fakeSession) RenderScrolled(off int) string {
 	return fmt.Sprintf("SCROLLED:%d:%s", off, f.dir)
 }
 
-// Lines is what copy mode reads: the pane's rows as plain text. The fake
+// Lines is what a mouse selection reads: the pane's rows as plain text. The fake
 // returns the screen it claims to show, split the way a real one would be.
 func (f *fakeSession) Lines(int) []string {
 	if f.rowsText != nil {

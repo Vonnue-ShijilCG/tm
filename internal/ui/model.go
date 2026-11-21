@@ -59,7 +59,7 @@ type Model struct {
 	form     *newTermForm // open "new terminal" dialog, nil otherwise
 	panel    *manager     // open terminal manager, nil otherwise
 	diff     *diffView    // open uncommitted-changes view, nil otherwise
-	copy     *copyMode    // open copy-mode selection, nil otherwise
+	sel      *selection   // mouse selection in a pane, nil otherwise; see mouseselect.go
 	help     bool         // help screen shown over everything
 	notice   string       // one-line message in the status bar (state file problems)
 	quitting bool         // set once quit began; later exit messages must not rewrite state
@@ -176,6 +176,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
+		m.sel = nil         // its frozen rows were cut to the old pane size
 		m.arrangeAttached() // the first size lays out a reattached window
 		for _, p := range m.ws.Projects {
 			m.applyLayout(p)
@@ -188,6 +189,7 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.handleMouse(msg)
 
 	case tea.KeyMsg:
+		m.sel = nil // typing dismisses a selection and unfreezes its pane
 		if m.help {
 			if key.Matches(msg, keys.HelpClose) {
 				m.help = false
@@ -196,9 +198,6 @@ func (m Model) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.diff != nil {
 			return m.updateDiff(msg)
-		}
-		if m.copy != nil {
-			return m.updateCopy(msg)
 		}
 		if m.panel != nil {
 			return m.updateManager(msg)
@@ -280,8 +279,6 @@ func (m Model) updateTerminal(msg tea.KeyMsg, p *workspace.Project, t *workspace
 		m.panel = newManager(m.ws, p, m.layouts[p], m.branches.get, m.printedOffScreen) // p is the focused terminal's project; focus is kept for esc
 	case key.Matches(msg, keys.DiffTerm):
 		return m, m.openDiff(p, t)
-	case key.Matches(msg, keys.Copy):
-		m.copy = newCopyMode(t, m.scroll[t])
 	case key.Matches(msg, keys.PaneSide):
 		m.openForm(p, splitSide, focusMain)
 	case key.Matches(msg, keys.PaneStack):
@@ -567,8 +564,8 @@ func (m *Model) grownGrid(root *pane, nt *workspace.Terminal) *pane {
 func (m *Model) dropPane(p *workspace.Project, t *workspace.Terminal) {
 	delete(m.scroll, t)
 	delete(m.panes, t) // an exiting terminal must not leave its card behind
-	if m.copy != nil && m.copy.term == t {
-		m.copy = nil // the pane the selection was in has gone
+	if m.sel != nil && m.sel.term == t {
+		m.sel = nil // the pane the selection was in has gone
 	}
 	root := m.layouts[p]
 	if root == nil || !root.contains(t) {
@@ -664,34 +661,6 @@ func (m Model) updateDiff(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateCopy handles a key while copy mode is open. Like the help screen and
-// the changes view it consumes every key, so nothing reaches the program
-// underneath — which is what lets plain j and k mean something here while they
-// are PTY input everywhere else in terminal focus.
-func (m Model) updateCopy(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	c := m.copy
-	switch {
-	case key.Matches(msg, keys.CopyClose):
-		m.copy = nil
-	case key.Matches(msg, keys.CopyYank):
-		if what := c.copy(); what != "" {
-			m.notice = what
-		}
-		m.copy = nil
-	case key.Matches(msg, keys.CopySelect):
-		c.mark()
-	case key.Matches(msg, keys.Down):
-		c.move(1)
-	case key.Matches(msg, keys.Up):
-		c.move(-1)
-	case key.Matches(msg, keys.Top):
-		c.move(-len(c.lines))
-	case key.Matches(msg, keys.Bottom):
-		c.move(len(c.lines))
-	}
-	return m, nil
-}
-
 // diffRows is how many code rows the changes view shows: the window less the
 // status bar, the modal's frame and the rows above the code. Scrolling clamps
 // against it, so it must measure the frame View draws.
@@ -771,6 +740,8 @@ func (m Model) updateSidebar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case key.Matches(msg, keys.Help):
 		m.help = true
+	case key.Matches(msg, keys.Refresh):
+		m.refreshProjects()
 	case key.Matches(msg, keys.Zoom):
 		if p, t := m.activeTerminal(); t != nil {
 			m.focus = focusMain
@@ -1236,7 +1207,7 @@ func (m Model) View() string {
 func (m Model) viewSidebar(height int) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Projects"))
-	b.WriteString("\n\n")
+	b.WriteString("\n" + sidebarButtons() + "\n")
 	height -= 2 // the title and the blank line under it
 
 	if len(m.ws.Projects) == 0 {
@@ -1378,15 +1349,16 @@ func sandwich(a, mid, b string) []string {
 func (m Model) renderLeaf(p *workspace.Project, t *workspace.Terminal, r rect, focused bool) string {
 	label, branch := m.paneHeaderParts(p, t)
 	delete(m.unseen, t) // drawing a pane is what "seen" means
-	if c := m.copy; c != nil && c.term == t {
-		// Copy mode is drawn straight, never cached: its cursor and selection
-		// move on keys paneKey knows nothing about, and it shows frozen rows
-		// rather than the live screen, so there is nothing for the cache to
-		// save. The card is built the same way, so the pane keeps its shape.
+	if s := m.sel; s != nil && s.term == t {
+		// A selection is drawn straight, never cached: it moves with the
+		// pointer, which paneKey knows nothing about, and it shows the rows
+		// frozen at the press rather than the live screen, so there is
+		// nothing for the cache to save. The card is built the same way, so
+		// the pane keeps its shape.
 		innerW := max(r.w-cardStyle.GetHorizontalBorderSize(), 1)
 		innerH := max(r.h-cardStyle.GetVerticalBorderSize(), 1)
 		rows := append([]string{paneHeader(label, branch+"  "+copyMark, innerW, focused, running(t))},
-			c.view(innerW, innerH-paneHeaderHeight)...)
+			s.view(innerW, innerH-paneHeaderHeight)...)
 		return framed(cardStyle, focused, r.w, r.h).Render(strings.Join(rows, "\n"))
 	}
 	// The version is read before the screen, never after: a write landing
@@ -1609,8 +1581,6 @@ func (m Model) viewStatus() string {
 		bindings = []key.Binding{keys.HelpClose}
 	case m.diff != nil:
 		bindings = keys.diffHelp()
-	case m.copy != nil:
-		bindings = keys.copyHelp()
 	case m.panel != nil:
 		bindings = keys.managerHelp()
 	case m.form != nil:
