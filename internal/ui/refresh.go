@@ -84,7 +84,9 @@ func (m *Model) refreshProjects() {
 
 	added, removed := m.ws.Rediscover(found)
 
-	m.cursor, m.selected = 0, -1
+	// A highlight whose project went stays where it was in the list, on
+	// what is now there, rather than jumping to the top of a long one.
+	m.cursor, m.selected = min(m.cursor, max(len(m.ws.Projects)-1, 0)), -1
 	for i, p := range m.ws.Projects {
 		if p == cursor {
 			m.cursor = i

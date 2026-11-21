@@ -71,6 +71,12 @@ Two rules for anything that draws into a frame:
   wrapped it cost the list its last row. The changes view does the same for
   the same reason.
 
+The list has no scroll position of its own: `visibleStart` recomputes it from
+the cursor every frame. So in a list longer than the sidebar, a click that
+moves the highlight can scroll the list under the pointer, and a second click
+on the same spot lands on another project. Harmless while a click only moves
+the highlight; a sticky offset is the fix if a click ever does more.
+
 ### Three layout representations
 
 The same arrangement exists in three shapes; keep conversions in sync when touching any of them:
@@ -355,7 +361,12 @@ redrawn plain on the highlight.
 
 Programs with mouse tracking (Claude Code, htop) get only the wheel
 forwarded, as before; tm never forwarded clicks, so taking the drag costs
-them nothing.
+them nothing — except that a drag over one freezes its pane until the next
+key or click, like any other.
+
+A left press also cancels a pending `alt+delete` question, as any key does:
+a click moves focus without passing through `updateTerminal`, and left armed
+the question turned the next `y` typed anywhere into a deletion.
 
 **The clipboard is written with OSC 52** (`ansi.SetSystemClipboard` to
 `clipboard`, a variable so tests can read it). tm asks the terminal to do it

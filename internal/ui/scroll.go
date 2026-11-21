@@ -36,6 +36,12 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	if m.help || m.form != nil || m.panel != nil {
 		return nil
 	}
+	if msg.Action == tea.MouseActionPress && msg.Button == tea.MouseButtonLeft && m.deleting != nil {
+		// A click cancels a pending alt+delete as any other key does. Left
+		// armed, the next y typed anywhere — in another pane or project —
+		// deleted the terminal.
+		m.deleting, m.deletePrompt = nil, ""
+	}
 	switch m.sidebarButtonAt(msg) {
 	case buttonRefresh:
 		m.sel = nil

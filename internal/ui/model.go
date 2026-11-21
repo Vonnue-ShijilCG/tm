@@ -1226,7 +1226,14 @@ func (m Model) viewSidebarList(height int) string {
 	height -= 2 // the title and the blank line under it
 
 	if len(m.ws.Projects) == 0 {
-		b.WriteString(hintStyle.Render("No Git repositories\nfound in:\n" + m.root))
+		// The root is a path of any length: wrapped to the sidebar here, and
+		// cut to the rows there are, or Lip Gloss wraps it itself and the
+		// sidebar grows past the window — which a refresh that finds nothing
+		// left would do, pushing the ↻ button off the row clicks look for.
+		inner := sidebarWidth - sidebarStyle.GetHorizontalFrameSize()
+		lines := append([]string{"No Git repositories", "found in:"}, strings.Split(ansi.Hardwrap(m.root, inner, true), "\n")...)
+		lines = lines[:min(len(lines), max(height, 0))]
+		b.WriteString(hintStyle.Render(strings.Join(lines, "\n")))
 		return b.String()
 	}
 

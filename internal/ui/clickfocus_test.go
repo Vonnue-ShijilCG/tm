@@ -130,3 +130,49 @@ func TestClickingAScrolledSidebarPicksTheProjectDrawnThere(t *testing.T) {
 		t.Errorf("highlight on %q, want projD7", got)
 	}
 }
+
+// A click answers a pending alt+delete question the way any other key does:
+// by cancelling it. Left armed, the next y typed anywhere deleted the
+// terminal.
+func TestClickCancelsAPendingDelete(t *testing.T) {
+	m, spawned := clickPanes(t)
+	m = press(m, "alt+delete")
+	if m.deleting == nil {
+		t.Fatal("setup: alt+delete should ask first")
+	}
+
+	at := find(t, m, "LEFT")
+	m = click(m, at[0], at[1])
+	m = press(m, "y")
+
+	if m.deleting != nil || (*spawned)[1].closed {
+		t.Error("a click should cancel the question; y then deleted the terminal")
+	}
+}
+
+// Zoomed, only the focused pane is on screen, and a click there focuses it.
+func TestClickInZoomFocusesTheVisiblePane(t *testing.T) {
+	m, _ := clickPanes(t)
+	m = press(m, "alt+z", "alt+s")
+
+	m = click(m, 60, 10)
+
+	p := m.ws.Projects[0]
+	if m.focus != focusMain || p.ActiveTerminal() != p.Terminals[1] {
+		t.Errorf("focus %v active %d, want the zoomed right pane focused", m.focus, p.ActiveIndex())
+	}
+}
+
+// The button row is the buttons', not the list's: a click there never moves
+// the highlight.
+func TestClickingTheButtonRowKeepsTheHighlight(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = press(m, "j")
+	at := find(t, m, "? keys")
+
+	m = click(m, at[0], at[1])
+
+	if m.cursor != 1 {
+		t.Errorf("cursor = %d, want it left on 1", m.cursor)
+	}
+}

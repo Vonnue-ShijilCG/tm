@@ -118,3 +118,39 @@ func TestShortWindowDropsTheSidebarButtons(t *testing.T) {
 		t.Errorf("a 6-row window should show the project and no buttons:\n%s", view)
 	}
 }
+
+// A refresh that removes every project leaves the window its own height and
+// the buttons where clicks find them: that is exactly when ↻ is the way back.
+func TestRefreshToAnEmptyWorkspaceStaysInTheWindow(t *testing.T) {
+	m, root := discoveredModel(t, "bravo")
+	if err := os.RemoveAll(filepath.Join(root, "bravo")); err != nil {
+		t.Fatal(err)
+	}
+	m = press(m, "r")
+
+	if n := len(strings.Split(m.View(), "\n")); n != m.height {
+		t.Fatalf("View is %d rows, want the window's %d:\n%s", n, m.height, ansi.Strip(m.View()))
+	}
+	gitDirs(t, root, "charlie")
+	at := find(t, m, "↻ refresh")
+	m = click(m, at[0], at[1])
+	if !strings.Contains(m.notice, "charlie") {
+		t.Errorf("clicking ↻ in an empty workspace: notice %q, want charlie found", m.notice)
+	}
+}
+
+// When the highlighted project is the one removed, the highlight stays near
+// where it was rather than jumping to the top.
+func TestRefreshRemovingTheHighlightedProjectKeepsItNearby(t *testing.T) {
+	m, root := discoveredModel(t, "alpha", "bravo", "charlie", "delta")
+	m = press(m, "j", "j") // charlie
+	if err := os.RemoveAll(filepath.Join(root, "charlie")); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "r")
+
+	if got := m.ws.Projects[m.cursor].Name; got != "delta" && got != "bravo" {
+		t.Errorf("highlight on %q, want a neighbour of the removed charlie", got)
+	}
+}
