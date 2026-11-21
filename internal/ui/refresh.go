@@ -56,7 +56,7 @@ func (m Model) sidebarButtonAt(msg tea.MouseMsg) sidebarButton {
 	}
 	row := sidebarStyle.GetBorderTopSize() + height - 1
 	left := sidebarStyle.GetBorderLeftSize() + sidebarStyle.GetPaddingLeft()
-	if msg.Y != row || msg.X >= sidebarWidth-sidebarStyle.GetBorderRightSize() {
+	if msg.Y != row || msg.X < sidebarStyle.GetBorderLeftSize() || msg.X >= sidebarWidth-sidebarStyle.GetBorderRightSize() {
 		return buttonNone
 	}
 	if msg.X < left+lipgloss.Width(refreshLabel)+buttonGap {
@@ -82,7 +82,7 @@ func (m *Model) refreshProjects() {
 	}
 	cursor, selected := at(m.cursor), at(m.selected)
 
-	added, removed := m.ws.Rediscover(found)
+	added, removed, kept := m.ws.Rediscover(found)
 
 	// A highlight whose project went stays where it was in the list, on
 	// what is now there, rather than jumping to the top of a long one.
@@ -101,16 +101,20 @@ func (m *Model) refreshProjects() {
 			return // a failed save says so, and that matters more
 		}
 	}
-	switch {
-	case len(added) == 0 && len(removed) == 0:
-		m.notice = "no new projects"
-	case len(removed) == 0:
-		m.notice = "found " + projectList(added)
-	case len(added) == 0:
-		m.notice = "gone: " + projectList(removed)
-	default:
-		m.notice = "found " + projectList(added) + "; gone: " + projectList(removed)
+	var parts []string
+	if len(added) > 0 {
+		parts = append(parts, "found "+projectList(added))
 	}
+	if len(removed) > 0 {
+		parts = append(parts, "gone: "+projectList(removed))
+	}
+	if len(kept) > 0 {
+		parts = append(parts, "missing but kept (has terminals): "+projectList(kept))
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "no new projects")
+	}
+	m.notice = strings.Join(parts, "; ")
 }
 
 // projectList names up to three projects, then counts the rest.

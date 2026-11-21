@@ -37,7 +37,14 @@ func (m *Model) clickFocus(msg tea.MouseMsg) {
 	}
 	selectTerminal(p, t)
 	m.applyLayout(p)
-	m.persist() // focus is part of the saved layout, as the keys save it
+	// Focus is part of the saved layout, as the keys save it. persist clears
+	// the status line on success, and a click is no reason to lose what it
+	// said — "copied 2 lines" is usually what a click to another pane follows.
+	notice := m.notice
+	m.persist()
+	if m.notice == "" {
+		m.notice = notice
+	}
 }
 
 // projectNameLines is a project's name as the sidebar draws it, wrapped

@@ -187,31 +187,34 @@ func New(root string, projects []project.Project, spawn Spawner) *Workspace {
 // before is added with no terminals, in name order like Discover's. One whose
 // directory is gone is dropped only when nothing runs or is saved in it:
 // forgetting a terminal is not something a rescan may do. It returns the
-// names added and removed.
-func (ws *Workspace) Rediscover(found []project.Project) (added, removed []string) {
+// names added, removed, and kept although their directory is gone.
+func (ws *Workspace) Rediscover(found []project.Project) (added, removed, kept []string) {
 	seen := map[string]bool{}
 	for _, f := range found {
 		seen[f.Path] = true
 	}
 	known := map[string]bool{}
-	kept := ws.Projects[:0:0]
+	next := ws.Projects[:0:0]
 	for _, p := range ws.Projects {
 		known[p.Path] = true
-		if !seen[p.Path] && len(p.Terminals) == 0 && len(p.Saved) == 0 {
-			removed = append(removed, p.Name)
-			continue
+		if !seen[p.Path] {
+			if len(p.Terminals) == 0 && len(p.Saved) == 0 {
+				removed = append(removed, p.Name)
+				continue
+			}
+			kept = append(kept, p.Name)
 		}
-		kept = append(kept, p)
+		next = append(next, p)
 	}
 	for _, f := range found {
 		if !known[f.Path] {
-			kept = append(kept, &Project{Project: f, active: -1})
+			next = append(next, &Project{Project: f, active: -1})
 			added = append(added, f.Name)
 		}
 	}
-	sort.SliceStable(kept, func(i, j int) bool { return kept[i].Name < kept[j].Name })
-	ws.Projects = kept
-	return added, removed
+	sort.SliceStable(next, func(i, j int) bool { return next[i].Name < next[j].Name })
+	ws.Projects = next
+	return added, removed, kept
 }
 
 // NewTerminal spawns a plain shell in p's directory. See CreateTerminal.

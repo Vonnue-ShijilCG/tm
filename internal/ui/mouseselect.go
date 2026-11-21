@@ -17,8 +17,8 @@ import (
 // terminal buffer: a row of that buffer spans every pane, so the host
 // terminal's own selection (shift+drag, which tm never sees) runs through the
 // card borders and into the neighbouring pane. Here the selection is clamped
-// to the pane the drag started in, and the text comes from that pane's own
-// grid through Session.Lines, so a copy is that pane's text and nothing else.
+// to the pane the drag started in, and the text is read from that pane's own
+// rows (plainRows), so a copy is that pane's text and nothing else.
 //
 // The pane is frozen from the press until the selection is dismissed (the
 // next key or click), so a program that keeps printing cannot move text out
@@ -37,7 +37,7 @@ func (c cell) before(d cell) bool { return c.y < d.y || (c.y == d.y && c.x < d.x
 type selection struct {
 	term       *workspace.Terminal
 	screen     []string // the pane's rendered rows at the press, drawn while the selection lasts
-	lines      []string // the same rows as plain text, which is what is copied
+	lines      []string // the same rows as plain text (plainRows), which is what is copied
 	start, end cell     // where the drag began and where the pointer is now
 	dragging   bool     // the button is still down
 	moved      bool     // the pointer left the cell it was pressed on: a click is not a selection
@@ -103,6 +103,20 @@ func (s *selection) view(width, height int) []string {
 	return out
 }
 
+// plainRows is the text of rendered rows: what the frozen picture shows, so
+// what is copied is exactly what is highlighted. Reading it from the picture
+// rather than asking Session.Lines matters with a tm server, where Lines is a
+// round trip that can lag the pushed picture by a frame, and answers nothing
+// — after blocking the press for its 2 s timeout — when the server has
+// stopped responding.
+func plainRows(rows []string) []string {
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = strings.TrimRight(plainText(ansi.Strip(r)), " ")
+	}
+	return out
+}
+
 // paneContent is the screen rectangle of t's emulated screen: its card less
 // the border and the header row.
 func paneContent(card rect) rect {
@@ -151,10 +165,11 @@ func (m *Model) handleSelect(msg tea.MouseMsg) bool {
 			screen = t.Session.Render(p.ActiveTerminal() == t && m.focus == focusMain)
 		}
 		at := clampTo(content, msg.X, msg.Y)
+		rows := strings.Split(screen, "\n")
 		m.sel = &selection{
 			term:     t,
-			screen:   strings.Split(screen, "\n"),
-			lines:    t.Session.Lines(off),
+			screen:   rows,
+			lines:    plainRows(rows),
 			start:    at,
 			end:      at,
 			dragging: true,

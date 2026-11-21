@@ -183,3 +183,43 @@ func TestTypingDismissesTheSelection(t *testing.T) {
 		t.Error("a key should dismiss the selection")
 	}
 }
+
+// The copy is the text the frozen picture shows, read from it, not a second
+// query: with a tm server that query is a round trip that can lag the
+// picture by a frame, or answer nothing when the server stops responding,
+// and the drag then copied nothing without saying why.
+func TestDragCopiesWhatThePaneShowsEvenWhenLinesFails(t *testing.T) {
+	clip := clipboardCatcher(t)
+	m, spawned := newTestModel(t)
+	m = press(m, "enter", "alt+v", "enter")
+	(*spawned)[0].rowsText = []string{"hello world"}
+	(*spawned)[0].noLines = true
+	m.panes = nil
+
+	w := find(t, m, "world")
+	m = drag(m, w, [2]int{w[0] + 4, w[1]})
+
+	if got := clip.String(); got != ansi.SetSystemClipboard("world") {
+		t.Errorf("clipboard = %q, want the word the pane shows", got)
+	}
+}
+
+// A click that moves focus keeps the status line: "copied 2 lines" must not
+// vanish because the next thing the user did was click another pane.
+func TestFocusClickKeepsTheNotice(t *testing.T) {
+	clipboardCatcher(t)
+	m := selectPanes(t, []string{"hello world"}, []string{"RIGHT"})
+	w := find(t, m, "world")
+	m = drag(m, w, [2]int{w[0] + 4, w[1]})
+	if m.notice == "" {
+		t.Fatal("setup: the drag should report the copy")
+	}
+	notice := m.notice
+
+	r := find(t, m, "RIGHT")
+	m = click(m, r[0], r[1])
+
+	if m.notice != notice {
+		t.Errorf("notice = %q after a focus click, want %q kept", m.notice, notice)
+	}
+}

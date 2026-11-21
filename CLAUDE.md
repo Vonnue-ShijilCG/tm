@@ -338,8 +338,11 @@ by side in one terminal buffer: a row of that buffer spans every pane, so the
 host terminal's own selection — shift+drag, which tm never sees and cannot
 confine — runs through the card borders into the neighbouring pane. tm's
 selection is clamped to the pane the press landed in (`clampTo`), however far
-the pointer wanders, and the text comes from the emulator's grid through
-`Session.Lines`, so a copy is that pane's text and nothing else. It replaced
+the pointer wanders, and the text is read back from the pane's own frozen
+rows (`plainRows`), so a copy is that pane's text and nothing else — and
+exactly what is highlighted. Not from `Session.Lines`: with a tm server that
+is a round trip that can lag the pushed picture by a frame, and answers
+nothing after a 2 s wait when the server has stopped responding. It replaced
 the keyboard copy mode (`alt+c`), which nobody reached for: people select
 with the mouse.
 
@@ -351,7 +354,7 @@ its cell is not a selection: it copies nothing and freezes nothing, so it
 cannot overwrite the clipboard.
 
 **The pane is frozen from the press** until the next key, click, wheel or
-resize: both its rendered rows and its plain lines are captured then, so a
+resize: its rendered rows are captured then, so a
 program that keeps printing cannot move text out from under the pointer, and
 what stays highlighted is what was copied. The header says `COPY` meanwhile.
 The pane is drawn straight rather than through the pane cache, because the
@@ -388,7 +391,9 @@ short for them gives the rows back to the list. `Workspace.Rediscover` merges a 
 one whose directory is gone is dropped only when nothing runs or is saved in
 it, since a rescan must never forget a terminal. The UI keeps the cursor and
 the shown project on the same `*Project`, not the same index, because a new
-name can sort above them.
+name can sort above them. A repository gone from disk that still has terminals stays
+listed, and the notice says `missing but kept (has terminals)` rather than
+`no new projects`.
 
 ### Background server
 

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/Vonnue-ShijilCG/tm/internal/project"
+	"github.com/Vonnue-ShijilCG/tm/internal/workspace"
 )
 
 // gitDirs makes a workspace whose children named here look like repositories.
@@ -152,5 +153,34 @@ func TestRefreshRemovingTheHighlightedProjectKeepsItNearby(t *testing.T) {
 
 	if got := m.ws.Projects[m.cursor].Name; got != "delta" && got != "bravo" {
 		t.Errorf("highlight on %q, want a neighbour of the removed charlie", got)
+	}
+}
+
+// The sidebar's border is not part of a button.
+func TestTheSidebarBorderIsNotTheRefreshButton(t *testing.T) {
+	m, _ := discoveredModel(t, "bravo")
+	at := find(t, m, "↻ refresh")
+
+	m = click(m, 0, at[1])
+
+	if m.notice != "" {
+		t.Errorf("a click on the border refreshed: %q", m.notice)
+	}
+}
+
+// A repository deleted from disk while terminals still run (or are saved) in
+// it stays listed — a rescan never forgets a terminal — and the notice says
+// so instead of "no new projects".
+func TestRefreshSaysWhenAMissingProjectIsKept(t *testing.T) {
+	m, root := discoveredModel(t, "alpha", "bravo")
+	m.ws.Projects[1].Saved = []workspace.SavedTerminal{{Command: "npm test"}}
+	if err := os.RemoveAll(filepath.Join(root, "bravo")); err != nil {
+		t.Fatal(err)
+	}
+
+	m = press(m, "r")
+
+	if !strings.Contains(m.notice, "bravo") || !strings.Contains(m.notice, "kept") {
+		t.Errorf("notice = %q, want it to say bravo is missing but kept", m.notice)
 	}
 }

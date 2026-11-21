@@ -21,7 +21,7 @@ func TestRediscoverAddsNewProjectsInNameOrder(t *testing.T) {
 	ws := New("/ws", []project.Project{{Name: "b", Path: "/ws/b"}, {Name: "d", Path: "/ws/d"}}, nil)
 	b := ws.Projects[0]
 
-	added, removed := ws.Rediscover([]project.Project{
+	added, removed, _ := ws.Rediscover([]project.Project{
 		{Name: "a", Path: "/ws/a"}, {Name: "b", Path: "/ws/b"}, {Name: "c", Path: "/ws/c"}, {Name: "d", Path: "/ws/d"},
 	})
 
@@ -50,10 +50,13 @@ func TestRediscoverDropsOnlyEmptyProjectsThatAreGone(t *testing.T) {
 	}
 	saved.Saved = []SavedTerminal{{Command: "npm test"}}
 
-	_, removed := ws.Rediscover(nil) // every directory gone
+	_, removed, kept := ws.Rediscover(nil) // every directory gone
 
 	if !reflect.DeepEqual(removed, []string{empty.Name}) {
 		t.Errorf("removed %v, want only %q", removed, empty.Name)
+	}
+	if !reflect.DeepEqual(kept, []string{running.Name, saved.Name}) {
+		t.Errorf("kept %v, want the running and the saved one reported", kept)
 	}
 	if got := names(ws.Projects); !reflect.DeepEqual(got, []string{running.Name, saved.Name}) {
 		t.Errorf("projects = %v, want the running and the saved one kept", got)

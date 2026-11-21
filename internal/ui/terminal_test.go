@@ -26,6 +26,7 @@ type fakeSession struct {
 	closed     bool
 	renders    int      // times Render was called, for the pane-cache tests
 	rowsText   []string // what Render and Lines return, when a test needs particular rows
+	noLines    bool     // Lines answers nothing, as a server that stopped answering does
 	grounded   bool     // Render paints its ground the way a real Session does, for tests that read every cell
 	output     chan struct{}
 	done       chan struct{}
@@ -57,6 +58,9 @@ func (f *fakeSession) RenderScrolled(off int) string {
 // Lines is what a mouse selection reads: the pane's rows as plain text. The fake
 // returns the screen it claims to show, split the way a real one would be.
 func (f *fakeSession) Lines(int) []string {
+	if f.noLines {
+		return nil
+	}
 	if f.rowsText != nil {
 		return f.rowsText
 	}
