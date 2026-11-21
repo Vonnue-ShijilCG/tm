@@ -1244,7 +1244,7 @@ func (m Model) viewSidebarList(height int) string {
 		stirred := m.stirring(p)
 		// Wrap rather than truncate: a project's name is how it is recognised,
 		// and the sidebar is narrow enough that real names do not fit.
-		wrapped := strings.Split(ansi.Wrap(p.Name, max(inner-2, 1), ""), "\n")
+		wrapped := projectNameLines(p.Name, inner)
 		for j, part := range wrapped {
 			prefix := marker
 			if j > 0 {

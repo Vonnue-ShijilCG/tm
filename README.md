@@ -82,6 +82,8 @@ tm
   and the arrows move the file list, `←`/`→` scroll both columns sideways,
   `n`/`N` jump between changes, `r` re-reads from git, `Esc` closes. Long
   lines are cut rather than wrapped so the two sides stay in step.
+- Click a pane to focus it, or the sidebar to go back to it and highlight the
+  project you clicked; the keys work as before.
 - Drag the mouse over a pane to copy from it; letting go copies. The selection
   stays inside the pane you started in, so it never picks up the card border
   or the pane beside it (your terminal's own shift+drag selection still spans

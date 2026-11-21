@@ -21,6 +21,20 @@ func visibleEntries(entries [][]string, selected, height int) []string {
 	if height <= 0 {
 		return nil
 	}
+	var lines []string
+	for _, e := range entries[visibleStart(entries, selected, height):] {
+		if len(lines)+len(e) > height {
+			break
+		}
+		lines = append(lines, e...)
+	}
+	return lines
+}
+
+// visibleStart is the first entry visibleEntries draws: entries are dropped
+// from the top only while the selected one would not otherwise fit. A click
+// is mapped to a row through it, so the two can never disagree.
+func visibleStart(entries [][]string, selected, height int) int {
 	used := 0
 	for i := 0; i <= selected && i < len(entries); i++ {
 		used += len(entries[i])
@@ -30,12 +44,5 @@ func visibleEntries(entries [][]string, selected, height int) []string {
 		used -= len(entries[start])
 		start++
 	}
-	var lines []string
-	for _, e := range entries[start:] {
-		if len(lines)+len(e) > height {
-			break
-		}
-		lines = append(lines, e...)
-	}
-	return lines
+	return start
 }

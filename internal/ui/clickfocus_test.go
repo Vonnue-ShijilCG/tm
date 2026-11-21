@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -57,4 +58,75 @@ func clickPanes(t *testing.T) (Model, *[]*fakeSession) {
 		t.Fatal("setup: the new right pane should have focus")
 	}
 	return m, spawned
+}
+
+// A click on the sidebar does what alt+s and j/k do: the sidebar takes focus
+// and the highlight lands on the clicked project. Nothing is opened.
+func TestClickingTheSidebarFocusesItAndMovesTheHighlight(t *testing.T) {
+	m, spawned := newTestModel(t)
+	m = press(m, "enter") // a shell in backend, focused
+	before := len(*spawned)
+
+	at := find(t, m, "mobile")
+	m = click(m, at[0], at[1])
+
+	if m.focus != focusSidebar {
+		t.Errorf("focus = %v, want the sidebar", m.focus)
+	}
+	if got := m.ws.Projects[m.cursor].Name; got != "mobile" {
+		t.Errorf("highlight on %q, want mobile", got)
+	}
+	if len(*spawned) != before {
+		t.Error("a click must not start a terminal")
+	}
+}
+
+// Empty sidebar space, and the blank row above the buttons, focus the sidebar
+// and leave the highlight where it was.
+func TestClickingEmptySidebarSpaceKeepsTheHighlight(t *testing.T) {
+	m, _ := newTestModel(t)
+	m = press(m, "j", "enter") // ecommerce, terminal focused
+	buttons := find(t, m, "↻ refresh")
+
+	for _, y := range []int{10, buttons[1] - 1} {
+		m = press(m, "alt+s", "j", "enter") // back into a terminal, cursor moved on
+		cursor := m.cursor
+		m = click(m, 5, y)
+		if m.focus != focusSidebar || m.cursor != cursor {
+			t.Errorf("row %d: focus %v cursor %d, want the sidebar with the cursor still %d", y, m.focus, m.cursor, cursor)
+		}
+	}
+}
+
+// A name too long for one row wraps; a click on its second line is still a
+// click on that project.
+func TestClickingEitherLineOfAWrappedNameSelectsIt(t *testing.T) {
+	long := "m-project-name-long-enough-to-wrap" // sorts between the others, so the highlight starts elsewhere
+	m, _ := discoveredModel(t, "alpha", long, "omega")
+
+	tail := find(t, m, "-wrap")
+	m = click(m, tail[0], tail[1])
+
+	if got := m.ws.Projects[m.cursor].Name; got != long {
+		t.Errorf("highlight on %q, want the wrapped project", got)
+	}
+}
+
+// A long list scrolls to keep the highlight on screen; a click must pick the
+// project drawn on that row, not the one at that index.
+func TestClickingAScrolledSidebarPicksTheProjectDrawnThere(t *testing.T) {
+	var names []string
+	for i := 0; i < 40; i++ {
+		names = append(names, "proj"+string(rune('A'+i/10))+string(rune('0'+i%10)))
+	}
+	m, _ := discoveredModel(t, names...)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 12})
+	m = press(next.(Model), "G")
+
+	at := find(t, m, "projD7")
+	m = click(m, at[0], at[1])
+
+	if got := m.ws.Projects[m.cursor].Name; got != "projD7" {
+		t.Errorf("highlight on %q, want projD7", got)
+	}
 }
