@@ -36,7 +36,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 	if m.help || m.form != nil || m.panel != nil {
 		return nil
 	}
-	switch sidebarButtonAt(msg) {
+	switch m.sidebarButtonAt(msg) {
 	case buttonRefresh:
 		m.sel = nil
 		m.refreshProjects()

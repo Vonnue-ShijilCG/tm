@@ -87,7 +87,7 @@ tm
   or the pane beside it (your terminal's own shift+drag selection still spans
   the whole window). The text goes to your clipboard with OSC 52, so it works
   over SSH; terminals that ship with OSC 52 disabled will ignore it.
-- `↻ refresh` at the top of the sidebar (or `r`) finds repositories added to
+- `↻ refresh` at the bottom of the sidebar (or `r`) finds repositories added to
   the folder while tm runs; `? keys` beside it shows every shortcut.
 - `alt+s` returns to the sidebar, `s` shows every shortcut, `q` quits (with the
   background server on, `q` leaves and `Q` quits; see below). Plain

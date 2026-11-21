@@ -16,15 +16,20 @@ import (
 // a restart is the thing nobody does any more. The sidebar's ↻ button, and r
 // in the sidebar, look again.
 
-// The sidebar's buttons sit on the row under its title, which was blank, so
-// they cost the project list nothing. A row of the terminal is the smallest
-// target there is, so each button owns its half of the row, not just its
-// label.
+// The sidebar's buttons are its last row, drawn as chips on the pane
+// headers' band so they read as things to press rather than as hints. A
+// terminal row is the smallest target there is, so each button owns its half
+// of the row, not just its label.
 const (
-	refreshLabel = "↻ refresh"
-	helpLabel    = "? keys"
-	buttonGap    = 3 // cells between the two labels
+	refreshLabel = " ↻ refresh "
+	helpLabel    = " ? keys "
+	buttonGap    = 1 // cells between the two chips
+
+	sidebarFooterRows = 2                         // a blank row, then the buttons
+	sidebarFooterMin  = 2 + 1 + sidebarFooterRows // title, blank, one project, footer
 )
+
+var buttonStyle = lipgloss.NewStyle().Foreground(bright).Background(band)
 
 type sidebarButton int
 
@@ -36,21 +41,25 @@ const (
 
 // sidebarButtons draws the button row.
 func sidebarButtons() string {
-	return hintStyle.Render(refreshLabel) + textStyle.Render(strings.Repeat(" ", buttonGap)) + hintStyle.Render(helpLabel)
+	return buttonStyle.Render(refreshLabel) + textStyle.Render(strings.Repeat(" ", buttonGap)) + buttonStyle.Render(helpLabel)
 }
 
 // sidebarButtonAt is the button a left click at the message's position
-// pressed, if any.
-func sidebarButtonAt(msg tea.MouseMsg) sidebarButton {
+// pressed, if any. It must measure the frame View draws.
+func (m Model) sidebarButtonAt(msg tea.MouseMsg) sidebarButton {
 	if msg.Action != tea.MouseActionPress || msg.Button != tea.MouseButtonLeft {
 		return buttonNone
 	}
-	row := sidebarStyle.GetBorderTopSize() + 1 // under the title
+	height := m.height - statusHeight - sidebarStyle.GetVerticalFrameSize() // the sidebar's rows
+	if height < sidebarFooterMin {
+		return buttonNone
+	}
+	row := sidebarStyle.GetBorderTopSize() + height - 1
 	left := sidebarStyle.GetBorderLeftSize() + sidebarStyle.GetPaddingLeft()
 	if msg.Y != row || msg.X >= sidebarWidth-sidebarStyle.GetBorderRightSize() {
 		return buttonNone
 	}
-	if msg.X < left+lipgloss.Width(refreshLabel)+buttonGap/2+1 {
+	if msg.X < left+lipgloss.Width(refreshLabel)+buttonGap {
 		return buttonRefresh
 	}
 	return buttonHelp

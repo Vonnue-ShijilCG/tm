@@ -87,3 +87,34 @@ func TestHelpButtonOpensTheKeyMap(t *testing.T) {
 		t.Error("clicking ? keys should open the help screen")
 	}
 }
+
+// The buttons sit on the sidebar's last row with a blank row above them, and
+// the title keeps its blank row under it, so neither crowds the list.
+func TestSidebarButtonsSitAtTheBottomWithRoomAround(t *testing.T) {
+	m, _ := discoveredModel(t, "bravo")
+	rows := strings.Split(ansi.Strip(m.View()), "\n")
+
+	at := find(t, m, "↻ refresh")
+	if want := m.height - statusHeight - 2; at[1] != want {
+		t.Errorf("buttons on row %d, want the sidebar's last row %d", at[1], want)
+	}
+	if strings.TrimSpace(strings.Trim(rows[at[1]-1][:sidebarWidth], "│")) != "" {
+		t.Errorf("the row above the buttons should be blank: %q", rows[at[1]-1])
+	}
+	title := find(t, m, "Projects")
+	if strings.TrimSpace(strings.Trim(rows[title[1]+1][:sidebarWidth], "│")) != "" {
+		t.Errorf("the row under the title should be blank: %q", rows[title[1]+1])
+	}
+}
+
+// A window too short for the buttons gives their rows back to the projects.
+func TestShortWindowDropsTheSidebarButtons(t *testing.T) {
+	m, _ := discoveredModel(t, "bravo")
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 6})
+	m = next.(Model)
+
+	view := ansi.Strip(m.View())
+	if strings.Contains(view, "refresh") || !strings.Contains(view, "bravo") {
+		t.Errorf("a 6-row window should show the project and no buttons:\n%s", view)
+	}
+}

@@ -1205,9 +1205,24 @@ func (m Model) View() string {
 // of the window — Lip Gloss pads a short block but never cuts a long one — and
 // take the status bar and the selected project off the screen with it.
 func (m Model) viewSidebar(height int) string {
+	// The buttons sit on the sidebar's last row, under a blank one, where the
+	// list leaves room in all but the longest workspaces. A window too short
+	// for them keeps every row for the projects; r and s still work.
+	if height < sidebarFooterMin {
+		return m.viewSidebarList(height)
+	}
+	body := strings.Split(m.viewSidebarList(height-sidebarFooterRows), "\n")
+	for len(body) < height-sidebarFooterRows {
+		body = append(body, "")
+	}
+	return strings.Join(append(body, "", sidebarButtons()), "\n")
+}
+
+// viewSidebarList is the sidebar's title and project list in height rows.
+func (m Model) viewSidebarList(height int) string {
 	var b strings.Builder
 	b.WriteString(titleStyle.Render("Projects"))
-	b.WriteString("\n" + sidebarButtons() + "\n")
+	b.WriteString("\n\n")
 	height -= 2 // the title and the blank line under it
 
 	if len(m.ws.Projects) == 0 {

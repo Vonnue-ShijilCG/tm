@@ -368,10 +368,11 @@ ship with it disabled, and there is no reply, so tm cannot report failure.
 
 Projects are discovered once at start, so a repository cloned into the
 workspace while tm runs used to need a restart — which with a tm server
-nobody does. The sidebar's row under its title, blank before, holds two
-buttons: `↻ refresh` (also `r` in the sidebar) and `? keys` (the help
-screen, also `s`). Each owns half the row, not just its label, because a row
-is the smallest target a terminal has. `Workspace.Rediscover` merges a fresh
+nobody does. The sidebar's last row, under a blank one, holds two buttons
+drawn as chips on the header band: `↻ refresh` (also `r` in the sidebar)
+and `? keys` (the help screen, also `s`). Each owns half the row, not just
+its label, because a row is the smallest target a terminal has; a window too
+short for them gives the rows back to the list. `Workspace.Rediscover` merges a fresh
 `project.Discover`: new repositories join in name order with no terminals;
 one whose directory is gone is dropped only when nothing runs or is saved in
 it, since a rescan must never forget a terminal. The UI keeps the cursor and
