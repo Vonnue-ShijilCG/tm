@@ -46,6 +46,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) tea.Cmd {
 		m.help = true
 		return nil
 	}
+	m.clickFocus(msg)
 	if m.handleSelect(msg) || msg.Action != tea.MouseActionPress {
 		return nil
 	}
