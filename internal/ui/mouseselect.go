@@ -227,10 +227,12 @@ func (m Model) paneRect(t *workspace.Terminal) (rect, bool) {
 // to do it rather than calling a clipboard tool, because that is the only way
 // that works over SSH: the escape travels back down the connection the user is
 // typing over and lands in the clipboard of the machine in front of them. The
-// cost is that terminals may refuse it — many ship with it disabled — and
-// there is no reply to check, so tm cannot report failure.
+// cost is that terminals may refuse it — many ship with it disabled, and
+// GNOME Terminal ignores it entirely — with no reply to check, which is why
+// the desktop's clipboard tool is handed the text as well.
 func writeClipboard(text string) {
 	fmt.Fprint(clipboard, ansi.SetSystemClipboard(text))
+	localClipboard(text) // for terminals that ignore OSC 52; see clipboard.go
 }
 
 // clipboard is where the OSC 52 sequence goes: the terminal tm is drawn on.

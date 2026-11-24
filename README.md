@@ -88,7 +88,8 @@ tm
   stays inside the pane you started in, so it never picks up the card border
   or the pane beside it (your terminal's own shift+drag selection still spans
   the whole window). The text goes to your clipboard with OSC 52, so it works
-  over SSH; terminals that ship with OSC 52 disabled will ignore it.
+  over SSH. Terminals that ignore OSC 52, GNOME Terminal among them, still get
+  the copy through `wl-copy`, `xclip` or `xsel` when one is installed.
 - `↻ refresh` at the bottom of the sidebar (or `r`) finds repositories added to
   the folder while tm runs; `? keys` beside it shows every shortcut.
 - `alt+s` returns to the sidebar, `s` shows every shortcut, `q` quits (with the

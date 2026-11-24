@@ -20,6 +20,7 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	os.Setenv("XDG_CONFIG_HOME", dir)
+	localClipboard = func(string) {} // a test run must never touch the developer's own clipboard
 	code := m.Run()
 	os.RemoveAll(dir)
 	os.Exit(code)

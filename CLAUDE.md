@@ -383,6 +383,16 @@ works over SSH — the escape travels back down the connection and lands in the
 clipboard of the machine in front of the user. Terminals may refuse it, many
 ship with it disabled, and there is no reply, so tm cannot report failure.
 
+**And with the desktop's clipboard tool** (`ui/clipboard.go`), because GNOME
+Terminal (VTE) ignores OSC 52 entirely: on the most common Linux desktop a copy
+reached no clipboard at all. `clipboardCommand` picks `wl-copy` on Wayland,
+else `xclip` or `xsel` when `DISPLAY` is set (XWayland reaches a Wayland
+desktop too), and nothing over SSH, where the desktop a tool would reach is
+the remote machine's. It runs off the event loop with no stdout or stderr: the
+tool forks to keep serving the selection, and a pipe it held would keep `Wait`
+from returning. `localClipboard` is a variable, and the `ui` `TestMain`
+replaces it, so a test run never touches the developer's clipboard.
+
 ### Finding new projects
 
 Projects are discovered once at start, so a repository cloned into the
