@@ -383,6 +383,8 @@ func TestSecondClientEvictsFirst(t *testing.T) {
 	refA := spawnOne(t, a, 1, "/a")
 	refB := spawnOne(t, a, 2, "/b")
 	send(t, a, Msg{SetBlob: &SetBlob{Blob: []byte("layout")}})
+	send(t, a, Msg{Query: &Query{Req: 98, Ref: "no-such-ref"}}) // answered after the blob is set; see below
+	expect(t, a, "Answer", func(m Msg) bool { return m.Answer != nil && m.Answer.Req == 98 })
 	fs.get(t, 1).emit() // output while A is still attached is not "changed"
 	expect(t, a, "Frame", func(m Msg) bool { return m.Frame != nil })
 
@@ -423,6 +425,11 @@ func TestSecondClientEvictsFirst(t *testing.T) {
 	// A blob replaced by B is what the next client gets.
 	send(t, b, Msg{SetBlob: &SetBlob{Blob: []byte("B's")}})
 	send(t, b, Msg{}) // an empty message is ignored, not fatal
+	// The server reads each connection on its own goroutine, so a third
+	// client's Hello can overtake B's SetBlob. A query B makes after it is
+	// answered from the same read loop, so its answer means the blob is set.
+	send(t, b, Msg{Query: &Query{Req: 99, Ref: "no-such-ref"}})
+	expect(t, b, "Answer", func(m Msg) bool { return m.Answer != nil && m.Answer.Req == 99 })
 	_, w2 := attach(t, r)
 	if string(w2.Blob) != "B's" {
 		t.Fatalf("third Welcome blob %q", w2.Blob)
